@@ -71,6 +71,10 @@ export function registerIpcHandlers(): void {
         args: app.isPackaged ? [] : ['--hidden']
       })
     }
+    // 自动备份参数变化 → 重新调度定时器
+    if (patch?.autoBackup !== undefined || patch?.autoBackupIntervalHours !== undefined) {
+      backupManager.syncAutoBackup(cfg.autoBackup, cfg.autoBackupIntervalHours)
+    }
     rebuildMenu()
     return cfg
   })

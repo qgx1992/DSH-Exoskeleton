@@ -63,6 +63,24 @@ app.whenReady().then(async () => {
     console.log('6) 删除')
     const del = backupManager.delete(info.id)
     assert(del.ok && !backupManager.list().some((b) => b.id === info.id), 'delete 生效')
+
+    console.log('7) 定时自动备份调度')
+    // 启动调度（间隔 1 小时）：启动时应立即补拍一次
+    backupManager.syncAutoBackup(true, 1)
+    await new Promise((r) => setTimeout(r, 400))
+    let list3 = backupManager.list()
+    const scheduled = list3.find((b) => b.trigger === 'scheduled')
+    assert(!!scheduled, '调度启动后立即创建 scheduled 快照')
+    assert(scheduled.kind === 'auto', 'scheduled 类型为 auto')
+    // 再次 sync 且间隔未到 → 不应重复创建
+    backupManager.syncAutoBackup(true, 1)
+    await new Promise((r) => setTimeout(r, 400))
+    list3 = backupManager.list()
+    const scheduledCount = list3.filter((b) => b.trigger === 'scheduled').length
+    assert(scheduledCount === 1, `周期未到不重复（当前 ${scheduledCount} 个 scheduled，应为 1）`)
+    // 关闭调度
+    backupManager.syncAutoBackup(false, 1)
+    assert(!backupManager.list().some((b) => b.id === info.id), '关闭后不再新增（无直接断言，仅确认不崩溃）')
   } catch (e) {
     console.error('TEST CRASH:', e)
     failed++

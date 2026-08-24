@@ -26,10 +26,38 @@ interface BackupMeta {
 
 class BackupManager {
   private backupDir = ''
+  private autoTimer: NodeJS.Timeout | null = null
 
   init(): void {
     this.backupDir = path.join(app.getPath('userData'), 'backups')
     fs.mkdirSync(this.backupDir, { recursive: true })
+  }
+
+  /** 定时自动备份调度（由配置变化/启动时调用） */
+  syncAutoBackup(enabled: boolean, intervalHours: number): void {
+    this.init()
+    if (this.autoTimer) {
+      clearInterval(this.autoTimer)
+      this.autoTimer = null
+    }
+    if (!enabled || !(intervalHours > 0)) {
+      logger.info('auto backup disabled')
+      return
+    }
+    const ms = intervalHours * 3600_000
+    // 启动时先评估一次（若上次定时快照距今已超过周期则立即补拍）
+    this.tryScheduledBackup(ms)
+    this.autoTimer = setInterval(() => this.tryScheduledBackup(ms), ms)
+    logger.info('auto backup scheduled', { intervalHours })
+  }
+
+  /** 周期触发：距上次定时快照不足周期则跳过，避免重复 */
+  private tryScheduledBackup(intervalMs: number): void {
+    const last = this.list().find((b) => b.trigger === 'scheduled')
+    if (last && Date.now() - last.createdAt < intervalMs) return
+    void this.autoSnapshot('scheduled').then((info) => {
+      if (info) logger.info('scheduled backup created', { id: info.id })
+    })
   }
 
   getDshHome(): string {
@@ -259,14 +287,17 @@ class BackupManager {
     }
   }
 
-  /** 保留策略：最多保留 MAX_BACKUPS 个（自动快照优先清理） */
+  /** 保留策略：最多保留 MAX_BACKUPS 个；自动/定时快照优先清理，手动存档尽量保留 */
   private prune(): void {
     const all = this.list()
     if (all.length <= MAX_BACKUPS) return
     const excess = all.slice(MAX_BACKUPS)
-    for (const b of excess) {
-      this.delete(b.id)
+    const autos = excess.filter((b) => b.kind === 'auto')
+    if (autos.length > 0) {
+      for (const b of autos) this.delete(b.id)
+      return
     }
+    for (const b of excess) this.delete(b.id)
     logger.info('pruned old backups', { removed: excess.length })
   }
 

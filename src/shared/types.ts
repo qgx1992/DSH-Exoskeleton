@@ -38,6 +38,10 @@ export interface AppConfig {
   notifyServiceEvents: boolean
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
+  /** 定时自动备份开关 */
+  autoBackup: boolean
+  /** 自动备份周期（小时） */
+  autoBackupIntervalHours: number
 }
 
 /** 日志条目 */
