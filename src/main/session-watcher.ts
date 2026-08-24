@@ -1,9 +1,10 @@
 /**
- * 会话完成通知（文档 §4.2.3「任务完成」场景）
- * - 监听 ~/.dsh/sessions/<workspace>/session-<uuid>/session.jsonl.zstd 的文件活动
- * - 判定规则：文件在观察期发生过增长（会话活跃），随后持续无写入超过阈值 → 视为完成，发系统通知
- * - 只通知「本次观察到活跃后停止」的会话，避免旧会话误报；每个会话只通知一次
- * - 不解析 zstd 内容（无解压依赖），通知带工作区名与会话短标识
+ * 会话完成通知（文档 §4.2.3「任务完成」）
+ * - 事件驱动：增量读取会话 jsonl.zstd 新增帧，检测 DSH 原生事件 `turn/end` →
+ *   立即判定完成并通知（不依赖"停止写入"猜测）
+ * - 解压：经系统 Node 常驻 worker（zstd-worker.cjs）；无系统 Node 时降级为
+ *   「停止写入超阈值」兜底判定，标题回退会话短号
+ * - 每个会话只通知一次；旧会话（观察期无新事件）不误报
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -13,48 +14,44 @@ import { dshManager } from './dsh-manager'
 import { notify } from './notify'
 import { configStore } from './config'
 import { windowManager } from './window-manager'
-import { readSessionRecords, extractTitle, extractCwd, projectNameFromPath, decodeWorkspaceName } from '../shared/session-jsonl'
+import { zstdWorker } from './zstd-worker'
+import { decodeWorkspaceName, projectNameFromPath } from '../shared/session-jsonl'
 
-/** 会话文件停止写入超过该时长（秒）视为完成；测试可用 DSH_SESSION_QUIET_MS 覆盖 */
-const COMPLETE_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 20_000)
-/** 观察到的停滞时长超过该上限则不通知（中断残留，避免通知早已结束的会话） */
-const MAX_STALE_MS = 6 * 3600_000
-/** 轮询间隔；测试可用 DSH_SESSION_POLL_MS 覆盖 */
-const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 4_000)
+/** 轮询间隔（事件驱动下只影响发现新帧的时延） */
+const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 2_000)
+/** 兜底（无 turn/end 或无线程 Node）：停止写入超阈值判定完成 */
+const FALLBACK_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 60_000)
 
 interface Tracked {
-  /** 最近一次 size 增长时间（会话最后活跃）；null = 尚未观察到增长（不可判完成） */
-  lastGrewAt: number | null
-  lastMtime: number
-  lastSize: number
+  readOffset: number
+  lastTurnEndSeq: number
+  lastGrewAt: number
+  seen: boolean
 }
 
 export interface SessionDoneEvent {
   sessionDir: string
   workspace: string
   uuid: string
+  file: string
 }
 
 export class SessionWatcher extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private tracked = new Map<string, Tracked>()
-  /** 已判定完成的会话（防重通知；服务停止时清空） */
   private doneSessions = new Set<string>()
+  private scanning = false
 
-  /** 由 DSH 服务状态驱动：running → start，否则 stop */
   syncWithService(status: string): void {
-    if (status === 'running') {
-      this.start()
-    } else {
-      this.stop()
-    }
+    if (status === 'running') this.start()
+    else this.stop()
   }
 
   start(): void {
     if (this.timer) return
-    this.scan() // 立即扫一次建立基线
-    this.timer = setInterval(() => this.scan(), POLL_MS)
-    logger.info('session watcher started')
+    void this.scan()
+    this.timer = setInterval(() => void this.scan(), POLL_MS)
+    logger.info('session watcher started (event-driven)')
   }
 
   stop(): void {
@@ -64,111 +61,116 @@ export class SessionWatcher extends EventEmitter {
     }
     this.tracked.clear()
     this.doneSessions.clear()
+    zstdWorker.close()
     logger.info('session watcher stopped')
   }
 
-  private scan(): void {
-    const sessionsRoot = path.join(dshManager.resolveDshHome(), 'sessions')
-    if (!configStore.get().notifySessionDone) {
-      this.tracked.clear()
-      return
-    }
-    let workspaceDirs: string[] = []
+  private async scan(): Promise<void> {
+    if (this.scanning) return
+    this.scanning = true
     try {
-      workspaceDirs = fs.readdirSync(sessionsRoot)
-    } catch {
-      return
-    }
-    const now = Date.now()
-
-    for (const ws of workspaceDirs) {
-      const wsDir = path.join(sessionsRoot, ws)
-      let sessionDirs: string[] = []
-      try {
-        if (!fs.statSync(wsDir).isDirectory()) continue
-        sessionDirs = fs.readdirSync(wsDir)
-      } catch {
-        continue
+      const sessionsRoot = path.join(dshManager.resolveDshHome(), 'sessions')
+      if (!configStore.get().notifySessionDone) {
+        this.tracked.clear()
+        return
       }
-      for (const s of sessionDirs) {
-        if (!s.startsWith('session-')) continue
-        const sessionDir = path.join(wsDir, s)
-        const jsonl = path.join(sessionDir, 'session.jsonl.zstd')
-        const key = sessionDir
-        // 已完成的不再观察（防重复通知）
-        if (this.doneSessions.has(key)) continue
+      let workspaceDirs: string[] = []
+      try {
+        workspaceDirs = fs.readdirSync(sessionsRoot)
+      } catch {
+        return
+      }
+      const now = Date.now()
+
+      for (const ws of workspaceDirs) {
+        const wsDir = path.join(sessionsRoot, ws)
+        let sessionDirs: string[] = []
         try {
-          const st = fs.statSync(jsonl)
-          if (st.size === 0) continue
-          const t = this.tracked.get(key)
-          if (!t) {
-            // 基线：unknown 活跃状态，等待观察到增长
-            this.tracked.set(key, { lastGrewAt: null, lastMtime: st.mtimeMs, lastSize: st.size })
-            continue
-          }
-          if (st.size > t.lastSize) {
-            // 观察到增长 → 会话活跃
-            t.lastSize = st.size
-            t.lastMtime = st.mtimeMs
-            t.lastGrewAt = now
-            continue
-          }
-          // 未增长：仅对「观察期内活跃过」的会话判完成
-          if (t.lastGrewAt === null) continue
-          const quiet = now - t.lastGrewAt
-          if (quiet > COMPLETE_QUIET_MS) {
-            if (quiet < MAX_STALE_MS) {
-              this.emitComplete({ sessionDir, workspace: ws, uuid: s.replace(/^session-/, '') })
-              this.doneSessions.add(key)
-            }
-            // 丢弃该会话（无论是否通知）
-            this.tracked.delete(key)
-          }
+          if (!fs.statSync(wsDir).isDirectory()) continue
+          sessionDirs = fs.readdirSync(wsDir)
         } catch {
-          // 文件临时不可读（正在写入/删除）→ 忽略
-          this.tracked.delete(key)
+          continue
+        }
+        for (const s of sessionDirs) {
+          if (!s.startsWith('session-')) continue
+          const sessionDir = path.join(wsDir, s)
+          const file = path.join(sessionDir, 'session.jsonl.zstd')
+          const key = sessionDir
+          if (this.doneSessions.has(key)) continue
+
+          let size = 0
+          try {
+            size = fs.statSync(file).size
+          } catch {
+            continue
+          }
+          if (size === 0) continue
+
+          let t = this.tracked.get(key)
+          if (!t) {
+            this.tracked.set(key, { readOffset: size, lastTurnEndSeq: 0, lastGrewAt: now, seen: false })
+            continue
+          }
+
+          if (size > t.readOffset) {
+            const oldOffset = t.readOffset
+            t.lastGrewAt = now
+            t.readOffset = size
+            t.seen = true
+            // 事件驱动主路径：worker 解新增帧，检测 turn/end
+            const r = await zstdWorker.request('frameEvents', { file, offset: oldOffset })
+            if (r.ok && (r.turnEndMax ?? 0) > t.lastTurnEndSeq) {
+              t.lastTurnEndSeq = r.turnEndMax ?? 0
+              this.emitComplete({ sessionDir, workspace: ws, uuid: s.replace(/^session-/, ''), file })
+            }
+            continue
+          }
+
+          // 兜底：观察中但未出现 turn/end，停止写入超阈值
+          if (t.seen && now - t.lastGrewAt > FALLBACK_QUIET_MS) {
+            this.emitComplete({ sessionDir, workspace: ws, uuid: s.replace(/^session-/, ''), file })
+          }
         }
       }
+    } finally {
+      this.scanning = false
     }
   }
 
   private emitComplete(ev: SessionDoneEvent): void {
+    if (this.doneSessions.has(ev.sessionDir)) return
+    this.doneSessions.add(ev.sessionDir)
     this.emit('complete', ev)
     logger.info('session done detected', { workspace: ev.workspace, uuid: ev.uuid })
   }
 
-  /** 供测试注入 */
   _debugState(): Map<string, Tracked> {
     return this.tracked
   }
 }
 
-/** 全局单例：由 index.ts 初始化并接线 */
 export const sessionWatcher = new SessionWatcher()
 
 /** 接线：DSH 状态变化 → watcher；会话完成 → 系统通知（标题/项目，点击唤起主窗口并尝试定位会话） */
 export function wireSessionWatcher(): void {
-  sessionWatcher.on('complete', (ev: SessionDoneEvent) => {
+  sessionWatcher.on('complete', async (ev: SessionDoneEvent) => {
     if (!configStore.get().notifySessionDone) return
 
     let title = `会话 ${ev.uuid.slice(0, 8)}`
     let project = ''
-    // 读取会话标题与项目路径（会话头 cwd 是权威项目路径）
-    try {
-      const file = path.join(ev.sessionDir, 'session.jsonl.zstd')
-      const records = readSessionRecords(fs.readFileSync(file), 16, 512 * 1024)
-      title = extractTitle(records, ev.uuid)
-      const cwd = extractCwd(records)
-      project = cwd ? projectNameFromPath(cwd) : projectNameFromPath(decodeWorkspaceName(ev.workspace))
-    } catch (err) {
-      logger.warn('session title read failed', err)
+    const head = await zstdWorker.request('headInfo', { file: ev.file })
+    if (head.ok) {
+      const cwd = head.cwd ?? ''
+      title = head.title || title
+      project = cwd ? projectNameFromPath(cwd) : ''
+    } else {
+      logger.warn('session head info unavailable (zstd), fallback ids', ev.uuid)
     }
+    if (!project) project = projectNameFromPath(decodeWorkspaceName(ev.workspace))
 
     const body = project ? `项目「${project}」· ${title}` : title
     notify('DSH 会话完成', body, () => {
-      // 1) 唤起主窗口
       windowManager.show()
-      // 2) 尽力而为：在 DSH Web UI 中定位对应会话（按勘察到的 sessionRow 列表项做标题匹配；失败静默）
       windowManager.activateSessionInWebUi(title)
     })
   })

@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "DeepSeek Harness 桌面客户端 — 轻量、纯净、功能完整的 DSH 桌面外壳（壳核分离）",
   "main": "out/main/index.js",
   "author": "DSH Exoskeleton",
@@ -33,9 +33,8 @@
     "vite": "^6.3.5"
   },
   "dependencies": {
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "zstddec": "^0.2.0"
   }
 }
-
-
 

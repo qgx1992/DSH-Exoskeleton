@@ -9,6 +9,8 @@ files:
 extraResources:
   - from: resources/tray.png
     to: tray.png
+  - from: scripts/zstd-worker.cjs
+    to: zstd-worker.cjs
 asar: true
 npmRebuild: false
 publish:
