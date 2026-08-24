@@ -1,0 +1,116 @@
+/**
+ * 主进程入口（文档 §4.1）
+ * - 单实例运行（§4.1.4）
+ * - 窗口 / 托盘 / IPC 初始化
+ * - DSH 子进程自动启动与 WebContentsView 挂载
+ */
+import { app } from 'electron'
+import { logger } from './logger'
+import { configStore } from './config'
+import { windowManager } from './window-manager'
+import { createTray, destroyTray, rebuildMenu } from './tray'
+import { dshManager } from './dsh-manager'
+import { registerIpcHandlers } from './ipc-handlers'
+import { notify } from './notify'
+
+const isHiddenLaunch = process.argv.includes('--hidden')
+
+// 应用名必须早于 requestSingleInstanceLock 设置，才能决定 userData 目录
+// （文档 §8.2：日志位于 %APPDATA%\DeepSeek Harness\dsh-desktop.log）
+app.setName('DeepSeek Harness')
+app.setAppUserModelId('io.dsh.desktop')
+
+// 单实例锁（文档 §4.1.4）
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    // 重复双击唤出已有窗口
+    windowManager.show()
+  })
+
+  void bootstrap()
+}
+
+async function bootstrap(): Promise<void> {
+  // 全局异常捕获
+  process.on('uncaughtException', (err) => {
+    logger.error('uncaughtException', err.message)
+  })
+  process.on('unhandledRejection', (reason) => {
+    logger.error('unhandledRejection', String(reason))
+  })
+
+  await app.whenReady()
+
+  logger.init()
+  configStore.init()
+
+  // 开机自启状态与配置同步
+  const cfg = configStore.get()
+  const loginSettings = app.getLoginItemSettings()
+  if (loginSettings.openAtLogin !== cfg.autoLaunch) {
+    const synced = { ...cfg, autoLaunch: loginSettings.openAtLogin }
+    void configStore.set(synced)
+  }
+
+  registerIpcHandlers()
+  createTray()
+  windowManager.create()
+
+  // 状态变化：running → 挂载 DSH Web UI；error/stopped → 卸载
+  dshManager.on('statusChange', (state) => {
+    if (state.status === 'running' && state.port) {
+      windowManager.attachDshView(`http://127.0.0.1:${state.port}`)
+    } else if (state.status === 'error' || state.status === 'stopped') {
+      windowManager.detachDshView()
+    }
+    rebuildMenu()
+
+    // 原生通知（文档 §4.2.3）：就绪仅窗口隐藏时提示；异常总是提示
+    if (configStore.get().notifyServiceEvents) {
+      const winVisible = windowManager.getWindow()?.isVisible() ?? false
+      if (state.status === 'running' && state.port) {
+        if (!winVisible) {
+          notify(
+            'DeepSeek Harness 服务已就绪',
+            `DSH Web UI 运行于 http://127.0.0.1:${state.port}`,
+            () => windowManager.show()
+          )
+        }
+      } else if (state.status === 'error') {
+        notify('DSH 服务异常', state.lastError ?? '未知错误，请查看日志', () => windowManager.show())
+      } else if (state.status === 'starting' && state.restartCount > 0) {
+        notify(`DSH 服务正在重启（第 ${state.restartCount} 次）`, '检测到进程异常退出，正在自动恢复…')
+      }
+    }
+  })
+
+  // 获取内核版本（异步，不阻塞）
+  void dshManager.readVersion().then(() => {
+    windowManager.broadcast('dsh:statusChange', dshManager.getState())
+  })
+
+  // 自动启动 DSH 服务
+  if (cfg.autoStartService !== false) {
+    void dshManager.start()
+  }
+
+  if (isHiddenLaunch) {
+    windowManager.hide()
+  }
+}
+
+// 托盘常驻：窗口全部关闭时不退出（文档 §4.1.3 "程序常驻后台"）
+app.on('window-all-closed', () => {
+  /* 保留在托盘，不退出 */
+})
+
+app.on('before-quit', () => {
+  windowManager.quit()
+})
+
+app.on('will-quit', () => {
+  void dshManager.shutdown().finally(() => destroyTray())
+})

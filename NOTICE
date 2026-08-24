@@ -1,0 +1,12 @@
+# NOTICE
+
+本仓库包含以下第三方素材，其版权归原作者所有：
+
+## DeepSeek 鲸鱼图标（resources/official/）
+
+- 来源：DeepSeek 官方静态资源（fe-static.deepseek.com/chat/favicon.svg 等）
+- 版权：© DeepSeek（深度求索）
+- 用途：本项目中仅对官方矢量路径做配色改造（黑金），用于桌面应用图标与界面展示
+- 请注意：DeepSeek 名称与鲸鱼标识属品牌资产，请勿在未经授权的情况下用于误导性用途或重新分发
+
+其余代码以 [LICENSE](LICENSE)（MIT）授权。

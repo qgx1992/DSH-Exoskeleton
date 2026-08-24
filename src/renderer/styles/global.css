@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family:
+    'Segoe UI',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background: #0b0f17;
+  color: #e5e7eb;
+  user-select: none;
+}
+
+/* 自绘标题栏拖拽区 */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
