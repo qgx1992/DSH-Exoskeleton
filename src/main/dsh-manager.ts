@@ -402,16 +402,7 @@ export class DSHManager extends EventEmitter {
     if (this.version) return this.version
     try {
       const exe = await this.resolveExecutable()
-      const out = await new Promise<string>((resolvePromise) => {
-        const child = spawn(exe.command, [...exe.args, '--version'], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-        let acc = ''
-        child.stdout?.on('data', (c: Buffer) => (acc += c.toString()))
-        child.on('close', () => resolvePromise(acc))
-        child.on('error', () => resolvePromise(''))
-        setTimeout(() => {
-          if (!child.killed) child.kill()
-        }, 10_000)
-      })
+      const out = await this.execCapture2(exe, [...exe.args, '--version'])
       const t = out.trim()
       this.version = t || null
       return this.version
@@ -419,6 +410,57 @@ export class DSHManager extends EventEmitter {
       logger.warn('read dsh version failed', err)
       return null
     }
+  }
+
+  /** 执行任意 dsh 子命令（如 plugin），返回输出；超时自动终止 */
+  async execDsh(args: string[], timeoutMs = 120_000): Promise<{ code: number | null; stdout: string; stderr: string }> {
+    const exe = await this.resolveExecutable()
+    const dshHome = this.dshHome ?? this.resolveDshHome()
+    return new Promise((resolvePromise) => {
+      const child = spawn(exe.command, [...exe.args, ...args], {
+        env: {
+          ...process.env,
+          DSH_HOME: dshHome
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout?.on('data', (c: Buffer) => {
+        stdout += c.toString()
+        logger.debug('[dsh exec]', c.toString().trim())
+      })
+      child.stderr?.on('data', (c: Buffer) => {
+        stderr += c.toString()
+        logger.debug('[dsh exec stderr]', c.toString().trim())
+      })
+      const timer = setTimeout(() => {
+        logger.warn('dsh exec timeout, killing', { args })
+        this.killTree(child.pid ?? 0)
+      }, timeoutMs)
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        resolvePromise({ code, stdout, stderr })
+      })
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        resolvePromise({ code: -1, stdout, stderr: err.message })
+      })
+    })
+  }
+
+  private execCapture2(exe: { command: string; args: string[] }, fullArgs: string[]): Promise<string> {
+    return new Promise((resolvePromise) => {
+      const child = spawn(exe.command, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      let acc = ''
+      child.stdout?.on('data', (c: Buffer) => (acc += c.toString()))
+      child.on('close', () => resolvePromise(acc))
+      child.on('error', () => resolvePromise(''))
+      setTimeout(() => {
+        if (!child.killed) child.kill()
+      }, 10_000)
+    })
   }
 
   async shutdown(): Promise<void> {

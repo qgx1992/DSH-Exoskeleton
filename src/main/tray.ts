@@ -72,7 +72,7 @@ export function rebuildMenu(): void {
     {
       label: '检查更新…',
       click: async () => {
-        const info = await updater.check()
+        const info = await updater.check(true)
         if (info.available && info.latest) {
           const r = await dialog.showMessageBox(windowManager.getWindow()!, {
             type: 'info',

@@ -10,12 +10,26 @@ import { windowManager } from './window-manager'
 import { updater } from './updater'
 import { rebuildMenu } from './tray'
 import { checkSetupStatus, saveApiKey } from './setup'
+import { backupManager } from './backup'
+import { listInstalled, listCatalog, installPlugin, uninstallPlugin } from './plugins'
 import type { AppConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
   // ---------- 首次启动引导 ----------
   ipcMain.handle('setup:check', () => checkSetupStatus())
   ipcMain.handle('setup:save', (_e, apiKey: string) => saveApiKey(apiKey))
+
+  // ---------- 备份与回滚（§4.3.4）----------
+  ipcMain.handle('backup:list', () => backupManager.list())
+  ipcMain.handle('backup:create', (_e, name?: string) => backupManager.create(name ?? 'manual', 'manual'))
+  ipcMain.handle('backup:restore', (_e, id: string) => backupManager.restore(id))
+  ipcMain.handle('backup:delete', (_e, id: string) => backupManager.delete(id))
+
+  // ---------- 插件管理（§4.3.3）----------
+  ipcMain.handle('plugins:catalog', (_e, query?: string) => listCatalog(query))
+  ipcMain.handle('plugins:installed', () => listInstalled())
+  ipcMain.handle('plugins:install', (_e, pkg: string) => installPlugin(pkg))
+  ipcMain.handle('plugins:uninstall', (_e, pkg: string) => uninstallPlugin(pkg))
 
   // ---------- DSH 管理 ----------
   ipcMain.handle('dsh:start', async (): Promise<{ ok: boolean; error?: string }> => {
@@ -73,6 +87,7 @@ export function registerIpcHandlers(): void {
 
   // ---------- 更新 ----------
   ipcMain.handle('updater:check', () => updater.check(true))
+  ipcMain.handle('updater:install', () => updater.install())
 
   // ---------- 日志 ----------
   ipcMain.handle('logs:list', (_e, limit?: number) => logger.list(limit ?? 200))

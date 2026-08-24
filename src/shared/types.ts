@@ -55,6 +55,11 @@ export interface UpdateInfo {
   url: string | null
   checkedAt: number | null
   error: string | null
+  /** 下载进度（下载中） */
+  progress: { percent: number; transferred: number; total: number } | null
+  /** 下载完成待安装 */
+  downloaded: boolean
+  installing: boolean
 }
 
 /** 首次启动引导状态 */
@@ -70,6 +75,42 @@ export interface SaveResult {
   error?: string
 }
 
+/** 备份快照信息（§4.3.4 备份与回滚） */
+export interface BackupInfo {
+  /** 快照目录名（id） */
+  id: string
+  /** 显示名称 */
+  name: string
+  createdAt: number
+  kind: 'manual' | 'auto'
+  /** auto 快照的触发来源（插件安装/自动更新等） */
+  trigger: string
+  size: number
+  entryCount: number
+}
+
+/** 社区插件目录条目（§4.3.3 插件管理器） */
+export interface PluginCatalogItem {
+  /** npm 包名（用于安装） */
+  packageName: string
+  /** 列表标题 */
+  name: string
+  description: string
+  version: string | null
+  stars: number
+  url: string
+  source: 'github' | 'npm'
+}
+
+export interface InstalledPlugin {
+  name: string
+  version: string
+}
+
+export interface PluginActionResult extends SaveResult {
+  output?: string
+}
+
 /** 预加载桥接暴露给渲染进程的 API（文档 §6.1） */
 export interface DesktopApi {
   dsh: {
@@ -83,6 +124,18 @@ export interface DesktopApi {
   setup: {
     check: () => Promise<SetupStatus>
     save: (apiKey: string) => Promise<SaveResult>
+  }
+  backup: {
+    list: () => Promise<BackupInfo[]>
+    create: (name?: string) => Promise<BackupInfo | null>
+    restore: (id: string) => Promise<SaveResult>
+    delete: (id: string) => Promise<SaveResult>
+  }
+  plugins: {
+    catalog: (query?: string) => Promise<PluginCatalogItem[]>
+    installed: () => Promise<InstalledPlugin[]>
+    install: (pkg: string) => Promise<PluginActionResult>
+    uninstall: (pkg: string) => Promise<PluginActionResult>
   }
   config: {
     get: () => Promise<AppConfig>
@@ -101,6 +154,7 @@ export interface DesktopApi {
   }
   updater: {
     check: () => Promise<UpdateInfo>
+    install: () => Promise<void>
     onStatus: (callback: (info: UpdateInfo) => void) => () => void
   }
   logs: {

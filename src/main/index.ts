@@ -12,6 +12,7 @@ import { createTray, destroyTray, rebuildMenu } from './tray'
 import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { notify } from './notify'
+import { updater } from './updater'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
 
@@ -91,6 +92,15 @@ async function bootstrap(): Promise<void> {
   void dshManager.readVersion().then(() => {
     windowManager.broadcast('dsh:statusChange', dshManager.getState())
   })
+
+  // 自动更新：初始化并向渲染层推送状态（打包版后台静默检查）
+  updater.init()
+  updater.on('status', (info) => {
+    windowManager.broadcast('updater:status', info)
+  })
+  if (app.isPackaged) {
+    setTimeout(() => void updater.check().catch(() => logger.warn('background update check failed')), 15_000)
+  }
 
   // 自动启动 DSH 服务
   if (cfg.autoStartService !== false) {

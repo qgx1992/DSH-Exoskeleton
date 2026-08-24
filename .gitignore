@@ -2,6 +2,7 @@ node_modules/
 out/
 dist/
 data/
+scripts/out/
 *.log
 *.log.*
 share_doc.html

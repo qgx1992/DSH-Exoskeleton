@@ -25,6 +25,18 @@ const api: DesktopApi = {
     check: () => ipcRenderer.invoke('setup:check'),
     save: (apiKey) => ipcRenderer.invoke('setup:save', apiKey)
   },
+  backup: {
+    list: () => ipcRenderer.invoke('backup:list'),
+    create: (name) => ipcRenderer.invoke('backup:create', name),
+    restore: (id) => ipcRenderer.invoke('backup:restore', id),
+    delete: (id) => ipcRenderer.invoke('backup:delete', id)
+  },
+  plugins: {
+    catalog: (query) => ipcRenderer.invoke('plugins:catalog', query),
+    installed: () => ipcRenderer.invoke('plugins:installed'),
+    install: (pkg) => ipcRenderer.invoke('plugins:install', pkg),
+    uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg)
+  },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch)
@@ -42,6 +54,7 @@ const api: DesktopApi = {
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
+    install: () => ipcRenderer.invoke('updater:install'),
     onStatus: (callback) => subscribe('updater:status', callback)
   },
   logs: {

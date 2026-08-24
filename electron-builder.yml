@@ -11,6 +11,10 @@ extraResources:
     to: tray.png
 asar: true
 npmRebuild: false
+publish:
+  provider: github
+  owner: qgx1992
+  repo: DSH-Exoskeleton
 win:
   executableName: DSH-Exoskeleton
   target:
