@@ -42,7 +42,7 @@ export function OnboardingWizard({ status, onDone }: Props): React.JSX.Element {
             <WhaleIcon size={28} />
           </span>
           <div>
-            <h1 className="text-lg font-semibold text-slate-100">欢迎使用 DeepSeek Harness</h1>
+            <h1 className="text-lg font-semibold text-slate-100">欢迎使用 DSH-Exoskeleton</h1>
             <p className="text-[12px] text-slate-500">首次启动 · 完成基本配置</p>
           </div>
         </div>

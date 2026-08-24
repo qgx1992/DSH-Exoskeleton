@@ -22,7 +22,7 @@ function iconPath(): string {
 
 export function createTray(): Tray {
   tray = new Tray(iconPath())
-  tray.setToolTip('DeepSeek Harness 桌面客户端')
+  tray.setToolTip('DSH-Exoskeleton 桌面客户端')
   tray.on('click', () => {
     windowManager.show()
   })
@@ -100,7 +100,7 @@ export function rebuildMenu(): void {
         await dialog.showMessageBox(windowManager.getWindow()!, {
           type: 'info',
           title: '关于',
-          message: 'DeepSeek Harness 桌面客户端',
+          message: 'DSH-Exoskeleton 桌面客户端',
           detail: `版本 ${app.getVersion()}（DSH 内核 ${state.version ?? '未知'}）\nDSH Home: ${dshManager.resolveDshHome()}`,
           buttons: ['好的']
         })

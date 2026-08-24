@@ -16,8 +16,8 @@ import { notify } from './notify'
 const isHiddenLaunch = process.argv.includes('--hidden')
 
 // 应用名必须早于 requestSingleInstanceLock 设置，才能决定 userData 目录
-// （文档 §8.2：日志位于 %APPDATA%\DeepSeek Harness\dsh-desktop.log）
-app.setName('DeepSeek Harness')
+// （%APPDATA%\DSH-Exoskeleton：日志/配置存放处）
+app.setName('DSH-Exoskeleton')
 app.setAppUserModelId('io.dsh.desktop')
 
 // 单实例锁（文档 §4.1.4）
@@ -74,7 +74,7 @@ async function bootstrap(): Promise<void> {
       if (state.status === 'running' && state.port) {
         if (!winVisible) {
           notify(
-            'DeepSeek Harness 服务已就绪',
+            'DSH-Exoskeleton 服务已就绪',
             `DSH Web UI 运行于 http://127.0.0.1:${state.port}`,
             () => windowManager.show()
           )

@@ -1,6 +1,6 @@
 /**
  * 主进程日志模块
- * 日志位置：%APPDATA%\DeepSeek Harness\dsh-desktop.log（文档 §8.2）
+ * 日志位置：%APPDATA%\DSH-Exoskeleton\dsh-desktop.log（文档 §8.2）
  * 同时维护内存环形缓冲，供渲染进程仪表盘实时查看
  */
 import { app } from 'electron'

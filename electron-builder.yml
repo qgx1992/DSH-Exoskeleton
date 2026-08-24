@@ -1,5 +1,5 @@
-appId: io.dsh.desktop
-productName: DeepSeek Harness
+appId: io.dsh.exoskeleton
+productName: DSH-Exoskeleton
 directories:
   buildResources: resources
   output: dist
@@ -12,7 +12,7 @@ extraResources:
 asar: true
 npmRebuild: false
 win:
-  executableName: DeepSeek-Harness
+  executableName: DSH-Exoskeleton
   target:
     - target: nsis
       arch: [x64]
@@ -24,7 +24,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: DeepSeek Harness
-  artifactName: DeepSeek-Harness-Setup-${version}.${ext}
+  shortcutName: DSH-Exoskeleton
+  artifactName: DSH-Exoskeleton-Setup-${version}.${ext}
 portable:
-  artifactName: DeepSeek-Harness-Portable-${version}.${ext}
+  artifactName: DSH-Exoskeleton-Portable-${version}.${ext}

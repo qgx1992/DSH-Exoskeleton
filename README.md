@@ -72,9 +72,9 @@ npm run dist
 ## 打包产物
 
 ```
-dist/DeepSeek-Harness-Setup-x64-0.1.0.exe    # NSIS 安装器
-dist/DeepSeek-Harness-Portable-0.1.0.exe     # 单文件便携版
-dist/win-unpacked/                           # 免安装绿色版文件夹
+dist/DSH-Exoskeleton-Setup-0.1.0.exe          # NSIS 安装器
+dist/DSH-Exoskeleton-Portable-0.1.0.exe       # 单文件便携版
+dist/win-unpacked/                            # 免安装绿色版文件夹
 ```
 
 ## DSH 可执行文件解析
@@ -89,7 +89,7 @@ dist/win-unpacked/                           # 免安装绿色版文件夹
 
 ## 配置项
 
-存储于 `%APPDATA%\DeepSeek Harness\config.json`：
+存储于 `%APPDATA%\DSH-Exoskeleton\config.json`：
 
 | 配置 | 用途 | 默认 |
 | :--- | :--- | :--- |
@@ -103,7 +103,7 @@ dist/win-unpacked/                           # 免安装绿色版文件夹
 
 ## 日志
 
-`%APPDATA%\DeepSeek Harness\dsh-desktop.log`（2MB 轮转），仪表盘提供实时查看，托盘菜单可打开日志目录。
+`%APPDATA%\DSH-Exoskeleton\dsh-desktop.log`（2MB 轮转），仪表盘提供实时查看，托盘菜单可打开日志目录。
 
 ## 路线图
 
