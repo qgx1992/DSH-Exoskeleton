@@ -200,36 +200,69 @@ export class WindowManager {
   }
 
   /**
-   * 在 DSH Web UI 中定位并激活对应会话。
-   * 依据实际勘察：会话列表为 div[class*="sessionRow"][role="treeitem"]，标题在内部 [class*="title"]，
-   * 无 data-* 属性 → 按标题文本匹配（Web UI 显示与会话记录同源的 session/title）。
-   * SPA 内部结构变化时静默失败（不影响已唤起的窗口）。
+   * 在 DSH Web UI 中定位并激活对应会话（增强版）。
+   * 流程：1) 尝试展开折叠的工作区分组 → 2) 按标题匹配 [class*="sessionRow"]/treeitem 并点击
+   *      → 3) 验证选中态是否切换为目标会话，未切换则重试（最多 4 轮）。
+   * 依据实际勘察：会话列表项无 data 属性，标题来自 session/title（同源于通知标题）。
+   * SPA 结构变化时静默失败（不影响唤起主窗口）。
    */
-  activateSessionInWebUi(title: string): void {
+  activateSessionInWebUi(title: string, altText?: string): void {
     const view = this.view
     if (!view || view.webContents.isDestroyed()) return
-    // includes 匹配（避免正则转义/特殊字符问题；标题同源自 session/title）
-    const script = `(() => {
-      try {
-        const t = ${JSON.stringify(title)}.slice(0, 40).toLowerCase();
-        const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
-        for (const el of items) {
-          const txt = (el.textContent || '').trim();
-          if (txt && txt.length < 300 && txt.toLowerCase().includes(t)) { el.click(); return true; }
-        }
-        return false;
-      } catch { return false; }
-    })()`
-    const run = (): void => {
-      if (view.webContents.isDestroyed()) return
+    const targets = [title, altText].filter((s): s is string => !!s).map((s) => s.slice(0, 40))
+
+    const attempt = (n: number): void => {
+      if (n > 3 || view.webContents.isDestroyed()) {
+        logger.debug('webui session activate exhausted', { n })
+        return
+      }
+      const script = `(() => {
+        try {
+          // 1) 展开折叠的会话分组（文本含"展开/其余 N 个会话/expand"的按钮/树项）
+          document.querySelectorAll('[role="button"], [role="treeitem"], [class*="expand"]').forEach(el => {
+            const t = (el.textContent || '').trim();
+            if (t && t.length < 40 && /展开|其余\s*\d+\s*个会话|show more|expand/i.test(t)) el.click();
+          });
+          // 2) 标题匹配并点击
+          const targets = ${JSON.stringify(targets)};
+          const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
+          let hit = null;
+          for (const el of items) {
+            const txt = (el.textContent || '').trim();
+            if (!txt || txt.length > 300) continue;
+            const lower = txt.toLowerCase();
+            if (targets.some(tg => tg && lower.includes(tg.toLowerCase()))) hit = el;
+          }
+          if (hit) { hit.click(); return 1; }
+          return 0;
+        } catch { return -1; }
+      })()`
       view.webContents
         .executeJavaScript(script)
-        .then((ok: unknown) => {
-          if (!ok) logger.debug('webui session activate miss (title not found in list)')
+        .then(async (clicked: unknown) => {
+          if (clicked !== 1) {
+            // 展开后也需重试（分组渲染异步）
+            setTimeout(() => attempt(n + 1), 1_200)
+            return
+          }
+          // 3) 验证选中态是否已切换为目标会话
+          await new Promise((r) => setTimeout(r, 1_400))
+          const verifyScript = `(() => {
+            const sels = [...document.querySelectorAll('[class*="sessionRow"][aria-selected="true"], [class*="sessionRow"][class*="selected"]')];
+            if (sels.length === 0) return 2;
+            const txt = sels[sels.length - 1].textContent.trim().slice(0, 60).toLowerCase();
+            const targets = ${JSON.stringify(targets.map((t) => t.toLowerCase()))};
+            if (targets.some((tg) => tg && txt.includes(tg))) return 1;
+            return 0;
+          })()`
+          const ok = await view.webContents.executeJavaScript(verifyScript)
+          if (ok !== 1) setTimeout(() => attempt(n + 1), 1_200)
         })
         .catch(() => logger.debug('webui session activate skipped'))
     }
-    setTimeout(run, 800)
+
+    // 等待窗口显示与 SPA 渲染后开始
+    setTimeout(() => attempt(0), 800)
   }
 
   show(): void {
