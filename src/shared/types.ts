@@ -38,6 +38,35 @@ export interface AppConfig {
   notifyServiceEvents: boolean
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
+  /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */
+  kernelMode: 'managed' | 'system'
+  /** 托管内核默认版本 */
+  defaultKernelVersion: string | null
+}
+
+/** 托管 DSH 内核（多版本共存）信息 */
+export interface KernelInfo {
+  version: string
+  dir: string
+  status: 'installed' | 'downloading' | 'verifying' | 'installing' | 'error'
+  installedAt: number | null
+  size: number
+  integrity: string | null
+  error: string | null
+}
+
+/** 内核安装/操作进度推送 */
+export interface KernelProgress {
+  version: string
+  stage: 'downloading' | 'verifying' | 'installing' | 'done' | 'error'
+  percent: number
+  message: string
+}
+
+/** 可用内核版本（npm registry） */
+export interface KernelRemoteVersion {
+  version: string
+  publishedAt: string | null
 }
 
 /** 日志条目 */
@@ -136,6 +165,16 @@ export interface DesktopApi {
     installed: () => Promise<InstalledPlugin[]>
     install: (pkg: string) => Promise<PluginActionResult>
     uninstall: (pkg: string) => Promise<PluginActionResult>
+  }
+  kernels: {
+    installed: () => Promise<KernelInfo[]>
+    available: () => Promise<KernelRemoteVersion[]>
+    install: (version: string) => Promise<SaveResult>
+    uninstall: (version: string) => Promise<SaveResult>
+    setDefault: (version: string | null) => Promise<SaveResult>
+    setMode: (mode: 'managed' | 'system') => Promise<SaveResult>
+    /** 订阅安装/切换进度 */
+    onProgress: (callback: (p: KernelProgress) => void) => () => void
   }
   config: {
     get: () => Promise<AppConfig>

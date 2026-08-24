@@ -37,6 +37,15 @@ const api: DesktopApi = {
     install: (pkg) => ipcRenderer.invoke('plugins:install', pkg),
     uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg)
   },
+  kernels: {
+    installed: () => ipcRenderer.invoke('kernels:installed'),
+    available: () => ipcRenderer.invoke('kernels:available'),
+    install: (version) => ipcRenderer.invoke('kernels:install', version),
+    uninstall: (version) => ipcRenderer.invoke('kernels:uninstall', version),
+    setDefault: (version) => ipcRenderer.invoke('kernels:setDefault', version),
+    setMode: (mode) => ipcRenderer.invoke('kernels:setMode', mode),
+    onProgress: (callback) => subscribe('kernels:progress', callback)
+  },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     set: (patch) => ipcRenderer.invoke('config:set', patch)

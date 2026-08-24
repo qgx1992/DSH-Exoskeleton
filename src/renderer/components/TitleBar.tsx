@@ -49,10 +49,10 @@ export function TitleBar({ status, port, version, appVersion, maximized }: Props
 
       <div className="flex-1" />
 
-      {/* 窗口控制按钮 */}
+      {/* 窗口控制按钮（圆角 hover 背景，Windows 11 风格） */}
       <div className="titlebar-no-drag flex items-center">
         <button
-          className="flex h-6 w-10 items-center justify-center text-slate-400 transition-colors hover:bg-slate-700/60 hover:text-slate-100"
+          className="flex h-7 w-11 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-slate-100 active:bg-white/[0.14]"
           title="最小化"
           onClick={() => void window.dshDesktop.window.minimize()}
         >
@@ -61,7 +61,7 @@ export function TitleBar({ status, port, version, appVersion, maximized }: Props
           </svg>
         </button>
         <button
-          className="flex h-6 w-10 items-center justify-center text-slate-400 transition-colors hover:bg-slate-700/60 hover:text-slate-100"
+          className="flex h-7 w-11 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-slate-100 active:bg-white/[0.14]"
           title={maximized ? '还原' : '最大化'}
           onClick={() => void window.dshDesktop.window.toggleMaximize()}
         >
@@ -77,7 +77,7 @@ export function TitleBar({ status, port, version, appVersion, maximized }: Props
           )}
         </button>
         <button
-          className="flex h-6 w-10 items-center justify-center text-slate-400 transition-colors hover:bg-red-500 hover:text-white"
+          className="flex h-7 w-11 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-500/90 hover:text-white active:bg-red-600"
           title="关闭（隐藏到托盘）"
           onClick={() => void window.dshDesktop.window.close()}
         >

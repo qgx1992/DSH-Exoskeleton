@@ -17,7 +17,9 @@ const DEFAULTS: AppConfig = {
   minimizeToTray: true,
   autoStartService: true,
   notifyServiceEvents: true,
-  onboardingDone: false
+  onboardingDone: false,
+  kernelMode: 'managed',
+  defaultKernelVersion: null
 }
 
 const ENCRYPTED_PREFIX = 'enc:'

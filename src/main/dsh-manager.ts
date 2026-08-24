@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import { logger } from './logger'
 import { configStore } from './config'
+import { kernelManager } from './kernel-manager'
 import type { DSHState } from '../shared/types'
 
 const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
@@ -73,7 +74,21 @@ export class DSHManager extends EventEmitter {
   private async resolveExecutable(): Promise<{ command: string; args: string[] }> {
     if (this.executable) return this.executable
 
-    // ① 环境变量
+    // ① 托管内核（kernelMode=managed 且 defaultKernelVersion 已安装）—— 多内核共存路由
+    kernelManager.init()
+    const cfg = configStore.get()
+    if (cfg.kernelMode === 'managed' && cfg.defaultKernelVersion) {
+      const binJs = kernelManager.binJsFor(cfg.defaultKernelVersion)
+      if (binJs) {
+        const nodeExe = await this.resolveNode()
+        this.executable = { command: nodeExe, args: [binJs] }
+        logger.info('dsh entry resolved via managed kernel', { version: cfg.defaultKernelVersion, binJs })
+        return this.executable
+      }
+      logger.warn('managed kernel not ready, falling back to system dsh', { version: cfg.defaultKernelVersion })
+    }
+
+    // ② 环境变量
     const explicit = process.env.DSH_EXECUTABLE
     if (explicit) {
       if (fs.existsSync(explicit)) {

@@ -12,6 +12,7 @@ import { rebuildMenu } from './tray'
 import { checkSetupStatus, saveApiKey } from './setup'
 import { backupManager } from './backup'
 import { listInstalled, listCatalog, installPlugin, uninstallPlugin } from './plugins'
+import { kernelManager } from './kernel-manager'
 import type { AppConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -30,6 +31,28 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('plugins:installed', () => listInstalled())
   ipcMain.handle('plugins:install', (_e, pkg: string) => installPlugin(pkg))
   ipcMain.handle('plugins:uninstall', (_e, pkg: string) => uninstallPlugin(pkg))
+
+  // ---------- 内核管理（多版本共存）----------
+  ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())
+  ipcMain.handle('kernels:available', () => kernelManager.listAvailable())
+  ipcMain.handle('kernels:install', (_e, version: string) => kernelManager.install(version))
+  ipcMain.handle('kernels:uninstall', (_e, version: string) => kernelManager.uninstall(version))
+  ipcMain.handle('kernels:setDefault', async (_e, version: string | null) => {
+    const cfg = configStore.set({ defaultKernelVersion: version })
+    // 服务运行中则自动换内核重启
+    if (dshManager.getState().status === 'running') {
+      await dshManager.restart()
+    }
+    return { ok: cfg.defaultKernelVersion === version }
+  })
+  ipcMain.handle('kernels:setMode', async (_e, mode: 'managed' | 'system') => {
+    const cfg = configStore.set({ kernelMode: mode })
+    rebuildMenu()
+    if (dshManager.getState().status === 'running') {
+      await dshManager.restart()
+    }
+    return { ok: cfg.kernelMode === mode }
+  })
 
   // ---------- DSH 管理 ----------
   ipcMain.handle('dsh:start', async (): Promise<{ ok: boolean; error?: string }> => {

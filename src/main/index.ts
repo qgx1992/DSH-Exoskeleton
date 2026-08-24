@@ -13,6 +13,7 @@ import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { notify } from './notify'
 import { updater } from './updater'
+import { kernelManager } from './kernel-manager'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
 
@@ -47,6 +48,12 @@ async function bootstrap(): Promise<void> {
 
   logger.init()
   configStore.init()
+  kernelManager.init()
+
+  // 内核安装进度 → 渲染层
+  kernelManager.on('progress', (p) => {
+    windowManager.broadcast('kernels:progress', p)
+  })
 
   // 开机自启状态与配置同步
   const cfg = configStore.get()

@@ -19,6 +19,7 @@
 | 备份与回滚 | 手动存档 + 自动快照（插件安装/卸载、恢复前）+ 一键回退，快照存于 userData\backups |
 | 插件管理 | GitHub topic dsh-plugin + npm 双来源目录，一键安装/卸载（复用 dsh plugin），冲突预检 + 操作前自动备份 |
 | 自动更新 | NSIS 安装版 electron-updater 静默下载 → 通知 → 一键重启安装；便携版引导手动下载 |
+| 内核管理（阶段 A） | DSH 多版本共存：手动安装（镜像加速）/设为默认/卸载，托管内核优先、系统 dsh 兜底 |
 | 数据复用 | DSH_HOME 环境变量优先，否则 `%USERPROFILE%\.dsh` |
 | 安全隔离 | 仅监听 `127.0.0.1`、渲染进程沙箱、`contextIsolation`、禁用 Node 集成 |
 | 自动更新（P2 占位） | 检查 DeepSeek Harness 官方最新 Release，引导下载 |
@@ -112,10 +113,17 @@ dist/win-unpacked/                            # 免安装绿色版文件夹
 
 - [x] Phase 1 — MVP：脚手架 / 原生窗口 / 托盘 / 单实例 / DSH 进程管理 / 端口自动分配
 - [x] Phase 2 — 体验完善：API Key 首次启动向导 / 数据复用 / 安全隔离 / 日志查看 / 原生通知 / 开机自启
-- [x] Phase 3 大部分：自动更新（electron-updater 静默下载+一键重启）/ 仪表盘（状态/设置/插件/备份/日志/更新）/
+- [x] Phase 3 大部分：自动更新（electron-updater 静默下载+一键重启）/ 仪表盘（状态/设置/内核/插件/备份/日志/更新）/
        插件管理器（双来源目录+冲突预检+自动备份）/ 备份与回滚 / 三种分发形态
-- [ ] Phase 3 剩余：历史版本回滚（升级类）、插件市场深度集成
-- [ ] Phase 4：多 Profile / 跨平台 / 社区生态
+- [ ] 内核管理阶段 A 完成（托管安装/默认路由/卸载）；**阶段 B**：内置 Node 运行时 + 内核升级检测；
+      内核依赖安装性能优化（内置 pnpm / 缓存预热）
+- [ ] Phase 4：多 Profile（含 profile-内核版本绑定）/ 跨平台 / 社区生态
+
+## 内核管理（阶段 A，已知限制）
+
+- 安装内核依赖本机 Node 与 pnpm/npm（阶段 B 将内置运行时，实现真正零门槛）
+- 安装走 npm registry（可切 npmmirror 镜像加速国内网络，见 `docs/KERNEL-MANAGER-DESIGN.md`）
+- 依赖树较大（单内核 ~50MB+），首次安装耗时受网络影响
 
 ## 参考项目
 
