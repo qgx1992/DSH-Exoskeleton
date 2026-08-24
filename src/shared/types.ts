@@ -36,6 +36,8 @@ export interface AppConfig {
   autoStartService: boolean
   /** 服务状态变化时发送原生通知 */
   notifyServiceEvents: boolean
+  /** 会话完成时发送原生通知（§4.2.3 任务完成） */
+  notifySessionDone: boolean
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
   /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */

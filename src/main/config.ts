@@ -17,6 +17,7 @@ const DEFAULTS: AppConfig = {
   minimizeToTray: true,
   autoStartService: true,
   notifyServiceEvents: true,
+  notifySessionDone: true,
   onboardingDone: false,
   kernelMode: 'managed',
   defaultKernelVersion: null

@@ -101,6 +101,14 @@ export function SettingsTab(): React.JSX.Element {
 
           <div className="flex items-center justify-between">
             <div>
+              <div className="text-slate-200">会话完成通知</div>
+              <div className="mt-0.5 text-[12px] text-slate-500">Agent 会话结束后发送 Windows 通知</div>
+            </div>
+            <Toggle checked={cfg.notifySessionDone} onChange={(v) => void save({ notifySessionDone: v })} />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
               <div className="text-slate-200">关闭窗口时隐藏到托盘</div>
               <div className="mt-0.5 text-[12px] text-slate-500">而非退出进程</div>
             </div>

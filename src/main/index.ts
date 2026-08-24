@@ -14,6 +14,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { notify } from './notify'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
+import { sessionWatcher, wireSessionWatcher } from './session-watcher'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
 
@@ -55,6 +56,9 @@ async function bootstrap(): Promise<void> {
     windowManager.broadcast('kernels:progress', p)
   })
 
+  // 会话完成通知（§4.2.3）
+  wireSessionWatcher()
+
   // 开机自启状态与配置同步
   const cfg = configStore.get()
   const loginSettings = app.getLoginItemSettings()
@@ -74,6 +78,8 @@ async function bootstrap(): Promise<void> {
     } else if (state.status === 'error' || state.status === 'stopped') {
       windowManager.detachDshView()
     }
+    // 会话观察与 DSH 服务状态联动
+    sessionWatcher.syncWithService(state.status)
     rebuildMenu()
 
     // 原生通知（文档 §4.2.3）：就绪仅窗口隐藏时提示；异常总是提示
