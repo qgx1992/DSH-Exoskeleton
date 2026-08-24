@@ -200,49 +200,32 @@ export class WindowManager {
   }
 
   /**
-   * 在 DSH Web UI 中尽力定位并激活对应会话（SPA 内部状态，采用 DOM 匹配点击）。
-   * 匹配失败/页面未就绪时静默返回（不影响已唤起的窗口）。
+   * 在 DSH Web UI 中定位并激活对应会话。
+   * 依据实际勘察：会话列表为 div[class*="sessionRow"][role="treeitem"]，标题在内部 [class*="title"]，
+   * 无 data-* 属性 → 按标题文本匹配（Web UI 显示与会话记录同源的 session/title）。
+   * SPA 内部结构变化时静默失败（不影响已唤起的窗口）。
    */
-  activateSessionInWebUi(sessionId: string, title: string): void {
+  activateSessionInWebUi(title: string): void {
     const view = this.view
     if (!view || view.webContents.isDestroyed()) return
+    // includes 匹配（避免正则转义/特殊字符问题；标题同源自 session/title）
     const script = `(() => {
       try {
-        const id = ${JSON.stringify(sessionId.replace(/^session-/, ''))};
-        const title = ${JSON.stringify(title)};
-        const esc = (s) => s.replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&');
-        const titleRe = new RegExp(esc(title.slice(0, 40)), 'i');
-        // 常见会话列表项选择器；优先 id 命中，其次标题文本命中
-        const sels = ['[data-session-id]', '[data-id]', '[data-conversation-id]', 'li', 'a', '[role="listitem"]', '[class*="session"]', '[class*="conversation"]'];
-        for (const open of sels) {
-          const els = [...document.querySelectorAll(open)];
-          for (const el of els) {
-            if ((el.dataset && (el.dataset.sessionId === id || el.dataset.id === id || el.dataset.conversationId === id)) ||
-                (el.getAttribute && (el.getAttribute('data-session-id') === id || el.getAttribute('data-id') === id))) {
-              el.click();
-              return true;
-            }
-          }
-        }
-        for (const open of sels) {
-          const els = [...document.querySelectorAll(open)];
-          for (const el of els) {
-            const t = (el.textContent || '').trim();
-            if (t && t.length < 200 && titleRe.test(t)) { el.click(); return true; }
-          }
+        const t = ${JSON.stringify(title)}.slice(0, 40).toLowerCase();
+        const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
+        for (const el of items) {
+          const txt = (el.textContent || '').trim();
+          if (txt && txt.length < 300 && txt.toLowerCase().includes(t)) { el.click(); return true; }
         }
         return false;
       } catch { return false; }
     })()`
-    // 页面就绪后执行；延迟重试一次
     const run = (): void => {
       if (view.webContents.isDestroyed()) return
       view.webContents
         .executeJavaScript(script)
         .then((ok: unknown) => {
-          if (!ok) {
-            logger.debug('webui session activate miss (fallback title match failed)')
-          }
+          if (!ok) logger.debug('webui session activate miss (title not found in list)')
         })
         .catch(() => logger.debug('webui session activate skipped'))
     }

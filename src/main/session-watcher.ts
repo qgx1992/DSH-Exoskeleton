@@ -16,11 +16,11 @@ import { windowManager } from './window-manager'
 import { readSessionRecords, extractTitle, extractCwd, projectNameFromPath, decodeWorkspaceName } from '../shared/session-jsonl'
 
 /** 会话文件停止写入超过该时长（秒）视为完成；测试可用 DSH_SESSION_QUIET_MS 覆盖 */
-const COMPLETE_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 40_000)
+const COMPLETE_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 20_000)
 /** 观察到的停滞时长超过该上限则不通知（中断残留，避免通知早已结束的会话） */
 const MAX_STALE_MS = 6 * 3600_000
 /** 轮询间隔；测试可用 DSH_SESSION_POLL_MS 覆盖 */
-const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 12_000)
+const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 4_000)
 
 interface Tracked {
   /** 最近一次 size 增长时间（会话最后活跃）；null = 尚未观察到增长（不可判完成） */
@@ -168,8 +168,8 @@ export function wireSessionWatcher(): void {
     notify('DSH 会话完成', body, () => {
       // 1) 唤起主窗口
       windowManager.show()
-      // 2) 尽力而为：在 DSH Web UI 中定位对应会话（SPA 内部，DOM 匹配；失败静默）
-      windowManager.activateSessionInWebUi(ev.uuid, title)
+      // 2) 尽力而为：在 DSH Web UI 中定位对应会话（按勘察到的 sessionRow 列表项做标题匹配；失败静默）
+      windowManager.activateSessionInWebUi(title)
     })
   })
 }
