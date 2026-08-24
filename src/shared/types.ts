@@ -44,6 +44,10 @@ export interface AppConfig {
   kernelMode: 'managed' | 'system'
   /** 托管内核默认版本 */
   defaultKernelVersion: string | null
+  /** 窗口几何记忆（尺寸/位置；null=首次启动用默认） */
+  windowBounds: { width: number; height: number; x: number; y: number } | null
+  /** 上次退出时窗口是否最大化 */
+  windowMaximized: boolean
 }
 
 /** 托管 DSH 内核（多版本共存）信息 */

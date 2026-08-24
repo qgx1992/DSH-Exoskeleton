@@ -4,31 +4,76 @@
  * - DSH Web UI 以 WebContentsView 嵌入标题栏下方
  * - 单实例、关闭隐藏到托盘
  */
-import { BrowserWindow, WebContentsView, app, shell } from 'electron'
+import { BrowserWindow, WebContentsView, app, shell, screen } from 'electron'
 import path from 'node:path'
 import { logger } from './logger'
 import { dshManager } from './dsh-manager'
+import { configStore } from './config'
 
 const TITLEBAR_HEIGHT = 36
+const DEFAULT_WIDTH = 1200
+const DEFAULT_HEIGHT = 800
+const MIN_WIDTH = 900
+const MIN_HEIGHT = 600
+/** 几何保存防抖（ms） */
+const GEOMETRY_DEBOUNCE_MS = 500
 
 export class WindowManager {
   private win: BrowserWindow | null = null
   private view: WebContentsView | null = null
   private viewUrl: string | null = null
   private isQuitting = false
+  private geometryTimer: NodeJS.Timeout | null = null
 
   getWindow(): BrowserWindow | null {
     return this.win
   }
 
+  /** 读取上次保存的窗口几何；若落在当前任一显示器可见区域则恢复，否则 null（用默认居中） */
+  private restoreBounds(): { width: number; height: number; x?: number; y?: number } | null {
+    const saved = configStore.get().windowBounds
+    if (!saved) return null
+    const w = Math.max(MIN_WIDTH, Math.round(saved.width))
+    const h = Math.max(MIN_HEIGHT, Math.round(saved.height))
+    const visible = screen.getAllDisplays().some((d) => {
+      const a = d.workArea
+      return saved.x + w > a.x && saved.x < a.x + a.width && saved.y + h > a.y && saved.y < a.y + a.height
+    })
+    if (!visible) return null
+    return { width: w, height: h, x: Math.round(saved.x), y: Math.round(saved.y) }
+  }
+
+  /** 保存窗口几何（非最大化保存 bounds；最大化只记状态） */
+  private persistGeometry(): void {
+    if (!this.win || this.win.isDestroyed()) return
+    if (this.win.isMaximized()) {
+      void configStore.set({ windowMaximized: true })
+      return
+    }
+    if (this.win.isMinimized()) return
+    const b = this.win.getBounds()
+    if (b.width < MIN_WIDTH || b.height < MIN_HEIGHT) return
+    void configStore.set({ windowBounds: { width: b.width, height: b.height, x: b.x, y: b.y }, windowMaximized: false })
+  }
+
+  private schedulePersist(): void {
+    if (this.geometryTimer) clearTimeout(this.geometryTimer)
+    this.geometryTimer = setTimeout(() => {
+      this.geometryTimer = null
+      this.persistGeometry()
+    }, GEOMETRY_DEBOUNCE_MS)
+  }
+
   create(): BrowserWindow {
     if (this.win) return this.win
 
+    const restored = this.restoreBounds()
     this.win = new BrowserWindow({
-      width: 1200,
-      height: 800,
-      minWidth: 900,
-      minHeight: 600,
+      width: restored?.width ?? DEFAULT_WIDTH,
+      height: restored?.height ?? DEFAULT_HEIGHT,
+      ...(restored ? { x: restored.x, y: restored.y } : {}),
+      minWidth: MIN_WIDTH,
+      minHeight: MIN_HEIGHT,
       frame: false,
       title: 'DSH-Exoskeleton',
       backgroundColor: '#0b0f17',
@@ -63,11 +108,25 @@ export class WindowManager {
         this.win?.hide()
       }
     })
-    this.win.on('maximize', () => this.win?.webContents.send('window:maximizeChange', true))
-    this.win.on('unmaximize', () => this.win?.webContents.send('window:maximizeChange', false))
-    this.win.on('resize', () => this.layoutView())
+    this.win.on('maximize', () => {
+      this.win?.webContents.send('window:maximizeChange', true)
+      this.persistGeometry()
+    })
+    this.win.on('unmaximize', () => {
+      this.win?.webContents.send('window:maximizeChange', false)
+      this.schedulePersist()
+    })
+    this.win.on('resize', () => {
+      this.layoutView()
+      this.schedulePersist()
+    })
+    this.win.on('move', () => this.schedulePersist())
     this.win.once('ready-to-show', () => {
       this.win?.show()
+      // 恢复最大化状态（先 show 再最大化，确保布局正常）
+      if (configStore.get().windowMaximized) {
+        this.win?.maximize()
+      }
     })
 
     this.loadRenderer()
@@ -168,6 +227,12 @@ export class WindowManager {
   /** 应用退出：允许真正关闭窗口 */
   quit(): void {
     this.isQuitting = true
+    // 退出前刷新几何（防抖可能尚未触发）
+    if (this.geometryTimer) {
+      clearTimeout(this.geometryTimer)
+      this.geometryTimer = null
+      this.persistGeometry()
+    }
     this.detachDshView()
     app.quit()
   }

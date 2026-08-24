@@ -20,7 +20,9 @@ const DEFAULTS: AppConfig = {
   notifySessionDone: true,
   onboardingDone: false,
   kernelMode: 'managed',
-  defaultKernelVersion: null
+  defaultKernelVersion: null,
+  windowBounds: null,
+  windowMaximized: false
 }
 
 const ENCRYPTED_PREFIX = 'enc:'
