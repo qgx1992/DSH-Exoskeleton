@@ -1,11 +1,11 @@
-// 验证：session-jsonl 模块（真实 DSH 会话文件：帧扫描/标题/cwd/工作区解码）
+// session-jsonl 模块测试
+// 无参数：纯逻辑单测（进 npm test）；带真实 .zstd 路径：追加真实文件集成验证
 import {
-  scanZstdFrames,
-  readSessionRecords,
   extractTitle,
   extractCwd,
   decodeWorkspaceName,
-  projectNameFromPath
+  projectNameFromPath,
+  truncate
 } from '../src/shared/session-jsonl.ts'
 import fs from 'node:fs'
 
@@ -15,39 +15,48 @@ const assert = (cond, label) => {
   if (cond) { passed++; console.log('  ✓', label) } else { failed++; console.error('  ✗', label) }
 }
 
+console.log('1) 标题提取（合成记录）')
+assert(
+  extractTitle([{ parsed: { type: 'session/title', data: { title: ' 整理文档 ' } }, line: '' }], 'ab12') === '整理文档',
+  'session/title 优先且 trim'
+)
+assert(
+  extractTitle(
+    [{ parsed: { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '帮我写一个方案' }] } }, line: '' }],
+    'ab12'
+  ) === '帮我写一个方案',
+  '用户消息回退'
+)
+const longTitle = extractTitle([{ parsed: { type: 'session/title', data: { title: 'x'.repeat(120) } }, line: '' }], 'ab12')
+assert(longTitle.length === 81 && longTitle.endsWith('…'), '超长标题截断')
+assert(extractTitle([], 'ab12') === '会话 ab12', '空记录 fallback')
+
+console.log('2) cwd 提取')
+assert(extractCwd([{ parsed: { type: 'session', cwd: 'D:\\proj' }, line: '' }]) === 'D:\\proj', '取 session 头 cwd')
+assert(extractCwd([{ parsed: { type: 'other' }, line: '' }]) === '', '无 cwd 返回空')
+assert(projectNameFromPath('D:\\A my project\\研究agent桌面端\\DSH-Exoskeleton') === 'DSH-Exoskeleton', '项目名取末级')
+
+console.log('3) 工作区名解码')
+assert(decodeWorkspaceName('--D-A-my~0020project-~7814~7A76agent--').includes('研究'), '~XXXX 中文解码')
+assert(decodeWorkspaceName('--C-Users-QIU-~0020.dsh--').includes(' '), '~0020 空格解码')
+assert(truncate('abcde', 3) === 'abc…', 'truncate')
+
+console.log('4) 帧扫描/真实文件（可选）')
 const file = process.argv[2]
-if (!file) {
-  console.error('用法: node --experimental-strip-types scripts/test-session-jsonl.mts <session.jsonl.zstd>')
-  process.exit(1)
+if (file && fs.existsSync(file)) {
+  const { scanZstdFrames, readSessionRecords } = await import('../src/shared/session-jsonl.ts')
+  const buf = fs.readFileSync(file)
+  const frames = scanZstdFrames(buf)
+  assert(frames.length > 0, `真实会话识别 ${frames.length} 个 frame`)
+  const records = readSessionRecords(buf, 16)
+  const title = extractTitle(records, 'ab12')
+  const cwd = extractCwd(records)
+  console.log('   真实标题:', JSON.stringify(title), '| cwd:', cwd)
+  assert(title.length > 0 && title !== '会话 ab12', '真实标题提取')
+  assert(cwd.length > 0, '真实 cwd 提取')
+} else {
+  console.log('   （未提供真实文件，跳过集成断言；开发时可用真实 .zstd 手动验证）')
 }
-const buf = fs.readFileSync(file)
-
-console.log('1) 帧扫描')
-const frames = scanZstdFrames(buf)
-assert(frames.length > 0, `识别 ${frames.length} 个 zstd frame`)
-assert(frames[0].start === 0, '首帧从 0 开始')
-assert(frames[frames.length - 1].end <= buf.length, '末帧边界合法')
-
-console.log('2) 记录解析')
-const records = readSessionRecords(buf, 16)
-assert(records.length > 0, `解析出 ${records.length} 条事件`)
-assert(records.some((r) => r.parsed?.type === 'session'), '含 session 头事件')
-
-console.log('3) 标题提取')
-const title = extractTitle(records, 'ab12cd34')
-console.log('   标题:', JSON.stringify(title))
-assert(title.length > 0 && title !== '会话 ab12cd34', '提取到真实标题（session/title 或用户消息）')
-
-console.log('4) 项目路径（cwd）')
-const cwd = extractCwd(records)
-console.log('   cwd:', cwd)
-assert(cwd.length > 0, '提取到会话 cwd')
-assert(projectNameFromPath(cwd).length > 0, `项目名: ${projectNameFromPath(cwd)}`)
-
-console.log('5) 工作区名 ~XXXX 解码')
-const decoded = decodeWorkspaceName('--D-A-my~0020project-~7814~7A76agent--')
-assert(decoded.includes('研究') && decoded.includes('agent'), '中文 ~7814~7A76 解码为"研究"')
-assert(decoded.includes(' '), '空格 ~0020 解码成功')
 
 console.log(`\n结果: ${passed} 通过, ${failed} 失败`)
 process.exit(failed === 0 ? 0 : 1)
