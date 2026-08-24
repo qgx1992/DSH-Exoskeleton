@@ -12,6 +12,8 @@ import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { notify } from './notify'
 import { configStore } from './config'
+import { windowManager } from './window-manager'
+import { readSessionRecords, extractTitle, extractCwd, projectNameFromPath, decodeWorkspaceName } from '../shared/session-jsonl'
 
 /** 会话文件停止写入超过该时长（秒）视为完成；测试可用 DSH_SESSION_QUIET_MS 覆盖 */
 const COMPLETE_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 40_000)
@@ -144,18 +146,30 @@ export class SessionWatcher extends EventEmitter {
 /** 全局单例：由 index.ts 初始化并接线 */
 export const sessionWatcher = new SessionWatcher()
 
-/** 接线：DSH 状态变化 → watcher；会话完成 → 系统通知 */
+/** 接线：DSH 状态变化 → watcher；会话完成 → 系统通知（标题/项目，点击唤起主窗口并尝试定位会话） */
 export function wireSessionWatcher(): void {
   sessionWatcher.on('complete', (ev: SessionDoneEvent) => {
     if (!configStore.get().notifySessionDone) return
-    const ws = ev.workspace.replace(/^--|--$/g, '').replace(/~(\d)/g, ' ') || '默认工作区'
-    notify(
-      'DSH 会话完成',
-      `工作区「${ws}」的会话已完成（${ev.uuid.slice(0, 8)}）`,
-      () => {
-        const { shell } = require('electron') as typeof import('electron')
-        void shell.openPath(path.dirname(ev.sessionDir))
-      }
-    )
+
+    let title = `会话 ${ev.uuid.slice(0, 8)}`
+    let project = ''
+    // 读取会话标题与项目路径（会话头 cwd 是权威项目路径）
+    try {
+      const file = path.join(ev.sessionDir, 'session.jsonl.zstd')
+      const records = readSessionRecords(fs.readFileSync(file), 16, 512 * 1024)
+      title = extractTitle(records, ev.uuid)
+      const cwd = extractCwd(records)
+      project = cwd ? projectNameFromPath(cwd) : projectNameFromPath(decodeWorkspaceName(ev.workspace))
+    } catch (err) {
+      logger.warn('session title read failed', err)
+    }
+
+    const body = project ? `项目「${project}」· ${title}` : title
+    notify('DSH 会话完成', body, () => {
+      // 1) 唤起主窗口
+      windowManager.show()
+      // 2) 尽力而为：在 DSH Web UI 中定位对应会话（SPA 内部，DOM 匹配；失败静默）
+      windowManager.activateSessionInWebUi(ev.uuid, title)
+    })
   })
 }
