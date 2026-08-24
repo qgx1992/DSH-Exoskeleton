@@ -70,7 +70,7 @@ export function BackupTab(): React.JSX.Element {
         <h2 className="text-lg font-semibold text-slate-100">备份与回滚</h2>
         <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
           对 <code className="rounded bg-slate-800 px-1 py-px font-mono text-[11px] text-amber-300">~/.dsh</code>{' '}
-          中的配置、会话、凭据、插件、技能等创建快照（自动排除 node_modules）。定时自动备份默认开启（设置中可改周期/关闭）；插件安装/卸载与恢复操作前也会自动生成保护快照。
+          中的配置、会话、凭据、插件、技能等创建快照（自动排除 node_modules）。插件安装/卸载与恢复操作前会自动生成保护快照；也可手动创建存档。
         </p>
 
         <div className="mt-4 flex gap-2">

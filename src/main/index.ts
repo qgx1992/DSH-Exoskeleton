@@ -13,7 +13,6 @@ import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { notify } from './notify'
 import { updater } from './updater'
-import { backupManager } from './backup'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
 
@@ -48,9 +47,6 @@ async function bootstrap(): Promise<void> {
 
   logger.init()
   configStore.init()
-
-  // 定时自动备份（默认开启，每 24 小时；配置变化时由 config:set 重新调度）
-  backupManager.syncAutoBackup(configStore.get().autoBackup, configStore.get().autoBackupIntervalHours)
 
   // 开机自启状态与配置同步
   const cfg = configStore.get()

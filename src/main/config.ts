@@ -17,9 +17,7 @@ const DEFAULTS: AppConfig = {
   minimizeToTray: true,
   autoStartService: true,
   notifyServiceEvents: true,
-  onboardingDone: false,
-  autoBackup: true,
-  autoBackupIntervalHours: 24
+  onboardingDone: false
 }
 
 const ENCRYPTED_PREFIX = 'enc:'

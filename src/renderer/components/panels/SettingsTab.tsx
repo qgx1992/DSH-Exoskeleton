@@ -6,14 +6,12 @@ export function SettingsTab(): React.JSX.Element {
   const [saved, setSaved] = useState(false)
   const [portInput, setPortInput] = useState('')
   const [dshHomeInput, setDshHomeInput] = useState('')
-  const [backupHours, setBackupHours] = useState('24')
 
   useEffect(() => {
     void window.dshDesktop.config.get().then((c) => {
       setCfg(c)
       setPortInput(String(c.port))
       setDshHomeInput(c.dshHome)
-      setBackupHours(String(c.autoBackupIntervalHours))
     })
   }, [])
 
@@ -91,36 +89,6 @@ export function SettingsTab(): React.JSX.Element {
               <div className="mt-0.5 text-[12px] text-slate-500">应用启动后自动拉起 dsh web</div>
             </div>
             <Toggle checked={cfg.autoStartService} onChange={(v) => void save({ autoStartService: v })} />
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-slate-200">定时自动备份</div>
-              <div className="mt-0.5 text-[12px] text-slate-500">按周期自动创建 ~/.dsh 快照（保留上限 15 个，自动快照优先清理）</div>
-            </div>
-            <div className="flex items-center gap-2">
-              {cfg.autoBackup && (
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  value={backupHours}
-                  onChange={(e) => setBackupHours(e.target.value)}
-                  onBlur={() => {
-                    const h = parseInt(backupHours || '24', 10)
-                    if (!Number.isNaN(h) && h >= 1 && h <= 720 && h !== cfg.autoBackupIntervalHours) {
-                      void save({ autoBackupIntervalHours: h })
-                    } else {
-                      setBackupHours(String(cfg.autoBackupIntervalHours))
-                    }
-                  }}
-                  className="w-16 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-right font-mono text-[12px] text-slate-100 outline-none focus:border-amber-400"
-                  title="备份周期（小时）"
-                />
-              )}
-              <span className="text-[11px] text-slate-500">{cfg.autoBackup ? '小时' : ''}</span>
-              <Toggle checked={cfg.autoBackup} onChange={(v) => void save({ autoBackup: v })} />
-            </div>
           </div>
 
           <div className="flex items-center justify-between">
