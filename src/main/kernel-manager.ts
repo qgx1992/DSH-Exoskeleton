@@ -16,6 +16,8 @@ import { runtimeManager } from './runtime-manager'
 import type { KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
+/** registry 根（install --registry 参数需要根 URL，不是包元数据 URL） */
+const REGISTRY_ROOT = 'https://registry.npmjs.org'
 const PACKAGE = '@deepseek-ai/dsh'
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
 
@@ -252,7 +254,8 @@ export class KernelManager extends EventEmitter {
     if (!nodeExe) {
       return { ok: false, error: '未找到可用的 Node.js 运行时。请安装 Node.js，或在「内核」面板一键下载内置运行时。' }
     }
-    const registry = registryOverride ?? REGISTRY_URL
+    // registry 根（镜像加速时传根 URL，如 https://registry.npmmirror.com）
+    const registryRoot = registryOverride ?? REGISTRY_ROOT
 
     const dirName = KernelManager.safeDirName(version)
     const kernelDir = path.join(this.kernelsDir, dirName)
@@ -273,7 +276,7 @@ export class KernelManager extends EventEmitter {
     try {
       // 1) registry 元数据（确认版本存在）
       this.emitProgress({ version, stage: 'downloading', percent: 4, message: '获取版本元数据…' })
-      const reg = (await (await fetch(registry)).json()) as {
+      const reg = (await (await fetch(registryRoot + '/@deepseek-ai/dsh')).json()) as {
         versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>
       }
       const dist = reg.versions?.[version]?.dist
@@ -292,11 +295,14 @@ export class KernelManager extends EventEmitter {
       meta.status = 'installing'
       this.persistIndex()
 
-      const installer = this.installCommand(registry)
+      const installer = this.installCommand(registryRoot)
       if (!installer) throw new Error('未找到可用的包管理器（pnpm/npm）')
       const r = await this.run(installer.command, installer.args, { cwd: kernelDir })
-      if (r.code !== 0) {
-        throw new Error(`依赖安装失败（exit ${r.code}）：${r.stderr.slice(0, 800)}`)
+      // pnpm 10+ 默认忽略依赖 build scripts，并以 exit 1 + ERR_PNPM_IGNORED_BUILDS 提示——
+      // 原生模块（node-pty/koffi/sharp）由平台包 prebuilt 提供，build script 仅为 fallback，忽略不等于失败
+      const ignoredBuilds = /ERR_PNPM_IGNORED_BUILDS|IGNORED_BUILDS/i.test(r.stderr + ' ' + r.stdout)
+      if (r.code !== 0 && !ignoredBuilds) {
+        throw new Error('依赖安装失败（exit ' + r.code + '）：' + (r.stderr || r.stdout).slice(0, 800))
       }
       this.emitProgress({ version, stage: 'installing', percent: 90, message: '自检内核…' })
 
