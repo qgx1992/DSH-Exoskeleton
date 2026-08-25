@@ -67,7 +67,19 @@ function parseEvents(text) {
     if (!line.trim()) continue
     try {
       const j = JSON.parse(line)
-      events.push({ type: j.type, seq: typeof j.seq === 'number' ? j.seq : 0 })
+      // kind：turn/end 的 reason.kind（completed/aborted/error/max-tokens/blocked/interrupted…）
+      const kind = j.data && j.data.reason && typeof j.data.reason.kind === 'string'
+        ? j.data.reason.kind
+        : undefined
+      // turn：turn/end 的 data.turn（轮次编号，用于按轮去重）
+      const turn = j.data && typeof j.data.turn === 'number' ? j.data.turn : undefined
+      events.push({
+        type: j.type,
+        seq: typeof j.seq === 'number' ? j.seq : 0,
+        time: typeof j.time === 'number' ? j.time : 0,
+        kind,
+        turn
+      })
     } catch { /* noop */ }
   }
   return events
@@ -104,15 +116,34 @@ function handle(req, res) {
       const frames = scanZstdFrames(tail.subarray(magicAt))
       let events = []
       let turnEndMax = 0
+      const turnEnds = []
+      let turnStarts = 0
+      // 本批最后一个 turn 事件（按 seq 最大者判定类型）：
+      //   - 'end'   → 本批以轮次结束收尾，更新完成候选
+      //   - 'start' → 本批以新一轮开始收尾，会话仍活跃，清除候选
+      let lastTurnType = null
+      let lastTurnSeq = -1
+      // 本批所有非 interrupted turn/end 的最大事件时间（ms）
+      let lastEndTime = 0
       const frameStartOfs = tailStart + magicAt
-      for (const fr of frames.slice(0, 6)) {
+      // 最多解析 64 帧：正常运行每次 flush 仅 1 帧（批窗口 200ms），
+      // 但崩溃修复（repair re-encode）或观察间隔较长时一次增长可达数十帧
+      for (const fr of frames.slice(0, 64)) {
         if (frameStartOfs + fr.end <= offset) continue // 仅处理位于 offset 之后的帧
         for (const ev of parseEvents(decompress(tail.subarray(magicAt), fr))) {
           events.push(ev)
-          if (ev.type === 'turn/end' && ev.seq > turnEndMax) turnEndMax = ev.seq
+          if (ev.type === 'turn/end') {
+            if (ev.seq > turnEndMax) turnEndMax = ev.seq
+            turnEnds.push({ seq: ev.seq, time: ev.time, kind: ev.kind, turn: ev.turn })
+            if (ev.kind !== 'interrupted' && ev.time > lastEndTime) lastEndTime = ev.time
+            if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'end' }
+          } else if (ev.type === 'turn/start') {
+            turnStarts++
+            if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'start' }
+          }
         }
       }
-      res({ ok: true, events, turnEndMax })
+      res({ ok: true, events, turnEndMax, turnEnds, turnStarts, lastTurnType, lastEndTime })
       return
     }
     if (req.cmd === 'headInfo') {

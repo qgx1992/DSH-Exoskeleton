@@ -1,10 +1,13 @@
 /**
- * 会话完成通知（文档 §4.2.3「任务完成」）
- * - 事件驱动：增量读取会话 jsonl.zstd 新增帧，检测 DSH 原生事件 `turn/end` →
- *   立即判定完成并通知（不依赖"停止写入"猜测）
- * - 解压：经系统 Node 常驻 worker（zstd-worker.cjs）；无系统 Node 时降级为
- *   「停止写入超阈值」兜底判定，标题回退会话短号
- * - 每个会话只通知一次；旧会话（观察期无新事件）不误报
+ * 对话完成通知（文档 §4.2.3「任务完成」）
+ * - 语义：DSH 的 "turn/end" 表示「一轮对话结束」。每轮（turn）结束即立即通知，
+ *   不做「会话级」判定——会话（session）可包含多轮，每一轮完成都是独立提醒。
+ * - interrupted 是崩溃恢复时持久层合成的关闭标记（loop 从不主动发出），
+ *   不代表一轮正常完成，不参与通知。
+ * - 按轮（turn 编号）去重：同一轮只通知一次（DSH 崩溃修复可能产生重复 turn/end）。
+ * - 无 turn/end 的会话（未完成任何一轮/中途异常退出）不通知——没有结束标记就
+ *   静默，宁可漏报不可误报（不使用「停止写入」兜底）。
+ * - 旧会话（观察期开始前已存在）不误报。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -17,16 +20,13 @@ import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
 import { decodeWorkspaceName, projectNameFromPath } from '../shared/session-jsonl'
 
-/** 轮询间隔（事件驱动下只影响发现新帧的时延） */
+/** 轮询间隔（只影响发现新帧的时延） */
 const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 2_000)
-/** 兜底（无 turn/end 或无线程 Node）：停止写入超阈值判定完成 */
-const FALLBACK_QUIET_MS = Number(process.env.DSH_SESSION_QUIET_MS ?? 60_000)
 
 interface Tracked {
   readOffset: number
-  lastTurnEndSeq: number
-  lastGrewAt: number
-  seen: boolean
+  /** 已通知过的轮次编号（Set<turn 编号>；防止同一轮重复通知） */
+  notifiedTurns: Set<number>
 }
 
 export interface SessionDoneEvent {
@@ -34,12 +34,13 @@ export interface SessionDoneEvent {
   workspace: string
   uuid: string
   file: string
+  /** 本轮轮次编号（turn/end 的 data.turn；缺失时为 undefined） */
+  turn?: number
 }
 
 export class SessionWatcher extends EventEmitter {
   private timer: NodeJS.Timeout | null = null
   private tracked = new Map<string, Tracked>()
-  private doneSessions = new Set<string>()
   private scanning = false
 
   syncWithService(status: string): void {
@@ -60,7 +61,6 @@ export class SessionWatcher extends EventEmitter {
       this.timer = null
     }
     this.tracked.clear()
-    this.doneSessions.clear()
     zstdWorker.close()
     logger.info('session watcher stopped')
   }
@@ -80,7 +80,6 @@ export class SessionWatcher extends EventEmitter {
       } catch {
         return
       }
-      const now = Date.now()
 
       for (const ws of workspaceDirs) {
         const wsDir = path.join(sessionsRoot, ws)
@@ -96,7 +95,6 @@ export class SessionWatcher extends EventEmitter {
           const sessionDir = path.join(wsDir, s)
           const file = path.join(sessionDir, 'session.jsonl.zstd')
           const key = sessionDir
-          if (this.doneSessions.has(key)) continue
 
           let size = 0
           try {
@@ -108,27 +106,34 @@ export class SessionWatcher extends EventEmitter {
 
           let t = this.tracked.get(key)
           if (!t) {
-            this.tracked.set(key, { readOffset: size, lastTurnEndSeq: 0, lastGrewAt: now, seen: false })
+            // 基线：仅记录偏移，不处理旧内容（避免启动时对历史会话批量通知）
+            this.tracked.set(key, { readOffset: size, notifiedTurns: new Set<number>() })
             continue
           }
 
           if (size > t.readOffset) {
             const oldOffset = t.readOffset
-            t.lastGrewAt = now
             t.readOffset = size
-            t.seen = true
-            // 事件驱动主路径：worker 解新增帧，检测 turn/end
+            // 解析新增帧中的轮次结束事件：每轮（非 interrupted）结束立即通知
             const r = await zstdWorker.request('frameEvents', { file, offset: oldOffset })
-            if (r.ok && (r.turnEndMax ?? 0) > t.lastTurnEndSeq) {
-              t.lastTurnEndSeq = r.turnEndMax ?? 0
-              this.emitComplete({ sessionDir, workspace: ws, uuid: s.replace(/^session-/, ''), file })
+            if (r.ok) {
+              for (const te of r.turnEnds ?? []) {
+                // interrupted = 崩溃恢复时持久层合成的关闭标记，不代表一轮完成
+                if (te.kind === 'interrupted') continue
+                // 按轮去重：同一轮只通知一次（DSH 崩溃修复可能重写重复 turn/end）
+                const turnKey = te.turn ?? te.seq
+                if (t.notifiedTurns.has(turnKey)) continue
+                t.notifiedTurns.add(turnKey)
+                this.emitComplete({
+                  sessionDir,
+                  workspace: ws,
+                  uuid: s.replace(/^session-/, ''),
+                  file,
+                  turn: te.turn
+                })
+              }
             }
             continue
-          }
-
-          // 兜底：观察中但未出现 turn/end，停止写入超阈值
-          if (t.seen && now - t.lastGrewAt > FALLBACK_QUIET_MS) {
-            this.emitComplete({ sessionDir, workspace: ws, uuid: s.replace(/^session-/, ''), file })
           }
         }
       }
@@ -138,10 +143,8 @@ export class SessionWatcher extends EventEmitter {
   }
 
   private emitComplete(ev: SessionDoneEvent): void {
-    if (this.doneSessions.has(ev.sessionDir)) return
-    this.doneSessions.add(ev.sessionDir)
     this.emit('complete', ev)
-    logger.info('session done detected', { workspace: ev.workspace, uuid: ev.uuid })
+    logger.info('turn done detected', { workspace: ev.workspace, uuid: ev.uuid, turn: ev.turn })
   }
 
   _debugState(): Map<string, Tracked> {
@@ -151,7 +154,7 @@ export class SessionWatcher extends EventEmitter {
 
 export const sessionWatcher = new SessionWatcher()
 
-/** 接线：DSH 状态变化 → watcher；会话完成 → 系统通知（标题/项目，点击唤起主窗口并尝试定位会话） */
+/** 接线：DSH 状态变化 → watcher；每轮对话完成 → 系统通知（标题/项目/轮次，点击唤起主窗口并尝试定位会话） */
 export function wireSessionWatcher(): void {
   sessionWatcher.on('complete', async (ev: SessionDoneEvent) => {
     if (!configStore.get().notifySessionDone) return
@@ -168,11 +171,14 @@ export function wireSessionWatcher(): void {
     }
     if (!project) project = projectNameFromPath(decodeWorkspaceName(ev.workspace))
 
-    const body = project ? `项目「${project}」· ${title}` : title
-    notify('DSH 会话完成', body, () => {
+    // 正文带轮次：项目「X」· 标题（第 N 轮）
+    const turnSuffix = ev.turn ? `（第 ${ev.turn} 轮）` : ''
+    const body = project ? `项目「${project}」· ${title}${turnSuffix}` : `${title}${turnSuffix}`
+    notify('DSH 对话完成', body, () => {
       windowManager.show()
-      // 多候补跳转：通知标题(LLM 版) + 首条用户消息(列表显示版)，辅以"刚刚"时间兜底
-      windowManager.activateSessionInWebUi(title, head.firstUserText)
+      // 跳转优先级：会话 ID 精确匹配（React fiber node.id）→ 通知标题(LLM 版)
+      // + 首条用户消息(列表显示版) → "刚刚"时间兜底
+      windowManager.activateSessionInWebUi(title, head.firstUserText, ev.uuid)
     })
   })
 }

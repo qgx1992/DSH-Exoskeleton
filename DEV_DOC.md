@@ -229,6 +229,21 @@ if (!gotTheLock) {
 - 使用 Electron 的 `Notification` API
 - 系统不支持时自动降级为托盘气泡[reference:46]
 
+**对话完成判定语义**（`session-watcher.ts`）：
+- DSH 的 `turn/end` 表示「一轮对话结束」；会话（session）可包含多轮——
+  **每轮结束（非 interrupted）即立即通知**，不做会话级聚合，每一轮都是独立提醒
+- 按轮（`turn/end` 的 `data.turn` 编号）去重：同一轮只通知一次（DSH 崩溃修复可能重写重复 turn/end）
+- `turn/end(interrupted)` 是崩溃恢复时持久层合成的关闭标记（loop 从不主动发出），不代表一轮正常完成，不参与通知
+- 无 `turn/end` 的会话（未完成任何一轮/中途异常退出）不通知——没有结束标记就静默，宁可漏报不可误报（不使用「停止写入」兜底）
+- 通知标题「DSH 对话完成」，正文带项目/标题/轮次（第 N 轮）
+- watcher 启动前已存在的旧会话（基线）不误报
+
+**点击通知跳转会话**（`window-manager.ts` `activateSessionInWebUi`）：
+- 优先按**会话 ID 精确匹配**：从会话行 DOM 元素的 React fiber（`__reactFiber$` 属性）向上读取
+  `node.id`（会话 uuid），消除同标题会话误点
+- fiber 读取失败或 ID 不存在时依次回退：标题模糊匹配 → 「刚刚/N秒前」时间兜底
+- 点击后验证选中态（ID 或标题），未切换则重试（最多 4 轮），SPA 结构变化时静默失败
+
 #### 4.2.4 安全隔离
 
 **功能**：仅监听本地回环地址，启用渲染进程沙箱[reference:47]。

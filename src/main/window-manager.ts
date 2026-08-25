@@ -219,12 +219,14 @@ export class WindowManager {
 
   /**
    * 在 DSH Web UI 中定位并激活对应会话（增强版）。
-   * 流程：1) 尝试展开折叠的工作区分组 → 2) 按标题匹配 [class*="sessionRow"]/treeitem 并点击
-   *      → 3) 验证选中态是否切换为目标会话，未切换则重试（最多 4 轮）。
-   * 依据实际勘察：会话列表项无 data 属性，标题来自 session/title（同源于通知标题）。
+   * 流程：1) 尝试展开折叠的工作区分组 → 2) 按会话 ID 精确匹配（从 React fiber 读取
+   *      node.id，优先于文本）→ 3) 无 ID 或未命中时按标题匹配 [class*="sessionRow"]/treeitem
+   *      → 4) 时间兜底（最近完成）→ 5) 验证选中态是否切换为目标会话，未切换则重试（最多 4 轮）。
+   * 依据实际勘察：会话列表 DOM 无 data 属性，但 React 组件节点携带 node.id（会话 uuid），
+   * 可通过元素上的 __reactFiber$ 属性读取；读取失败时静默回退标题匹配。
    * SPA 结构变化时静默失败（不影响唤起主窗口）。
    */
-  activateSessionInWebUi(title: string, altText?: string): void {
+  activateSessionInWebUi(title: string, altText?: string, sessionId?: string): void {
     const view = this.view
     if (!view || view.webContents.isDestroyed()) return
     const targets = [title, altText].filter((s): s is string => !!s).map((s) => s.slice(0, 40))
@@ -241,9 +243,32 @@ export class WindowManager {
             const t = (el.textContent || '').trim();
             if (t && t.length < 40 && /展开|其余\s*\d+\s*个会话|show more|expand/i.test(t)) el.click();
           });
-          // 2) 标题匹配并点击
-          const targets = ${JSON.stringify(targets)};
+          // 从 React fiber 读取会话 ID（组件 props.node.id，向上遍历最多 8 层）
+          const readId = (el) => {
+            const k = Object.keys(el).find(x => x.startsWith('__reactFiber'));
+            if (!k) return null;
+            let f = el[k];
+            for (let i = 0; i < 8 && f; i++) {
+              const p = f.memoizedProps;
+              if (p && p.node && typeof p.node.id === 'string' && p.node.id) return p.node.id;
+              f = f.return;
+            }
+            return null;
+          };
+          // 归一化：DSH SessionId 形如 "session-<uuid>"，目录名提取的 uuid 无前缀——比较时统一去前缀
+          const norm = (s) => (typeof s === 'string' ? s.replace(/^session-/, '') : s);
           const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
+          // 2) 会话 ID 精确匹配（优先，消除同标题误点）
+          const targetId = ${JSON.stringify(sessionId ?? '')};
+          if (targetId) {
+            const want = norm(targetId);
+            for (const el of items) {
+              const id = readId(el);
+              if (id && norm(id) === want) { el.click(); return 1; }
+            }
+          }
+          // 3) 标题匹配并点击
+          const targets = ${JSON.stringify(targets)};
           let hit = null;
           for (const el of items) {
             const txt = (el.textContent || '').trim();
@@ -251,7 +276,7 @@ export class WindowManager {
             const lower = txt.toLowerCase();
             if (targets.some(tg => tg && lower.includes(tg.toLowerCase()))) hit = el;
           }
-          // 3) 时间兜底：候选全不中时，点击"刚刚/N秒前/N分钟前"结尾的会话叶子（最近完成的）
+          // 4) 时间兜底：候选全不中时，点击"刚刚/N秒前/N分钟前"结尾的会话叶子（最近完成的）
           if (!hit) {
             const timeRe = /刚刚|秒前|分钟前|小时前|昨天|天前/i;
             for (const el of items) {
@@ -275,9 +300,25 @@ export class WindowManager {
           // 3) 验证选中态是否已切换为目标会话
           await new Promise((r) => setTimeout(r, 1_400))
           const verifyScript = `(() => {
+            const readId = (el) => {
+              const k = Object.keys(el).find(x => x.startsWith('__reactFiber'));
+              if (!k) return null;
+              let f = el[k];
+              for (let i = 0; i < 8 && f; i++) {
+                const p = f.memoizedProps;
+                if (p && p.node && typeof p.node.id === 'string' && p.node.id) return p.node.id;
+                f = f.return;
+              }
+              return null;
+            };
+            const norm = (s) => (typeof s === 'string' ? s.replace(/^session-/, '') : s);
             const sels = [...document.querySelectorAll('[class*="sessionRow"][aria-selected="true"], [class*="sessionRow"][class*="selected"]')];
             if (sels.length === 0) return 2;
-            const txt = sels[sels.length - 1].textContent.trim().slice(0, 60).toLowerCase();
+            const last = sels[sels.length - 1];
+            // ID 精确验证（优先，归一化比较）
+            const targetId = ${JSON.stringify(sessionId ?? '')};
+            if (targetId && norm(readId(last)) === norm(targetId)) return 1;
+            const txt = last.textContent.trim().slice(0, 60).toLowerCase();
             const targets = ${JSON.stringify(targets.map((t) => t.toLowerCase()))};
             if (targets.some((tg) => tg && txt.includes(tg))) return 1;
             // 时间兜底候选也接受：选中项是"刚刚/N秒前"叶子即认为已切换

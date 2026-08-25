@@ -1,5 +1,11 @@
-// 会话完成通知（事件驱动）集成测试
-// zstd 帧由系统 Node(有 zstd) 生成；watcher 通过 zstd-worker（系统 Node）解压检测 turn/end
+// 对话完成通知（每轮立即通知）集成测试
+// 覆盖语义：
+//  1) 启动前已含完整轮次的旧会话 → 基线化，不误报
+//  2) 观察期每轮 turn/end(非 interrupted) 结束 → 立即通知
+//  3) 同一轮重复 turn/end（崩溃修复重写）→ 按轮去重，不重复
+//  4) 后续每一轮 → 都立即通知（轮次编号递增）
+//  5) 无 turn/end 的会话（进行中的轮次）→ 永不通知（无「停止写入」兜底）
+//  6) turn/end(interrupted)（崩溃恢复合成）→ 不通知
 const { app } = require('electron')
 const child = require('child_process')
 const fs = require('fs')
@@ -7,7 +13,6 @@ const os = require('os')
 const path = require('path')
 
 process.env.DSH_SESSION_POLL_MS = '150'
-process.env.DSH_SESSION_QUIET_MS = '500'
 
 const tmpRoot = path.join(os.tmpdir(), 'dsh-session-test-' + Date.now())
 const fakeHome = path.join(tmpRoot, 'fake-dsh')
@@ -39,63 +44,120 @@ app.whenReady().then(async () => {
     wireSessionWatcher()
 
     const wsName = '--D-test_ws--'
-    const uuid = 'deadbeef-0000-4000-8000-000000000001'
-    const sessDir = path.join(fakeHome, 'sessions', wsName, `session-${uuid}`)
-    const jsonl = path.join(sessDir, 'session.jsonl.zstd')
-    const mid = path.join(sessDir, 'mid-frame.tmp')
-    fs.mkdirSync(sessDir, { recursive: true })
+    const mkSess = (uuid) => {
+      const sessDir = path.join(fakeHome, 'sessions', wsName, `session-${uuid}`)
+      const jsonl = path.join(sessDir, 'session.jsonl.zstd')
+      const mid = path.join(sessDir, 'mid-frame.tmp')
+      fs.mkdirSync(sessDir, { recursive: true })
+      return { sessDir, jsonl, mid, uuid }
+    }
+    const append = (jsonl, mid) => fs.appendFileSync(jsonl, fs.readFileSync(mid))
 
     const completed = []
     sessionWatcher.on('complete', (ev) => completed.push(ev))
 
-    console.log('1) 基线：写入会话头帧后启动 watcher')
-    zstdFrame([{ type: 'session', cwd: 'D:\\proj\\demo', id: `session-${uuid}` }], jsonl)
+    // ---------- 会话 A：正常多轮 ----------
+    const A = mkSess('deadbeef-0000-4000-8000-000000000001')
+
+    console.log('1) 启动前已含完整轮次的旧会话 → 不误报')
+    const t0 = Date.now()
+    zstdFrame(
+      [
+        { type: 'session', cwd: 'D:\\proj\\demo', id: `session-${A.uuid}` },
+        { type: 'user/message', seq: 1, time: t0, data: { role: 'user', content: [{ type: 'text', text: '你好' }] } },
+        { type: 'turn/start', seq: 2, time: t0, data: { turn: 1 } },
+        { type: 'step/start', seq: 3, time: t0, data: { turn: 1, step: 1 } },
+        { type: 'assistant/chunk', seq: 4, time: t0 },
+        { type: 'step/end', seq: 5, time: t0, data: { turn: 1, step: 1 } },
+        { type: 'turn/end', seq: 6, time: t0, data: { turn: 1, reason: { kind: 'completed' } } }
+      ],
+      A.jsonl
+    )
     sessionWatcher.syncWithService('running')
     await sleep(400)
     assert(sessionWatcher._debugState().size === 1, '基线跟踪 1 个会话')
-    assert(completed.length === 0, '会话头不触发完成')
+    assert(completed.length === 0, '启动前旧会话不误报（历史 turn/end 不通知）')
 
-    console.log('2) 事件驱动：追加含 turn/end 的帧 → 立即完成（无需停写等待）')
+    console.log('2) 观察期第 1 轮 turn/end(completed) → 立即通知')
+    const t1 = Date.now()
     zstdFrame(
       [
-        { type: 'user/message', seq: 1, data: { role: 'user', content: [{ type: 'text', text: '你好' }] } },
-        { type: 'step/start', seq: 2, data: { turn: 1, step: 1 } },
-        { type: 'assistant/chunk', seq: 3 },
-        { type: 'step/end', seq: 4, data: { turn: 1, step: 1 } },
-        { type: 'turn/end', seq: 5, data: { turn: 1, reason: { kind: 'completed' } } }
+        { type: 'user/message', seq: 7, time: t1, data: { role: 'user', content: [{ type: 'text', text: '继续' }] } },
+        { type: 'turn/start', seq: 8, time: t1, data: { turn: 2 } },
+        { type: 'assistant/chunk', seq: 9, time: t1 },
+        { type: 'turn/end', seq: 10, time: t1, data: { turn: 2, reason: { kind: 'completed' } } }
       ],
-      mid
+      A.mid
     )
-    fs.appendFileSync(jsonl, fs.readFileSync(mid))
-    await sleep(500) // > poll 150ms + worker 往返
-    assert(completed.length === 1, 'turn/end 出现后立即 complete（1 次）')
-    assert(completed[0].uuid === uuid, '携带 uuid')
+    append(A.jsonl, A.mid)
+    await sleep(400)
+    assert(completed.length === 1, 'turn/end 出现即完成（1 次，无需静默等待）')
+    assert(completed[0].uuid === A.uuid, '携带 uuid')
+    assert(completed[0].turn === 2, '携带轮次编号')
 
-    console.log('3) 追加无 turn/end 的帧 → 不重复触发')
-    zstdFrame([{ type: 'user/message', seq: 6, data: { role: 'user', content: [] } }], mid)
-    fs.appendFileSync(jsonl, fs.readFileSync(mid))
-    await sleep(500)
-    assert(completed.length === 1, '仍为 1 次（不重复通知）')
+    console.log('3) 同一轮重复 turn/end（崩溃修复重写场景）→ 按轮去重')
+    const t2 = Date.now()
+    zstdFrame([{ type: 'turn/end', seq: 11, time: t2, data: { turn: 2, reason: { kind: 'completed' } } }], A.mid)
+    append(A.jsonl, A.mid)
+    await sleep(400)
+    assert(completed.length === 1, '同轮重复 turn/end 不重复通知')
 
-    console.log('4) 兜底分支：无 turn/end 的会话，停止写入超阈值才完成')
-    const uuid2 = 'cafebabe-0000-4000-8000-000000000002'
-    const sessDir2 = path.join(fakeHome, 'sessions', wsName, `session-${uuid2}`)
-    fs.mkdirSync(sessDir2, { recursive: true })
-    zstdFrame([{ type: 'session', cwd: 'D:\\other' }], path.join(sessDir2, 'head.tmp'))
-    const jl2 = path.join(sessDir2, 'session.jsonl.zstd')
-    fs.copyFileSync(path.join(sessDir2, 'head.tmp'), jl2)
-    await sleep(250) // 让 watcher 基线记录 head（readOffset = head 大小，seen=false）
-    zstdFrame([{ type: 'user/message', seq: 1 }], mid)
-    fs.appendFileSync(jl2, fs.readFileSync(mid))
-    await sleep(400) // 观察到增长 → seen=true
-    assert(completed.length === 1, '无 turn/end 不立即完成')
-    // debug 兜底状态
-    const dbg = [...sessionWatcher._debugState().entries()].map(([k, v]) => `${k.split(path.sep).pop()} off=${v.readOffset} grew=${Math.round((Date.now() - v.lastGrewAt) / 100) / 10}s seen=${v.seen}`)
-    console.log('   兜底前状态:', dbg.join(' | '))
-    await sleep(700) // 超过 QUIET_MS=500
-    console.log('   兜底后完成数:', completed.length)
-    assert(completed.length === 2, '兜底判定完成（第 2 次）')
-    assert(completed[1].uuid === uuid2, '兜底事件 uuid')
+    console.log('4) 第 2 轮 turn/end(completed) → 再次立即通知（每轮都弹）')
+    const t3 = Date.now()
+    zstdFrame(
+      [
+        { type: 'turn/start', seq: 12, time: t3, data: { turn: 3 } },
+        { type: 'turn/end', seq: 13, time: t3, data: { turn: 3, reason: { kind: 'completed' } } }
+      ],
+      A.mid
+    )
+    append(A.jsonl, A.mid)
+    await sleep(400)
+    assert(completed.length === 2, '第 3 轮结束立即完成（第 2 次通知）')
+    assert(completed[1].turn === 3, '轮次编号递增')
+
+    // ---------- 会话 B：进行中但无 turn/end ----------
+    const B = mkSess('cafebabe-0000-4000-8000-000000000002')
+    console.log('5) 无 turn/end 的会话（进行中的轮次）→ 永不通知（无兜底）')
+    zstdFrame(
+      [
+        { type: 'session', cwd: 'D:\\other', id: `session-${B.uuid}` },
+        { type: 'user/message', seq: 1, time: t0, data: { role: 'user', content: [{ type: 'text', text: '长任务…' }] } },
+        { type: 'step/start', seq: 2, time: t0, data: { turn: 1, step: 1 } },
+        { type: 'assistant/chunk', seq: 3, time: t0 }
+      ],
+      path.join(B.sessDir, 'head.tmp')
+    )
+    fs.copyFileSync(path.join(B.sessDir, 'head.tmp'), B.jsonl)
+    await sleep(250) // 基线
+    const t5 = Date.now()
+    zstdFrame([{ type: 'assistant/chunk', seq: 4, time: t5 }], B.mid)
+    append(B.jsonl, B.mid)
+    await sleep(400)
+    assert(completed.length === 2, '进行中的轮次不通知')
+    await sleep(700) // 模拟超过旧「停止写入」兜底阈值
+    assert(completed.length === 2, '无 turn/end 永不通知（无兜底误报）')
+
+    // ---------- 会话 C：崩溃恢复合成的 interrupted ----------
+    const C = mkSess('12345678-0000-4000-8000-000000000003')
+    console.log('6) turn/end(interrupted)（崩溃合成）→ 不通知')
+    zstdFrame([{ type: 'session', cwd: 'D:\\crash', id: `session-${C.uuid}` }], path.join(C.sessDir, 'head.tmp'))
+    fs.copyFileSync(path.join(C.sessDir, 'head.tmp'), C.jsonl)
+    await sleep(250)
+    const t6 = Date.now()
+    zstdFrame(
+      [
+        { type: 'turn/start', seq: 1, time: t6, data: { turn: 1 } },
+        { type: 'assistant/chunk', seq: 2, time: t6 },
+        { type: 'turn/end', seq: 3, time: t6, data: { turn: 1, reason: { kind: 'interrupted' } } }
+      ],
+      C.mid
+    )
+    append(C.jsonl, C.mid)
+    await sleep(400)
+    assert(completed.length === 2, 'interrupted 不通知')
+    await sleep(700)
+    assert(completed.length === 2, 'interrupted 持续不通知')
 
     sessionWatcher.stop()
   } catch (e) {

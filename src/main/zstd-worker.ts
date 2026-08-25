@@ -13,6 +13,14 @@ interface WorkerPayload {
   zstd?: boolean
   events?: Array<{ type: string; seq: number }>
   turnEndMax?: number
+  /** 新增帧中出现的 turn/end 事件（seq/time/reason.kind/turn 编号） */
+  turnEnds?: Array<{ seq: number; time: number; kind?: string; turn?: number }>
+  /** 新增帧中出现的 turn/start 事件数量 */
+  turnStarts?: number
+  /** 本批 seq 最大的 turn 事件类型：'start' 或 'end'；无 turn 事件时为 null */
+  lastTurnType?: 'start' | 'end' | null
+  /** 本批非 interrupted turn/end 的最大事件时间（ms） */
+  lastEndTime?: number
   cwd?: string
   title?: string
   firstUserText?: string
