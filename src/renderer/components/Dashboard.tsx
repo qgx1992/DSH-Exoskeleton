@@ -7,8 +7,9 @@ import { UpdateTab } from './panels/UpdateTab'
 import { BackupTab } from './panels/BackupTab'
 import { PluginsTab } from './panels/PluginsTab'
 import { KernelsTab } from './panels/KernelsTab'
+import { ProfilesTab } from './panels/ProfilesTab'
 
-type Tab = 'status' | 'settings' | 'kernels' | 'plugins' | 'backup' | 'logs' | 'update'
+type Tab = 'status' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
 
 interface Props {
   state: DSHState | null
@@ -21,6 +22,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'status', label: '状态', icon: '◈' },
   { id: 'settings', label: '设置', icon: '⚙' },
   { id: 'kernels', label: '内核', icon: '⬡' },
+  { id: 'profiles', label: '档案', icon: '▤' },
   { id: 'plugins', label: '插件', icon: '◆' },
   { id: 'backup', label: '备份', icon: '▣' },
   { id: 'logs', label: '日志', icon: '☰' },
@@ -62,6 +64,7 @@ export function Dashboard({ state, onStart, onStop, onRestart }: Props): React.J
         {tab === 'status' && <StatusTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} />}
         {tab === 'settings' && <SettingsTab />}
         {tab === 'kernels' && <KernelsTab />}
+        {tab === 'profiles' && <ProfilesTab />}
         {tab === 'plugins' && <PluginsTab />}
         {tab === 'backup' && <BackupTab />}
         {tab === 'logs' && <LogsTab />}

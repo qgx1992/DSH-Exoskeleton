@@ -14,6 +14,7 @@ import os from 'node:os'
 import { logger } from './logger'
 import { configStore } from './config'
 import { kernelManager } from './kernel-manager'
+import { runtimeManager } from './runtime-manager'
 import type { DSHState } from '../shared/types'
 
 const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
@@ -74,18 +75,21 @@ export class DSHManager extends EventEmitter {
   private async resolveExecutable(): Promise<{ command: string; args: string[] }> {
     if (this.executable) return this.executable
 
-    // ① 托管内核（kernelMode=managed 且 defaultKernelVersion 已安装）—— 多内核共存路由
+    // ① 托管内核（kernelMode=managed）—— 多内核共存路由（阶段 C：Profile 绑定优先）
     kernelManager.init()
     const cfg = configStore.get()
-    if (cfg.kernelMode === 'managed' && cfg.defaultKernelVersion) {
-      const binJs = kernelManager.binJsFor(cfg.defaultKernelVersion)
+    const profile = (cfg.profiles ?? []).find((p) => p.id === cfg.activeProfileId)
+    const kernelVersion =
+      cfg.kernelMode === 'managed' ? (profile?.kernelVersion ?? cfg.defaultKernelVersion) : null
+    if (kernelVersion) {
+      const binJs = kernelManager.binJsFor(kernelVersion)
       if (binJs) {
         const nodeExe = await this.resolveNode()
         this.executable = { command: nodeExe, args: [binJs] }
-        logger.info('dsh entry resolved via managed kernel', { version: cfg.defaultKernelVersion, binJs })
+        logger.info('dsh entry resolved via managed kernel', { version: kernelVersion, profile: profile?.id, binJs })
         return this.executable
       }
-      logger.warn('managed kernel not ready, falling back to system dsh', { version: cfg.defaultKernelVersion })
+      logger.warn('managed kernel not ready, falling back to system dsh', { version: kernelVersion })
     }
 
     // ② 环境变量
@@ -160,9 +164,17 @@ export class DSHManager extends EventEmitter {
     )
   }
 
-  /** 解析可用的 node 可执行文件：DSH_NODE / 系统 node / 应用自带 Electron Node */
+  /** 解析可用的 node 可执行文件：内置运行时（阶段 B）→ DSH_NODE → 系统 node */
   private async resolveNode(): Promise<string> {
     if (this.nodeExe) return this.nodeExe
+    // 1) 内置 Node 运行时（阶段 B：真零门槛，原生模块 ABI 兼容）
+    const embedded = runtimeManager.getNodeExe()
+    if (embedded) {
+      this.nodeExe = embedded
+      logger.info('node resolved via embedded runtime', { node: embedded })
+      return embedded
+    }
+    // 2) 显式指定 / 系统 node
     const candidates: string[] = []
     if (process.env.DSH_NODE) candidates.push(process.env.DSH_NODE)
     try {
@@ -178,10 +190,7 @@ export class DSHManager extends EventEmitter {
         return c
       }
     }
-    // 最后回退到应用自身（Electron 内置 Node，能力等同）
-    this.nodeExe = process.execPath
-    logger.info('fallback to app-embedded node', { node: this.nodeExe })
-    return this.nodeExe
+    throw new Error('未找到可用的 Node.js 运行时。请安装 Node.js，或在「内核」面板一键下载内置运行时。')
   }
 
   private execCapture(cmd: string, args: string[]): Promise<string | null> {

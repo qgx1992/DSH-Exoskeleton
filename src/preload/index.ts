@@ -44,7 +44,22 @@ const api: DesktopApi = {
     uninstall: (version) => ipcRenderer.invoke('kernels:uninstall', version),
     setDefault: (version) => ipcRenderer.invoke('kernels:setDefault', version),
     setMode: (mode) => ipcRenderer.invoke('kernels:setMode', mode),
+    checkUpdate: () => ipcRenderer.invoke('kernels:checkUpdate'),
+    quota: () => ipcRenderer.invoke('kernels:quota'),
     onProgress: (callback) => subscribe('kernels:progress', callback)
+  },
+  runtime: {
+    status: () => ipcRenderer.invoke('runtime:status'),
+    download: () => ipcRenderer.invoke('runtime:download'),
+    remove: () => ipcRenderer.invoke('runtime:remove'),
+    onProgress: (callback) => subscribe('runtime:progress', callback)
+  },
+  profiles: {
+    list: () => ipcRenderer.invoke('profiles:list'),
+    create: (name) => ipcRenderer.invoke('profiles:create', name),
+    delete: (id) => ipcRenderer.invoke('profiles:delete', id),
+    activate: (id) => ipcRenderer.invoke('profiles:activate', id),
+    setKernel: (id, version) => ipcRenderer.invoke('profiles:setKernel', id, version)
   },
   config: {
     get: () => ipcRenderer.invoke('config:get'),

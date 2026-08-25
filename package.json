@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.5.4",
+  "version": "0.6.0",
   "description": "DeepSeek Harness 桌面客户端 — 轻量、纯净、功能完整的 DSH 桌面外壳（壳核分离）",
   "main": "out/main/index.js",
   "author": "DSH Exoskeleton",
@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "node --experimental-strip-types scripts/test-credentials.ts && node node_modules/esbuild/bin/esbuild src/main/backup.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/backup.cjs && electron scripts/test-backup.cjs && node node_modules/esbuild/bin/esbuild src/main/kernel-manager.ts --bundle --platform=node --external:electron --external:@deepseek-ai/* --format=cjs --outfile=scripts/out/kernel-manager.cjs && electron scripts/test-kernel.cjs && node node_modules/esbuild/bin/esbuild src/main/session-watcher.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/session-watcher.cjs && electron scripts/test-session.cjs && node --experimental-strip-types scripts/test-session-jsonl.mts",
+    "test": "node --experimental-strip-types scripts/test-credentials.ts && node node_modules/esbuild/bin/esbuild src/main/backup.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/backup.cjs && electron scripts/test-backup.cjs && node node_modules/esbuild/bin/esbuild src/main/kernel-manager.ts --bundle --platform=node --external:electron --external:@deepseek-ai/* --format=cjs --outfile=scripts/out/kernel-manager.cjs && electron scripts/test-kernel.cjs && node node_modules/esbuild/bin/esbuild src/main/profiles.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/profiles.cjs && electron scripts/test-profiles.cjs && node node_modules/esbuild/bin/esbuild src/main/session-watcher.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/session-watcher.cjs && electron scripts/test-session.cjs && node --experimental-strip-types scripts/test-session-jsonl.mts",
     "build": "electron-vite build",
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",

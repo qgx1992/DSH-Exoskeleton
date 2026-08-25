@@ -11,7 +11,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn, execFileSync } from 'node:child_process'
 import { logger } from './logger'
-import type { KernelInfo, KernelProgress, KernelRemoteVersion } from '../shared/types'
+import { configStore } from './config'
+import { runtimeManager } from './runtime-manager'
+import type { KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
 const PACKAGE = '@deepseek-ai/dsh'
@@ -134,6 +136,13 @@ export class KernelManager extends EventEmitter {
 
   private resolveNode(): string | null {
     if (this.nodeExe && fs.existsSync(this.nodeExe)) return this.nodeExe
+    // 1) 内置 Node 运行时（阶段 B：真零门槛）
+    const embedded = runtimeManager.getNodeExe()
+    if (embedded) {
+      this.nodeExe = embedded
+      return embedded
+    }
+    // 2) 显式指定 / 系统 node
     if (process.env.DSH_NODE && fs.existsSync(process.env.DSH_NODE)) {
       this.nodeExe = process.env.DSH_NODE
       return this.nodeExe
@@ -236,9 +245,12 @@ export class KernelManager extends EventEmitter {
     if (this.index.kernels[version]?.status === 'installed') {
       return { ok: false, error: `内核 v${version} 已安装` }
     }
+    // 磁盘空间 + 配额检查（阶段 C）
+    const spaceErr = this.checkDiskSpace()
+    if (spaceErr) return { ok: false, error: spaceErr }
     const nodeExe = this.resolveNode()
     if (!nodeExe) {
-      return { ok: false, error: '未找到 Node.js 运行时（阶段 B 将内置运行时，当前需系统 Node）' }
+      return { ok: false, error: '未找到可用的 Node.js 运行时。请安装 Node.js，或在「内核」面板一键下载内置运行时。' }
     }
     const registry = registryOverride ?? REGISTRY_URL
 
@@ -315,11 +327,22 @@ export class KernelManager extends EventEmitter {
     }
   }
 
-  /** 卸载内核（若为默认版本则需先解除默认） */
+  /** 卸载内核（阶段 C：引用保护——默认版本或任一 Profile 绑定的版本不可卸载） */
   uninstall(version: string): { ok: boolean; error?: string } {
     this.init()
     const meta = this.index.kernels[version]
-    if (!meta) return { ok: false, error: `内核 v${version} 未安装` }
+    if (!meta) return { ok: false, error: '内核 v' + version + ' 未安装' }
+    const cfg = configStore.get()
+    if (cfg.kernelMode === 'managed' && cfg.defaultKernelVersion === version) {
+      return { ok: false, error: 'v' + version + ' 是当前默认内核，请先切换默认版本后再卸载' }
+    }
+    const refProfiles = (cfg.profiles ?? []).filter((p) => p.kernelVersion === version)
+    if (refProfiles.length > 0) {
+      return {
+        ok: false,
+        error: 'v' + version + ' 被配置档案「' + refProfiles.map((p) => p.name).join('、') + '」绑定，请先解除绑定'
+      }
+    }
     try {
       const target = path.join(this.kernelsDir, KernelManager.safeDirName(version))
       if (!target.startsWith(this.kernelsDir)) return { ok: false, error: '非法路径' }
@@ -330,6 +353,81 @@ export class KernelManager extends EventEmitter {
       return { ok: true }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
+  /** 内核仓库总占用（字节） */
+  totalSizeBytes(): number {
+    return Object.values(this.index.kernels)
+      .filter((k) => k.status === 'installed')
+      .reduce((sum, k) => sum + (k.size || 0), 0)
+  }
+
+  /** 存储统计（配额，阶段 C） */
+  quota(): KernelQuota {
+    this.init()
+    const cfg = configStore.get()
+    let runtimeMB = 0
+    try {
+      const r = runtimeManager.getRuntimeDir()
+      if (fs.existsSync(r)) runtimeMB = Math.round(dirSizeSync(r) / (1024 * 1024))
+    } catch {
+      /* noop */
+    }
+    return {
+      quotaMB: cfg.kernelsQuotaMB ?? 1024,
+      usedMB: Math.round(this.totalSizeBytes() / (1024 * 1024)),
+      runtimeMB,
+      diskFreeMB: runtimeManager.diskFreeMB()
+    }
+  }
+
+  /** 安装前磁盘/配额检查；通过返回 null，否则返回错误信息 */
+  private checkDiskSpace(): string | null {
+    const cfg = configStore.get()
+    // 磁盘剩余空间（需要至少 500MB，含依赖下载与解压余量）
+    const free = runtimeManager.diskFreeMB()
+    if (free >= 0 && free < 500) return '磁盘剩余空间不足（' + free + 'MB < 500MB）'
+    // 内核仓库配额（0 = 不限制）
+    const quotaMB = cfg.kernelsQuotaMB ?? 1024
+    if (quotaMB > 0) {
+      const usedMB = Math.round(this.totalSizeBytes() / (1024 * 1024))
+      const ESTIMATE_MB = 60 // 单内核依赖树估算（~50MB+，留余量）
+      if (usedMB + ESTIMATE_MB > quotaMB) {
+        return '内核仓库已超配额（' + usedMB + 'MB + 预估 ' + ESTIMATE_MB + 'MB > 配额 ' + quotaMB + 'MB），请先卸载部分版本或调高配额'
+      }
+    }
+    return null
+  }
+
+  /** 内核更新检测（阶段 B：registry dist-tags latest/rc） */
+  async checkUpdate(): Promise<KernelUpdateInfo> {
+    const cfg = configStore.get()
+    const current = cfg.kernelMode === 'managed' ? cfg.defaultKernelVersion : null
+    const info: KernelUpdateInfo = {
+      current,
+      latest: null,
+      rc: null,
+      available: false,
+      url: 'https://www.npmjs.com/package/@deepseek-ai/dsh',
+      checkedAt: Date.now(),
+      error: null
+    }
+    try {
+      const res = await fetch(REGISTRY_URL, {
+        headers: { Accept: 'application/vnd.npm.install-v1+json' },
+        signal: AbortSignal.timeout(15_000)
+      })
+      if (!res.ok) throw new Error('registry ' + res.status)
+      const data = (await res.json()) as { 'dist-tags'?: Record<string, string> }
+      info.latest = data['dist-tags']?.latest ?? null
+      info.rc = data['dist-tags']?.rc ?? null
+      info.available = !!info.latest && !!current && compareVersions(info.latest, current) > 0
+      return info
+    } catch (err) {
+      info.error = err instanceof Error ? err.message : String(err)
+      logger.warn('kernel update check failed', err)
+      return info
     }
   }
 }
@@ -359,6 +457,30 @@ function dirSizeSync(dir: string): number {
     /* noop */
   }
   return s
+}
+
+
+/** 简单 semver 比较：返回 a>b ? 1 : a<b ? -1 : 0（prerelease 视为低于同 base 稳定版） */
+function compareVersions(a: string, b: string): number {
+  const parse = (v: string): { base: number[]; pre: string } => {
+    const parts = v.split('-')
+    return {
+      base: (parts[0] ?? '0').split('.').map((n) => parseInt(n, 10) || 0),
+      pre: parts.slice(1).join('-')
+    }
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  const len = Math.max(pa.base.length, pb.base.length)
+  for (let i = 0; i < len; i++) {
+    const x = pa.base[i] ?? 0
+    const y = pb.base[i] ?? 0
+    if (x !== y) return x > y ? 1 : -1
+  }
+  if (pa.pre === pb.pre) return 0
+  if (!pa.pre) return 1 // 稳定版 > prerelease
+  if (!pb.pre) return -1
+  return pa.pre < pb.pre ? -1 : 1
 }
 
 export const kernelManager = new KernelManager()

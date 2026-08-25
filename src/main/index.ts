@@ -14,6 +14,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { notify } from './notify'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
+import { runtimeManager } from './runtime-manager'
 import { sessionWatcher, wireSessionWatcher } from './session-watcher'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
@@ -50,10 +51,15 @@ async function bootstrap(): Promise<void> {
   logger.init()
   configStore.init()
   kernelManager.init()
+  runtimeManager.init()
 
   // 内核安装进度 → 渲染层
   kernelManager.on('progress', (p) => {
     windowManager.broadcast('kernels:progress', p)
+  })
+  // 内置 Node 运行时下载/解压进度 → 渲染层
+  runtimeManager.on('progress', (p) => {
+    windowManager.broadcast('runtime:progress', p)
   })
 
   // 会话完成通知（§4.2.3）

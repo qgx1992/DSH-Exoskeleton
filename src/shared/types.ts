@@ -48,6 +48,12 @@ export interface AppConfig {
   windowBounds: { width: number; height: number; x: number; y: number } | null
   /** 上次退出时窗口是否最大化 */
   windowMaximized: boolean
+  /** 激活的配置档案 id（阶段 C） */
+  activeProfileId: string
+  /** 配置档案列表（多 Profile，每档案可绑定内核版本） */
+  profiles: DshProfile[]
+  /** 内核仓库磁盘配额（MB，0 = 不限制） */
+  kernelsQuotaMB: number
 }
 
 /** 托管 DSH 内核（多版本共存）信息 */
@@ -64,7 +70,7 @@ export interface KernelInfo {
 /** 内核安装/操作进度推送 */
 export interface KernelProgress {
   version: string
-  stage: 'downloading' | 'verifying' | 'installing' | 'done' | 'error'
+  stage: 'downloading' | 'verifying' | 'installing' | 'extracting' | 'removing' | 'done' | 'error'
   percent: number
   message: string
 }
@@ -73,6 +79,55 @@ export interface KernelProgress {
 export interface KernelRemoteVersion {
   version: string
   publishedAt: string | null
+}
+
+/** 配置档案（阶段 C：多 Profile + 内核版本绑定） */
+export interface DshProfile {
+  id: string
+  name: string
+  /** 绑定内核版本；null = 跟随全局默认版本 */
+  kernelVersion: string | null
+  createdAt: number
+}
+
+/** 内置 Node 运行时状态（阶段 B） */
+export interface RuntimeInfo {
+  installed: boolean
+  version: string | null
+  /** 内置 node.exe 路径（未安装时为 null） */
+  path: string | null
+  /** 系统 Node（探测到的路径，未找到为 null） */
+  systemNode: string | null
+  /** 当前操作状态 */
+  busy: 'idle' | 'downloading' | 'extracting' | 'removing'
+}
+
+/** 内核更新检测结果（阶段 B：channels latest/rc） */
+export interface KernelUpdateInfo {
+  /** 当前使用的内核版本（托管模式） */
+  current: string | null
+  /** registry dist-tags.latest（稳定版） */
+  latest: string | null
+  /** registry dist-tags.rc（预发布渠道） */
+  rc: string | null
+  /** 是否有可升级的新稳定版 */
+  available: boolean
+  /** 内核 registry 页面 */
+  url: string | null
+  checkedAt: number | null
+  error: string | null
+}
+
+/** 内核/运行时存储统计（阶段 C：磁盘配额） */
+export interface KernelQuota {
+  /** 配额上限（MB；0 = 不限制） */
+  quotaMB: number
+  /** 已安装内核总占用（MB） */
+  usedMB: number
+  /** 内置 Node 运行时占用（MB） */
+  runtimeMB: number
+  /** 磁盘剩余空间（MB） */
+  diskFreeMB: number
 }
 
 /** 日志条目 */
@@ -179,8 +234,33 @@ export interface DesktopApi {
     uninstall: (version: string) => Promise<SaveResult>
     setDefault: (version: string | null) => Promise<SaveResult>
     setMode: (mode: 'managed' | 'system') => Promise<SaveResult>
+    /** 检查内核更新（dist-tags latest/rc） */
+    checkUpdate: () => Promise<KernelUpdateInfo>
+    /** 内核/运行时存储统计（配额） */
+    quota: () => Promise<KernelQuota>
     /** 订阅安装/切换进度 */
     onProgress: (callback: (p: KernelProgress) => void) => () => void
+  }
+  runtime: {
+    /** 内置 Node 运行时状态 */
+    status: () => Promise<RuntimeInfo>
+    /** 下载并安装内置 Node 运行时（后台，进度走 runtime:progress） */
+    download: () => Promise<SaveResult>
+    /** 删除内置 Node 运行时 */
+    remove: () => Promise<SaveResult>
+    /** 订阅下载/解压进度 */
+    onProgress: (callback: (p: KernelProgress) => void) => () => void
+  }
+  profiles: {
+    list: () => Promise<DshProfile[]>
+    /** 新建档案（返回新建的档案） */
+    create: (name: string) => Promise<SaveResult & { profile?: DshProfile }>
+    /** 删除档案（default 档案不可删） */
+    delete: (id: string) => Promise<SaveResult>
+    /** 激活档案（切换后服务自动重启换内核） */
+    activate: (id: string) => Promise<SaveResult>
+    /** 绑定/解除档案的内核版本 */
+    setKernel: (id: string, version: string | null) => Promise<SaveResult>
   }
   config: {
     get: () => Promise<AppConfig>

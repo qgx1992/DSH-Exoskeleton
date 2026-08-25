@@ -107,6 +107,9 @@ dsh-desktop/
 | **配置管理** | API Key、端口、工作区、开机自启 | csyyywy[reference:24] |
 | **自动更新** | 后台静默检查、下载就绪后通知重启 | SnowCrescenter[reference:25] |
 | **插件管理** | 浏览/搜索/安装/卸载社区插件 | csyyywy[reference:26] |
+| **内核管理** | 多版本共存：npm 安装/校验/默认路由/卸载（kernel-manager.ts） | 自研 |
+| **运行时管理** | 内置 Node 运行时下载/自检/删除（runtime-manager.ts，阶段 B） | 自研 |
+| **配置档案** | 多 Profile + 内核版本绑定（profiles.ts，阶段 C） | 自研 |
 
 
 ## 四、功能模块详细设计
@@ -336,6 +339,16 @@ if (!gotTheLock) {
 | 三种分发形态 | NSIS 安装包 + Portable 单文件版 + 绿色版[reference:75] |
 
 **里程碑**：功能完整的 DSH 桌面客户端，可与主流方案媲美。
+
+### 内核管理（阶段 A/B/C，已落地）
+
+| 阶段 | 内容 | 落地 |
+| :--- | :--- | :--- |
+| A | KernelManager：npm 下载/校验/安装到 userData/kernels/、默认路由、卸载 | v0.3.0 |
+| B | 内置 Node 运行时（runtime-manager.ts：一键下载/解压/自检，resolveNode 优先）；内核更新检测（dist-tags latest/rc）+ 一键升级；进度推送 | v0.6.0 |
+| C | 多 Profile 档案（profiles.ts + 档案面板）：档案绑定内核版本、切换即换内核；卸载引用保护；磁盘配额（kernelsQuotaMB） | v0.6.0 |
+
+**验收**：全新机器仅装应用 → 下载内置 Node 运行时 + 托管内核 → 打开 DSH Web UI；不同档案稳定运行不同内核版本。
 
 ### Phase 4 — 生态建设（持续）
 

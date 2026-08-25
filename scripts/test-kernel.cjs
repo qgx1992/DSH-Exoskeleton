@@ -57,6 +57,13 @@ app.whenReady().then(async () => {
     assert(kernelManager.getActiveVersion('9.9.9') === null, '未装版本不可激活')
     assert(kernelManager.getActiveVersion(null) === null, 'null 默认返回 null')
 
+    console.log('5.5) 存储统计（配额，阶段 C）')
+    assert(kernelManager.totalSizeBytes() > 0, 'totalSizeBytes > 0（种子已装）')
+    const q = kernelManager.quota()
+    assert(typeof q.quotaMB === 'number' && q.quotaMB > 0, 'quotaMB 有效: ' + q.quotaMB)
+    assert(typeof q.usedMB === 'number' && q.usedMB > 0, 'usedMB 有效: ' + q.usedMB)
+    assert(typeof q.diskFreeMB === 'number', 'diskFreeMB 有效: ' + q.diskFreeMB)
+
     console.log('6) 重复安装拒绝（不触发网络）')
     const dup = await kernelManager.install(ver)
     assert(!dup.ok, '重复安装被拒绝')

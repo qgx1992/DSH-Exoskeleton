@@ -22,7 +22,10 @@ const DEFAULTS: AppConfig = {
   kernelMode: 'managed',
   defaultKernelVersion: null,
   windowBounds: null,
-  windowMaximized: false
+  windowMaximized: false,
+  activeProfileId: 'default',
+  profiles: [{ id: 'default', name: '默认档案', kernelVersion: null, createdAt: Date.now() }],
+  kernelsQuotaMB: 1024
 }
 
 const ENCRYPTED_PREFIX = 'enc:'
@@ -40,15 +43,26 @@ class ConfigStore {
     try {
       if (fs.existsSync(this.file)) {
         const raw = JSON.parse(fs.readFileSync(this.file, 'utf-8'))
-        this.cache = { ...DEFAULTS, ...raw }
+        this.cache = this.normalize({ ...DEFAULTS, ...raw })
       } else {
-        this.cache = { ...DEFAULTS }
+        this.cache = this.normalize({ ...DEFAULTS })
         this.persist()
       }
     } catch (err) {
       logger.warn('config load failed, using defaults', err)
-      this.cache = { ...DEFAULTS }
+      this.cache = this.normalize({ ...DEFAULTS })
     }
+  }
+
+  /** 兼容老配置：补全 profile 列表，修复无效 activeProfileId（阶段 C） */
+  private normalize(cfg: AppConfig): AppConfig {
+    if (!Array.isArray(cfg.profiles) || cfg.profiles.length === 0) {
+      cfg.profiles = [{ id: 'default', name: '默认档案', kernelVersion: null, createdAt: Date.now() }]
+    }
+    if (!cfg.profiles.some((p) => p.id === cfg.activeProfileId)) {
+      cfg.activeProfileId = cfg.profiles[0].id
+    }
+    return cfg
   }
 
   private persist(): void {
@@ -60,12 +74,19 @@ class ConfigStore {
     }
   }
 
+  /** 惰性初始化：任何调用都保证 userData 路径就绪（独立 bundle/测试环境未调 init 也能持久化） */
+  private ensureInit(): void {
+    if (!this.file) this.init()
+  }
+
   get(): AppConfig {
+    this.ensureInit()
     if (!this.cache) this.load()
     return { ...(this.cache as AppConfig) }
   }
 
   set(patch: Partial<AppConfig>): AppConfig {
+    this.ensureInit()
     const next = { ...this.get(), ...patch }
     // apiKey 使用 OS 级加密存储（Windows DPAPI / macOS Keychain），避免明文落盘
     if (patch.apiKey !== undefined) {
@@ -86,6 +107,7 @@ class ConfigStore {
 
   /** 读取解密后的 apiKey（P1 首次启动引导使用） */
   getApiKey(): string {
+    this.ensureInit()
     const key = this.get().apiKey
     if (!key) return ''
     if (key.startsWith(ENCRYPTED_PREFIX)) {
@@ -105,6 +127,7 @@ class ConfigStore {
   }
 
   getFile(): string {
+    this.ensureInit()
     return this.file
   }
 }

@@ -13,6 +13,8 @@ import { checkSetupStatus, saveApiKey } from './setup'
 import { backupManager } from './backup'
 import { listInstalled, listCatalog, installPlugin, uninstallPlugin } from './plugins'
 import { kernelManager } from './kernel-manager'
+import { runtimeManager } from './runtime-manager'
+import { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } from './profiles'
 import type { AppConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -52,6 +54,32 @@ export function registerIpcHandlers(): void {
       await dshManager.restart()
     }
     return { ok: cfg.kernelMode === mode }
+  })
+  ipcMain.handle('kernels:checkUpdate', () => kernelManager.checkUpdate())
+  ipcMain.handle('kernels:quota', () => kernelManager.quota())
+
+  // ---------- 内置 Node 运行时（阶段 B）----------
+  ipcMain.handle('runtime:status', () => runtimeManager.status())
+  ipcMain.handle('runtime:download', () => runtimeManager.download())
+  ipcMain.handle('runtime:remove', () => runtimeManager.remove())
+
+  // ---------- 配置档案（阶段 C：多 Profile + 内核版本绑定）----------
+  ipcMain.handle('profiles:list', () => listProfiles())
+  ipcMain.handle('profiles:create', (_e, name: string) => createProfile(name))
+  ipcMain.handle('profiles:delete', (_e, id: string) => deleteProfile(id))
+  ipcMain.handle('profiles:activate', async (_e, id: string) => {
+    const r = activateProfile(id)
+    if (r.ok && dshManager.getState().status === 'running') {
+      await dshManager.restart()
+    }
+    return r
+  })
+  ipcMain.handle('profiles:setKernel', async (_e, id: string, version: string | null) => {
+    const r = setProfileKernel(id, version)
+    if (r.ok && configStore.get().activeProfileId === id && dshManager.getState().status === 'running') {
+      await dshManager.restart()
+    }
+    return r
   })
 
   // ---------- DSH 管理 ----------
