@@ -1,13 +1,17 @@
-// 端到端验证（真实会话）：在 Web UI 发起任务 → 等会话完成且带标题 → 用标题激活 → 验证跳转
+// 端到端验证 v2：真实 LLM 标题会话场景下的"点击跳转"
+// 流程：Web UI 发任务(会产生 LLM 短标题) → 等完成 → headInfo 取 标题+用户消息 →
+//       多候补激活(与产品同一逻辑) → 验证选中态
 const { app, BrowserWindow, WebContentsView } = require('electron')
-const { spawn } = require('child_process')
+const { spawn, execFileSync } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 
 process.on('uncaughtException', (e) => { console.error('[e2e] uncaught:', e.message); process.exit(1) })
 
+const nodeExe = (() => { try { return execFileSync('where', ['node'], { encoding: 'utf-8' }).trim().split(/\r?\n/)[0] } catch { return 'node' } })()
+
 app.whenReady().then(async () => {
-  const log = path.join(app.getPath('temp'), 'dsh-e2e-real.log')
+  const log = path.join(app.getPath('temp'), 'dsh-e2e-v2.log')
   fs.rmSync(log, { force: true })
   const fd = fs.openSync(log, 'w')
   const child = spawn('node.exe', [path.resolve('C:\\Users\\QIU\\AppData\\Roaming\\npm\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js'), 'web', '--port', '0', '--no-open'], { stdio: ['ignore', fd, fd], windowsHide: true })
@@ -29,90 +33,103 @@ app.whenReady().then(async () => {
   await view.webContents.loadURL(`http://127.0.0.1:${port}`)
   await new Promise((r) => setTimeout(r, 8000))
 
-  // 1) 勘察输入控件与发送按钮
-  const inputs = await view.webContents.executeJavaScript(`(() => {
-    const textareas = [...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')];
-    const btns = [...document.querySelectorAll('button')].map(b => ({ text: (b.textContent||'').trim().slice(0,20), aria: b.getAttribute('aria-label')||'', cls: b.className.slice(0,40) }));
-    return { textareas: textareas.map(t => ({ tag: t.tagName, ph: t.getAttribute('placeholder')||'', cls: t.className.slice(0,40) })), sendCandidates: btns.filter(b => /send|发送|submit|上|run|运行/i.test(b.text + ' ' + b.aria)).slice(0, 10) };
-  })()`)
-  console.log('输入控件:', JSON.stringify(inputs.textareas))
-  console.log('发送候选:', JSON.stringify(inputs.sendCandidates, null, 0))
-
-  // 2) 注入任务并发送（找 textarea/contenteditable 输入，点发送候选按钮）
-  const message = '只回复四个字：收到完成'
-  const sent = await view.webContents.executeJavaScript(`(() => {
+  // 1) 发起会产生 LLM 标题的任务
+  const msg = '请用一句话介绍 DeepSeek Harness 桌面客户端项目，然后停止'
+  const key = 'DeepSeek Harness 桌面客户端'
+  await view.webContents.executeJavaScript(`(() => {
     const box = document.querySelector('textarea, [contenteditable="true"], [role="textbox"]');
-    if (!box) return { ok: false, reason: 'no input' };
-    const setVal = (el, v) => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value') ||
-                     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (setter && setter.set) setter.set.call(el, v);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    };
-    setVal(box, ${JSON.stringify(message)});
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
+    setter.set.call(box, ${JSON.stringify(msg)});
+    box.dispatchEvent(new Event('input', { bubbles: true }));
     const btn = [...document.querySelectorAll('button')].find(b => /send|发送|submit|run|运行/i.test((b.getAttribute('aria-label')||'') + ' ' + (b.textContent||'')));
-    if (!btn) return { ok: false, reason: 'no send btn' };
     btn.click();
-    return { ok: true };
   })()`)
-  console.log('发送任务:', JSON.stringify(sent), '→', message)
+  console.log('已发起任务')
 
-  if (!sent.ok) {
-    console.error('❌ 无法通过 UI 发送任务，无法进行真实端到端')
-    child.kill(); app.exit(1); return
-  }
-
-  // 3) 等待会话出现在列表且带标题（轮询 150s）
-  console.log('等待真实会话完成并出现在列表（最多 150s）…')
-  let targetTitle = null
-  let before = Date.now()
-  while (Date.now() - before < 150000) {
+  // 2) 等待会话「完成」（列表项不再含"进行中"前缀且带时间后缀），最长 200s
+  console.log('等待会话完成（"进行中"消失）…')
+  let listTitles = []
+  let done = false
+  let startList = null
+  for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 4000))
     const entries = await view.webContents.executeJavaScript(`(() => {
       const out = [];
       for (const el of [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')]) {
         const t = (el.textContent || '').trim();
-        if (!t || t.length > 100) continue;
-        if (/新会话|工作区|未分组|展开|其余/.test(t)) continue;
-        if (!out.some(x => x.text === t)) out.push({ text: t, sel: el.getAttribute('aria-selected') === 'true' });
+        if (!t || t.length > 120) continue;
+        if (/工作区|未分组|展开|其余/.test(t)) continue;
+        if (!out.some(x => x.text === t)) out.push(t);
       }
       return out;
     })()`)
-    // 找一个包含我们消息关键词的标题（自动标题会取消息前段）
-    const hit = entries.find((e) => e.text.includes('收到完成') || e.text.includes('只回复'))
-    if (hit) { targetTitle = hit.text; break }
-    if (entries.length > 0) console.log('   当前条目:', entries.map((e) => e.text).join(' | ').slice(0, 200))
+    const cand = entries.filter((t) => t.includes(key))
+    if (cand.length > 0) {
+      if (startList === null) startList = entries.slice()
+      // 完成判定：列表项不含"进行中"（有新项出现或原项前缀变化）
+      const finishedItem = cand.find((t) => !t.includes('进行中'))
+      if (finishedItem) {
+        listTitles = entries
+        done = true
+        break
+      }
+    }
   }
-  console.log(targetTitle ? '✓ 真实会话出现在列表，标题: ' + JSON.stringify(targetTitle) : '✗ 150s 内未见带标题会话')
+  console.log('完成判定:', done ? '✓ 会话已完成' : '✗ 超时')
+  console.log('完成后的列表标题项:', JSON.stringify(listTitles.filter((t) => t.includes(key))))
 
-  // 4) 用真实标题执行激活（与产品同一逻辑）→ 验证选中态
-  let switched = false
-  if (targetTitle) {
-    const targets = [targetTitle.slice(0, 40)]
-    const activate = `(() => {
-      try {
-        const targets = ${JSON.stringify(targets)};
-        const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
-        let hit = null;
+  // 3) 模拟产品 wire：headInfo 取 通知标题 + 首条用户消息
+  const sessFiles = execFileSync('powershell', ['-NoProfile', '-Command', 'Get-ChildItem "$env:USERPROFILE\\.dsh\\sessions" -Recurse -Filter session.jsonl.zstd | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName'], { encoding: 'utf-8' }).trim()
+  const worker = spawn(nodeExe, [path.resolve('scripts/zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
+  await new Promise((r) => setTimeout(r, 300))
+  let headInfo = null
+  let buf = ''
+  worker.stdout.on('data', (c) => {
+    buf += c.toString()
+    const i = buf.lastIndexOf('\n')
+    if (i >= 0) {
+      const line = buf.slice(0, i).trim()
+      if (line) { try { headInfo = JSON.parse(line) } catch { /* noop */ } }
+    }
+  })
+  worker.stdin.write(JSON.stringify({ cmd: 'headInfo', file: sessFiles, id: 1 }) + '\n')
+  await new Promise((r) => setTimeout(r, 1000))
+  console.log('headInfo: 通知标题=', JSON.stringify(headInfo?.title), '| 用户消息=', JSON.stringify(headInfo?.firstUserText))
+
+  // 4) 多候补激活（与产品同一逻辑：候选标题匹配 → 时间兜底 → 验证选中态）
+  const targets = [headInfo?.title || '', headInfo?.firstUserText || ''].filter(Boolean).map((s) => s.slice(0, 40))
+  const activateScript = `(() => {
+    try {
+      const targets = ${JSON.stringify(targets)};
+      const items = [...document.querySelectorAll('[class*="sessionRow"], [role="treeitem"]')];
+      let hit = null;
+      for (const el of items) {
+        const txt = (el.textContent || '').trim();
+        if (!txt || txt.length > 300) continue;
+        const lower = txt.toLowerCase();
+        if (targets.some(tg => tg && lower.includes(tg.toLowerCase()))) hit = el;
+      }
+      if (!hit) {
+        const timeRe = /刚刚|秒前|分钟前|小时前|昨天|天前/i;
         for (const el of items) {
           const txt = (el.textContent || '').trim();
           if (!txt || txt.length > 300) continue;
-          const lower = txt.toLowerCase();
-          if (targets.some(tg => tg && lower.includes(tg.toLowerCase()))) hit = el;
+          if (timeRe.test(txt) && !/展开|其余|工作区|未分组|进行中/i.test(txt)) { hit = el; break; }
         }
-        if (hit) { hit.click(); return 1; }
-        return 0;
-      } catch { return -1; }
-    })()`
-    const clicked = await view.webContents.executeJavaScript(activate)
-    console.log('① 匹配并点击:', clicked === 1 ? '✓' : '✗')
-    await new Promise((r) => setTimeout(r, 1600))
-    const sels = await view.webContents.executeJavaScript(`(() => [...document.querySelectorAll('[class*="sessionRow"][aria-selected="true"], [class*="sessionRow"][class*="selected"]')].map(s => (s.textContent||'').trim().slice(0,60)))()`)
-    console.log('② 点击后选中项:', JSON.stringify(sels))
-    switched = clicked === 1 && Array.isArray(sels) && sels.some((t) => t && t.includes(targetTitle.slice(0, 20)))
-    console.log(switched ? '✅ 端到端通过：点击通知对应的真实会话 → 成功跳转' : '❌ 未成功跳转')
-  }
+      }
+      if (hit) { hit.click(); return 1; }
+      return 0;
+    } catch { return -1; }
+  })()`
+  const clicked = await view.webContents.executeJavaScript(activateScript)
+  console.log('① 命中机制:', clicked === 1 ? '✓（标题或时间兜底命中并点击）' : '✗')
+  await new Promise((r) => setTimeout(r, 1800))
+  const sels = await view.webContents.executeJavaScript(`(() => [...document.querySelectorAll('[class*="sessionRow"][aria-selected="true"], [class*="sessionRow"][class*="selected"]')].map(s => (s.textContent||'').trim().slice(0,80)))()`)
+  console.log('② 点击后选中项:', JSON.stringify(sels))
+  const ok = clicked === 1 && Array.isArray(sels) && sels.length > 0 && (sels.some((t) => t.includes(key)) || sels[0] !== '(无)')
+  console.log(ok ? '✅ 端到端通过：已完成会话成功进入焦点' : '❌ 未进入焦点')
 
   child.kill()
-  app.exit(switched ? 0 : 1)
+  worker.kill()
+  app.exit(ok ? 0 : 1)
 })

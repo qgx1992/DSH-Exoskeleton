@@ -171,7 +171,8 @@ export function wireSessionWatcher(): void {
     const body = project ? `项目「${project}」· ${title}` : title
     notify('DSH 会话完成', body, () => {
       windowManager.show()
-      windowManager.activateSessionInWebUi(title)
+      // 多候补跳转：通知标题(LLM 版) + 首条用户消息(列表显示版)，辅以"刚刚"时间兜底
+      windowManager.activateSessionInWebUi(title, head.firstUserText)
     })
   })
 }

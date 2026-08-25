@@ -15,6 +15,7 @@ interface WorkerPayload {
   turnEndMax?: number
   cwd?: string
   title?: string
+  firstUserText?: string
 }
 
 export class ZstdWorkerClient {

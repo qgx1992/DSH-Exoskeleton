@@ -120,6 +120,7 @@ function handle(req, res) {
       const records = []
       let cwd = ''
       let title = ''
+      let firstUserText = ''
       for (const fr of frames.slice(0, 16)) {
         for (const line of decompress(buf, fr).split('\n')) {
           if (!line.trim()) continue
@@ -138,11 +139,20 @@ function handle(req, res) {
                 }
               }
             }
+            // 首条用户消息（列表显示用同一来源），始终收集
+            if (!firstUserText && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
+              for (const part of j.data.content) {
+                if (part && typeof part.text === 'string' && part.text.trim()) {
+                  firstUserText = part.text.trim().slice(0, 80)
+                  break
+                }
+              }
+            }
           } catch { /* noop */ }
         }
-        if (cwd && title) break
+        if (cwd && title && firstUserText) break
       }
-      res({ ok: true, cwd, title })
+      res({ ok: true, cwd, title, firstUserText })
       return
     }
     res({ ok: false, error: 'unknown cmd: ' + req.cmd })

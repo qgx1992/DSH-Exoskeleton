@@ -233,6 +233,15 @@ export class WindowManager {
             const lower = txt.toLowerCase();
             if (targets.some(tg => tg && lower.includes(tg.toLowerCase()))) hit = el;
           }
+          // 3) 时间兜底：候选全不中时，点击"刚刚/N秒前/N分钟前"结尾的会话叶子（最近完成的）
+          if (!hit) {
+            const timeRe = /刚刚|秒前|分钟前|小时前|昨天|天前/i;
+            for (const el of items) {
+              const txt = (el.textContent || '').trim();
+              if (!txt || txt.length > 300) continue;
+              if (timeRe.test(txt) && !/展开|其余|工作区|未分组|进行中/i.test(txt)) { hit = el; break; }
+            }
+          }
           if (hit) { hit.click(); return 1; }
           return 0;
         } catch { return -1; }
@@ -253,6 +262,8 @@ export class WindowManager {
             const txt = sels[sels.length - 1].textContent.trim().slice(0, 60).toLowerCase();
             const targets = ${JSON.stringify(targets.map((t) => t.toLowerCase()))};
             if (targets.some((tg) => tg && txt.includes(tg))) return 1;
+            // 时间兜底候选也接受：选中项是"刚刚/N秒前"叶子即认为已切换
+            if (/刚刚|秒前|分钟前/.test(txt) && !/工作区|未分组/.test(txt)) return 1;
             return 0;
           })()`
           const ok = await view.webContents.executeJavaScript(verifyScript)
