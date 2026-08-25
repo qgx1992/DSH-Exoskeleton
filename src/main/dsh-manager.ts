@@ -109,7 +109,7 @@ export class DSHManager extends EventEmitter {
 
     // ② npm 全局安装
     try {
-      const prefix = await this.execCapture('npm', ['prefix', '-g'])
+      const prefix = await this.execCapture('npm.cmd', ['prefix', '-g'], { shell: true })
       if (prefix) {
         const binJs = path.join(prefix.trim(), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
         if (fs.existsSync(binJs)) {
@@ -193,9 +193,9 @@ export class DSHManager extends EventEmitter {
     throw new Error('未找到可用的 Node.js 运行时。请安装 Node.js，或在「内核」面板一键下载内置运行时。')
   }
 
-  private execCapture(cmd: string, args: string[]): Promise<string | null> {
+  private execCapture(cmd: string, args: string[], opts: { shell?: boolean } = {}): Promise<string | null> {
     return new Promise((resolvePromise) => {
-      execFile(cmd, args, { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+      execFile(cmd, args, { windowsHide: true, timeout: 10_000, shell: opts.shell ?? false }, (err, stdout) => {
         if (err) {
           resolvePromise(null)
           return
