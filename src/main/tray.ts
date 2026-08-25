@@ -10,6 +10,7 @@ import { windowManager } from './window-manager'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
 import { updater } from './updater'
+import { kernelManager } from './kernel-manager'
 
 let tray: Tray | null = null
 
@@ -72,26 +73,50 @@ export function rebuildMenu(): void {
     {
       label: '检查更新…',
       click: async () => {
-        const info = await updater.check(true)
-        if (info.available && info.latest) {
-          const r = await dialog.showMessageBox(windowManager.getWindow()!, {
-            type: 'info',
-            title: '发现新版本',
-            message: `发现新版本 ${info.latest}（当前 ${info.current}）`,
-            detail: '是否前往发布页下载？',
-            buttons: ['前往下载', '取消'],
-            defaultId: 0,
-            cancelId: 1
-          })
-          if (r.response === 0 && info.url) void shell.openExternal(info.url)
-        } else {
-          await dialog.showMessageBox(windowManager.getWindow()!, {
+        // #4：合并检查应用更新（electron-updater/GitHub API）+ 内核更新（npm dist-tags）
+        const [appInfo, kernelInfo] = await Promise.all([updater.check(true), kernelManager.checkUpdate()])
+        const win = windowManager.getWindow()
+        if (!win) return
+        const parts: string[] = []
+        if (appInfo.available && appInfo.latest) {
+          parts.push('应用新版本 v' + appInfo.latest + '（当前 v' + appInfo.current + '）')
+        }
+        if (kernelInfo.available && kernelInfo.latest) {
+          parts.push('内核新版本 v' + kernelInfo.latest + '（当前 v' + (kernelInfo.current ?? '系统 dsh') + '）')
+        }
+        if (parts.length === 0) {
+          await dialog.showMessageBox(win, {
             type: 'info',
             title: '检查更新',
-            message: `当前已是最新版本 ${info.current}`,
+            message: '当前已是最新（应用 v' + appInfo.current + '）',
+            detail: kernelInfo.error ? '内核版本检测失败：' + kernelInfo.error : undefined,
             buttons: ['好的']
           })
+          return
         }
+        const buttons: string[] = ['取消']
+        const actions: Array<() => void> = [() => { /* noop */ }]
+        if (appInfo.available && appInfo.url) {
+          buttons.unshift('前往下载应用')
+          actions.unshift(() => void shell.openExternal(appInfo.url as string))
+        }
+        if (kernelInfo.available) {
+          buttons.unshift('打开内核面板')
+          actions.unshift(() => {
+            windowManager.show()
+            windowManager.setAdminPanelVisible(true)
+          })
+        }
+        const r = await dialog.showMessageBox(win, {
+          type: 'info',
+          title: '发现更新',
+          message: '发现以下更新：\n· ' + parts.join('\n· '),
+          detail: '应用更新需前往发布页下载安装；内核更新可在内核面板一键升级。',
+          buttons,
+          defaultId: 0,
+          cancelId: buttons.length - 1
+        })
+        if (r.response >= 0 && r.response < actions.length) actions[r.response]()
       }
     },
     {

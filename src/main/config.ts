@@ -25,7 +25,8 @@ const DEFAULTS: AppConfig = {
   windowMaximized: false,
   activeProfileId: 'default',
   profiles: [{ id: 'default', name: '默认档案', kernelVersion: null, createdAt: Date.now() }],
-  kernelsQuotaMB: 1024
+  kernelsQuotaMB: 1024,
+  kernelRegistry: ''
 }
 
 const ENCRYPTED_PREFIX = 'enc:'

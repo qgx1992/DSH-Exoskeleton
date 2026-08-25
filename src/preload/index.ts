@@ -41,7 +41,7 @@ const api: DesktopApi = {
   kernels: {
     installed: () => ipcRenderer.invoke('kernels:installed'),
     available: () => ipcRenderer.invoke('kernels:available'),
-    install: (version) => ipcRenderer.invoke('kernels:install', version),
+    install: (version, registry) => ipcRenderer.invoke('kernels:install', version, registry),
     uninstall: (version) => ipcRenderer.invoke('kernels:uninstall', version),
     setDefault: (version) => ipcRenderer.invoke('kernels:setDefault', version),
     setMode: (mode) => ipcRenderer.invoke('kernels:setMode', mode),

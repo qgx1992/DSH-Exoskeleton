@@ -33,10 +33,14 @@ export function KernelsTab(): React.JSX.Element {
   // 阶段 C：磁盘配额
   const [quota, setQuota] = useState<KernelQuota | null>(null)
   const [quotaInput, setQuotaInput] = useState('')
+  // #5：内核安装源（空 = 官方 npmjs）
+  const [registry, setRegistry] = useState('')
 
   const refresh = useCallback(async () => {
     setInstalled(await window.dshDesktop.kernels.installed())
-    setCfg(await window.dshDesktop.config.get())
+    const c = await window.dshDesktop.config.get()
+    setCfg(c)
+    setRegistry(c.kernelRegistry ?? '')
     setRuntime(await window.dshDesktop.runtime.status())
     setQuota(await window.dshDesktop.kernels.quota())
   }, [])
@@ -83,12 +87,19 @@ export function KernelsTab(): React.JSX.Element {
     if (!selected) return
     setInstalling(selected)
     setMessage(null)
-    const r = await window.dshDesktop.kernels.install(selected)
+    const r = await window.dshDesktop.kernels.install(selected, registry || undefined)
     if (!r.ok) {
       setInstalling(null)
       setMessage({ type: 'err', text: r.error ?? '安装失败' })
     }
     // 成功时由 progress(done) 事件收尾
+  }
+
+  /** 保存安装源（#5） */
+  const saveRegistry = async (v: string): Promise<void> => {
+    setRegistry(v)
+    await window.dshDesktop.config.set({ kernelRegistry: v })
+    setMessage({ type: 'ok', text: v ? '安装源已切换为 ' + v : '安装源已切换为官方 npmjs' })
   }
 
   const setDefault = async (v: string | null): Promise<void> => {
@@ -124,7 +135,7 @@ export function KernelsTab(): React.JSX.Element {
     if (!latest) return
     setInstalling(latest)
     setMessage(null)
-    const r = await window.dshDesktop.kernels.install(latest)
+    const r = await window.dshDesktop.kernels.install(latest, registry || undefined)
     if (!r.ok) {
       setInstalling(null)
       setMessage({ type: 'err', text: r.error ?? '升级失败' })
@@ -396,6 +407,19 @@ export function KernelsTab(): React.JSX.Element {
           >
             {installing !== null ? '安装中…' : '安装'}
           </button>
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-[12px] text-slate-500">安装源</span>
+          <select
+            value={registry}
+            onChange={(e) => void saveRegistry(e.target.value)}
+            disabled={installing !== null}
+            className="w-72 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-[12px] text-slate-100 outline-none focus:border-amber-400 disabled:opacity-50"
+          >
+            <option value="">官方 npmjs（默认）</option>
+            <option value="https://registry.npmmirror.com">npmmirror（国内加速）</option>
+          </select>
+          <span className="text-[11px] text-slate-600">保存后后续安装/升级均使用该源</span>
         </div>
 
         {progress && (

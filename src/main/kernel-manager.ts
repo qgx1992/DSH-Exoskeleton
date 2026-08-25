@@ -192,26 +192,36 @@ export class KernelManager extends EventEmitter {
    * 依赖安装器：优先 node 直接运行 JS 入口（避免 .cmd/.bat 的 cmd.exe 引号问题）：
    * 1) Node 内置 corepack pnpm → 2) 系统 pnpm 的 pnpm.cjs → 3) npm-cli.js
    */
+  /**
+   * 依赖安装器：优先 node 直接运行 JS 入口（避免 .cmd/.bat 的 cmd.exe 引号问题）：
+   * 1) Node 内置 corepack pnpm → 2) 系统 pnpm 的 pnpm.cjs → 3) npm-cli.js
+   * 缓存/存储定向到内核仓库（#3：pnpm store 内容寻址跨版本复用，不污染 %LOCALAPPDATA%\pnpm）
+   */
   private installCommand(registry: string): { command: string; args: string[] } | null {
     const nodeExe = this.nodeExe
     if (!nodeExe) return null
 
+    const storeDir = path.join(this.kernelsDir, '.pnpm-store')
+    const npmCacheDir = path.join(this.kernelsDir, '.npm-cache')
+    fs.mkdirSync(storeDir, { recursive: true })
+    fs.mkdirSync(npmCacheDir, { recursive: true })
+
     const corepackPnpm = path.join(path.dirname(nodeExe), 'node_modules', 'corepack', 'dist', 'pnpm.js')
     if (fs.existsSync(corepackPnpm)) {
-      return { command: nodeExe, args: [corepackPnpm, 'install', '--prod', '--registry', registry] }
+      return { command: nodeExe, args: [corepackPnpm, 'install', '--prod', '--registry', registry, '--store-dir', storeDir] }
     }
     const pnpmCmd = this.findCommand('pnpm.cmd') ?? this.findCommand('pnpm')
     if (pnpmCmd) {
       const entry = path.join(path.dirname(pnpmCmd), 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
       if (fs.existsSync(entry)) {
-        return { command: nodeExe, args: [entry, 'install', '--prod', '--registry', registry] }
+        return { command: nodeExe, args: [entry, 'install', '--prod', '--registry', registry, '--store-dir', storeDir] }
       }
     }
     const npmCli = this.findNpmCli(nodeExe)
     if (npmCli) {
-      return { command: nodeExe, args: [npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', '--registry', registry] }
+      return { command: nodeExe, args: [npmCli, 'install', '--omit=dev', '--no-audit', '--no-fund', '--no-package-lock', '--cache', npmCacheDir, '--registry', registry] }
     }
-    return { command: 'npm.cmd', args: ['install', '--omit=dev', '--no-audit', '--no-fund', '--registry', registry] }
+    return { command: 'npm.cmd', args: ['install', '--omit=dev', '--no-audit', '--no-fund', '--cache', npmCacheDir, '--registry', registry] }
   }
 
   private run(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
@@ -297,12 +307,17 @@ export class KernelManager extends EventEmitter {
 
       const installer = this.installCommand(registryRoot)
       if (!installer) throw new Error('未找到可用的包管理器（pnpm/npm）')
-      const r = await this.run(installer.command, installer.args, { cwd: kernelDir })
+      let r = await this.run(installer.command, installer.args, { cwd: kernelDir })
       // pnpm 10+ 默认忽略依赖 build scripts，并以 exit 1 + ERR_PNPM_IGNORED_BUILDS 提示——
       // 原生模块（node-pty/koffi/sharp）由平台包 prebuilt 提供，build script 仅为 fallback，忽略不等于失败
-      const ignoredBuilds = /ERR_PNPM_IGNORED_BUILDS|IGNORED_BUILDS/i.test(r.stderr + ' ' + r.stdout)
-      if (r.code !== 0 && !ignoredBuilds) {
-        throw new Error('依赖安装失败（exit ' + r.code + '）：' + (r.stderr || r.stdout).slice(0, 800))
+      if (r.code !== 0 && !isIgnoredBuilds(r)) {
+        // 网络瞬断等偶发失败：自动重试一次（同参数）
+        logger.warn('kernel deps install failed, retrying once', { version, code: r.code })
+        this.emitProgress({ version, stage: 'installing', percent: 40, message: '依赖安装失败，自动重试…' })
+        r = await this.run(installer.command, installer.args, { cwd: kernelDir })
+        if (r.code !== 0 && !isIgnoredBuilds(r)) {
+          throw new Error('依赖安装失败（exit ' + r.code + '）：' + (r.stderr || r.stdout).slice(0, 800))
+        }
       }
       this.emitProgress({ version, stage: 'installing', percent: 90, message: '自检内核…' })
 
@@ -465,6 +480,11 @@ function dirSizeSync(dir: string): number {
   return s
 }
 
+
+/** pnpm10 忽略 build scripts 提示（exit 1 但依赖已安装成功） */
+function isIgnoredBuilds(r: { code: number | null; stdout: string; stderr: string }): boolean {
+  return /ERR_PNPM_IGNORED_BUILDS|IGNORED_BUILDS/i.test(r.stderr + ' ' + r.stdout)
+}
 
 /** 简单 semver 比较：返回 a>b ? 1 : a<b ? -1 : 0（prerelease 视为低于同 base 稳定版） */
 function compareVersions(a: string, b: string): number {

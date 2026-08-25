@@ -54,6 +54,8 @@ export interface AppConfig {
   profiles: DshProfile[]
   /** 内核仓库磁盘配额（MB，0 = 不限制） */
   kernelsQuotaMB: number
+  /** 内核安装 registry 根（空 = 官方 npmjs；如 https://registry.npmmirror.com 加速国内） */
+  kernelRegistry: string
 }
 
 /** 托管 DSH 内核（多版本共存）信息 */
@@ -231,7 +233,8 @@ export interface DesktopApi {
   kernels: {
     installed: () => Promise<KernelInfo[]>
     available: () => Promise<KernelRemoteVersion[]>
-    install: (version: string) => Promise<SaveResult>
+    /** registryOverride：内核安装 registry 根（空 = 官方 npmjs） */
+    install: (version: string, registry?: string) => Promise<SaveResult>
     uninstall: (version: string) => Promise<SaveResult>
     setDefault: (version: string | null) => Promise<SaveResult>
     setMode: (mode: 'managed' | 'system') => Promise<SaveResult>

@@ -38,7 +38,7 @@ export function registerIpcHandlers(): void {
   // ---------- 内核管理（多版本共存）----------
   ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())
   ipcMain.handle('kernels:available', () => kernelManager.listAvailable())
-  ipcMain.handle('kernels:install', (_e, version: string) => kernelManager.install(version))
+  ipcMain.handle('kernels:install', (_e, version: string, registry?: string) => kernelManager.install(version, registry))
   ipcMain.handle('kernels:uninstall', (_e, version: string) => kernelManager.uninstall(version))
   ipcMain.handle('kernels:setDefault', async (_e, version: string | null) => {
     const cfg = configStore.set({ defaultKernelVersion: version })
