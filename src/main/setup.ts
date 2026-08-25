@@ -13,6 +13,7 @@ import {
   parseRefs,
   isValidApiKey,
   editCredentialsText,
+  removeCredentialsText,
   readCredentialsFile
 } from '../shared/credentials'
 
@@ -73,6 +74,22 @@ export function saveApiKey(key: string): { ok: boolean; error?: string } {
     return { ok: true }
   } catch (err) {
     logger.error('save api key failed', err)
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** 清除 API Key（从 credentials.yaml 移除 DEEPSEEK_API_KEY；文件不存在视为已清除） */
+export function clearApiKey(): { ok: boolean; error?: string } {
+  const file = credentialsFile()
+  try {
+    const existing = readCredentialsFile(file)
+    if (existing === null) return { ok: true }
+    const next = removeCredentialsText(existing, CREDENTIALS_ENV)
+    fs.writeFileSync(file, next, 'utf-8')
+    logger.info('api key cleared', { file })
+    return { ok: true }
+  } catch (err) {
+    logger.error('clear api key failed', err)
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

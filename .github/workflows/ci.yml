@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache electron binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            %LOCALAPPDATA%\electron\Cache
+            %LOCALAPPDATA%\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # test-kernel.cjs 的离线种子克隆依赖全局安装的 @deepseek-ai/dsh
+      - name: Install global dsh (test seed)
+        run: npm install -g @deepseek-ai/dsh@0.1.1-rc.2
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build

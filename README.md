@@ -22,7 +22,6 @@
 | 内核管理（阶段 A/B/C） | DSH 多版本共存：安装/默认路由/卸载 + 内置 Node 运行时（零门槛）+ 内核更新检测与一键升级 + 多 Profile 内核绑定 + 磁盘配额 |
 | 数据复用 | DSH_HOME 环境变量优先，否则 `%USERPROFILE%\.dsh` |
 | 安全隔离 | 仅监听 `127.0.0.1`、渲染进程沙箱、`contextIsolation`、禁用 Node 集成 |
-| 自动更新（P2 占位） | 检查 DeepSeek Harness 官方最新 Release，引导下载 |
 
 ## 技术栈
 
@@ -76,8 +75,8 @@ npm run dist
 ## 打包产物
 
 ```
-dist/DSH-Exoskeleton-Setup-0.1.0.exe          # NSIS 安装器
-dist/DSH-Exoskeleton-Portable-0.1.0.exe       # 单文件便携版
+dist/DSH-Exoskeleton-Setup-0.6.1.exe          # NSIS 安装器
+dist/DSH-Exoskeleton-Portable-0.6.1.exe       # 单文件便携版
 dist/win-unpacked/                            # 免安装绿色版文件夹
 ```
 

@@ -214,6 +214,7 @@ export interface DesktopApi {
   setup: {
     check: () => Promise<SetupStatus>
     save: (apiKey: string) => Promise<SaveResult>
+    clear: () => Promise<SaveResult>
   }
   backup: {
     list: () => Promise<BackupInfo[]>

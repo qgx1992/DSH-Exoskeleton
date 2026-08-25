@@ -102,6 +102,35 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/** 在 credentials 文件文本中移除指定 env 的 key（保留其余内容）；refs 块为空时一并清理 */
+export function removeCredentialsText(text: string, env: string): string {
+  const lines = text.split(/\r?\n/)
+  const out: string[] = []
+  let inRefs = false
+  let refsEmpty = true
+  for (const line of lines) {
+    if (/^refs:\s*$/i.test(line.trimEnd())) {
+      inRefs = true
+      out.push(line)
+      continue
+    }
+    if (inRefs) {
+      if (line.length > 0 && /^\S/.test(line) && !/^\s/.test(line)) {
+        inRefs = false
+      } else {
+        const m = line.match(new RegExp('^(\\s{2})' + escapeRegExp(env) + ':\\s*(.*)$'))
+        if (m) continue // 跳过目标行
+        if (/\S/.test(line) && !/^\s*#/.test(line)) refsEmpty = false
+      }
+    }
+    out.push(line)
+  }
+  // refs 块空 → 移除 refs 行
+  const joined = out.filter((l) => !(refsEmpty && /^refs:\s*$/i.test(l.trimEnd())))
+  while (joined.length && joined[joined.length - 1].trim() === '') joined.pop()
+  return joined.join('\n') + (joined.length ? '\n' : '')
+}
+
 /** 读取凭据文件（不存在返回 null） */
 export function readCredentialsFile(file: string): string | null {
   try {

@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
-import type { AppConfig } from '../../../shared/types'
+import type { AppConfig, SetupStatus } from '../../../shared/types'
 
 export function SettingsTab(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
   const [saved, setSaved] = useState(false)
   const [portInput, setPortInput] = useState('')
   const [dshHomeInput, setDshHomeInput] = useState('')
+  // API Key 管理
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
+  const [keyInput, setKeyInput] = useState('')
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [keyMsg, setKeyMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   useEffect(() => {
     void window.dshDesktop.config.get().then((c) => {
@@ -13,6 +18,7 @@ export function SettingsTab(): React.JSX.Element {
       setPortInput(String(c.port))
       setDshHomeInput(c.dshHome)
     })
+    void window.dshDesktop.setup.check().then(setSetupStatus)
   }, [])
 
   const save = async (patch: Partial<AppConfig>): Promise<void> => {
@@ -20,6 +26,32 @@ export function SettingsTab(): React.JSX.Element {
     setCfg(next)
     setSaved(true)
     setTimeout(() => setSaved(false), 1500)
+  }
+
+  const refreshSetup = async (): Promise<void> => {
+    setSetupStatus(await window.dshDesktop.setup.check())
+  }
+
+  const saveKey = async (): Promise<void> => {
+    setKeyBusy(true)
+    setKeyMsg(null)
+    const r = await window.dshDesktop.setup.save(keyInput.trim())
+    setKeyBusy(false)
+    setKeyMsg(r.ok ? { type: 'ok', text: '✓ API Key 已保存到本地凭据文件' } : { type: 'err', text: r.error ?? '保存失败' })
+    if (r.ok) {
+      setKeyInput('')
+      await refreshSetup()
+    }
+  }
+
+  const clearKey = async (): Promise<void> => {
+    if (!window.confirm('清除已保存的 API Key？')) return
+    setKeyBusy(true)
+    setKeyMsg(null)
+    const r = await window.dshDesktop.setup.clear()
+    setKeyBusy(false)
+    setKeyMsg(r.ok ? { type: 'ok', text: 'API Key 已清除' } : { type: 'err', text: r.error ?? '清除失败' })
+    await refreshSetup()
   }
 
   if (!cfg) {
@@ -119,13 +151,77 @@ export function SettingsTab(): React.JSX.Element {
         {saved && <div className="mt-4 text-[12px] text-emerald-400">✓ 已保存</div>}
       </section>
 
-      {/* API Key 说明（P1 首次启动引导） */}
+      {/* API Key 管理（P1） */}
       <section className="rounded-xl border border-slate-800/70 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">API Key（开发中）</h3>
+        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">API Key</h3>
         <p className="mt-2 text-[13px] leading-relaxed text-slate-400">
-          DeepSeek API Key 配置与首次启动引导向导将在 P1 阶段提供。Key 仅保存在本地（系统级加密），
-          不联网上传。当前阶段可在 ~/.dsh 中按官方方式配置。
+          DeepSeek API Key 仅保存在本地凭据文件（<code className="rounded bg-slate-800 px-1 py-px font-mono text-[11px] text-amber-300">~/.dsh/.credentials.yaml</code>），不联网上传。
         </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[11px] ${
+              setupStatus?.configured
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-slate-700 bg-slate-800 text-slate-400'
+            }`}
+          >
+            {setupStatus ? (setupStatus.configured ? '✓ 已配置' : '未配置') : '检测中…'}
+          </span>
+          {setupStatus?.malformed && (
+            <span className="rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] text-red-300">凭据文件解析异常</span>
+          )}
+          {setupStatus && setupStatus.refs.length > 0 && (
+            <span className="text-[11px] text-slate-500">已检测变量：{setupStatus.refs.join('、')}</span>
+          )}
+        </div>
+
+        <div className="mt-3 flex gap-2">
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void saveKey()
+            }}
+            placeholder="输入新的 API Key（sk-...）"
+            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-[13px] text-slate-100 outline-none focus:border-cyan-500"
+          />
+          <button
+            onClick={() => void saveKey()}
+            disabled={!keyInput.trim() || keyBusy}
+            className="shrink-0 rounded-lg bg-cyan-500 px-4 py-1.5 text-[13px] font-medium text-slate-950 hover:bg-cyan-400 disabled:opacity-50"
+          >
+            {keyBusy ? '保存中…' : '保存'}
+          </button>
+          {setupStatus?.configured && (
+            <button
+              onClick={() => void clearKey()}
+              disabled={keyBusy}
+              className="shrink-0 rounded-lg bg-slate-800 px-4 py-1.5 text-[13px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+            >
+              清除
+            </button>
+          )}
+        </div>
+
+        {keyMsg && (
+          <div
+            className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
+              keyMsg.type === 'ok'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                : 'border-red-500/30 bg-red-500/10 text-red-300'
+            }`}
+          >
+            {keyMsg.text}
+          </div>
+        )}
+
+        {setupStatus && (
+          <div className="mt-2 text-[11px] text-slate-600">
+            凭据文件：<code className="font-mono">{setupStatus.file}</code>
+          </div>
+        )}
       </section>
     </div>
   )

@@ -9,6 +9,7 @@ import {
   parseRefs,
   isValidApiKey,
   editCredentialsText,
+  removeCredentialsText,
   readCredentialsFile
 } from '../src/shared/credentials.ts'
 
@@ -72,6 +73,16 @@ text = editCredentialsText(fs.readFileSync(file, 'utf-8'), 'DEEPSEEK_API_KEY', '
 const s7 = parseRefs(text)
 assert(s7.refs['DEEPSEEK_API_KEY'] === 'sk-tail-1', '追加成功')
 assert(text.includes('random: top-level'), '顶层内容保留')
+
+console.log('8.5) removeCredentialsText 清除')
+const before = 'version: 1\nrefs:\n  TAVILY_API_KEY: tvly-keep\n  DEEPSEEK_API_KEY: sk-remove-me\n'
+const after = removeCredentialsText(before, 'DEEPSEEK_API_KEY')
+const s85 = parseRefs(after)
+assert(s85.refs['DEEPSEEK_API_KEY'] === undefined, '目标 key 已移除')
+assert(s85.refs['TAVILY_API_KEY'] === 'tvly-keep', '其他 refs 保留')
+const only = removeCredentialsText('version: 1\nrefs:\n  DEEPSEEK_API_KEY: sk-only\n', 'DEEPSEEK_API_KEY')
+assert(!only.includes('refs:'), 'refs 块为空时一并清理')
+assert(only.trim() === 'version: 1', '顶层保留: ' + JSON.stringify(only.trim()))
 
 console.log('8) malformed 检测')
 const mal = parseRefs('version: 1\nrefs:\n  奇怪内容在这里\n')

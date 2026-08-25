@@ -23,7 +23,8 @@ const api: DesktopApi = {
   },
   setup: {
     check: () => ipcRenderer.invoke('setup:check'),
-    save: (apiKey) => ipcRenderer.invoke('setup:save', apiKey)
+    save: (apiKey) => ipcRenderer.invoke('setup:save', apiKey),
+    clear: () => ipcRenderer.invoke('setup:clear')
   },
   backup: {
     list: () => ipcRenderer.invoke('backup:list'),

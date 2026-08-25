@@ -9,7 +9,7 @@ import { dshManager } from './dsh-manager'
 import { windowManager } from './window-manager'
 import { updater } from './updater'
 import { rebuildMenu } from './tray'
-import { checkSetupStatus, saveApiKey } from './setup'
+import { checkSetupStatus, saveApiKey, clearApiKey } from './setup'
 import { backupManager } from './backup'
 import { listInstalled, listCatalog, installPlugin, uninstallPlugin } from './plugins'
 import { kernelManager } from './kernel-manager'
@@ -21,6 +21,7 @@ export function registerIpcHandlers(): void {
   // ---------- 首次启动引导 ----------
   ipcMain.handle('setup:check', () => checkSetupStatus())
   ipcMain.handle('setup:save', (_e, apiKey: string) => saveApiKey(apiKey))
+  ipcMain.handle('setup:clear', () => clearApiKey())
 
   // ---------- 备份与回滚（§4.3.4）----------
   ipcMain.handle('backup:list', () => backupManager.list())
