@@ -24,6 +24,8 @@ export class WindowManager {
   private viewUrl: string | null = null
   private isQuitting = false
   private geometryTimer: NodeJS.Timeout | null = null
+  /** 管理面板是否打开（打开时隐藏 DSH Web UI 视图） */
+  private adminPanelVisible = false
 
   getWindow(): BrowserWindow | null {
     return this.win
@@ -170,6 +172,8 @@ export class WindowManager {
       return { action: 'deny' }
     })
     this.view.webContents.loadURL(url)
+    // 管理面板打开时保持隐藏（服务重启重挂载后不打断面板）
+    this.view.setVisible(!this.adminPanelVisible)
     // 焦点跟随：点击 DSH 页面时聚焦（保证输入可用）
     this.view.webContents.on('focus', () => this.view?.webContents.focus())
     this.layoutView()
@@ -197,6 +201,20 @@ export class WindowManager {
 
   getViewUrl(): string | null {
     return this.viewUrl
+  }
+
+  /** 显示/隐藏管理面板：打开时隐藏 DSH Web UI 视图，关闭时恢复显示 */
+  setAdminPanelVisible(visible: boolean): void {
+    this.adminPanelVisible = visible
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.setVisible(!visible)
+      if (!visible) {
+        this.view.webContents.focus()
+      }
+      logger.info('admin panel visibility', { visible, hasDshView: true })
+    } else {
+      logger.info('admin panel visibility', { visible, hasDshView: false })
+    }
   }
 
   /**

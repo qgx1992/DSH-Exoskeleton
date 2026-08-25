@@ -12,6 +12,8 @@ export default function App(): React.JSX.Element {
   const [appVersion, setAppVersion] = useState('')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
+  /** 管理面板（Dashboard）是否打开：打开时主进程隐藏 DSH Web UI 视图 */
+  const [adminPanel, setAdminPanel] = useState(false)
 
   useEffect(() => {
     void api.app.getVersion().then(setAppVersion)
@@ -54,6 +56,11 @@ export default function App(): React.JSX.Element {
     await api.dsh.restart()
   }, [])
 
+  // 管理面板显隐与主进程同步（隐藏 DSH Web UI 视图）
+  useEffect(() => {
+    void api.window.setAdminPanelVisible(adminPanel)
+  }, [adminPanel])
+
   const running = dshState?.status === 'running'
 
   return (
@@ -64,10 +71,13 @@ export default function App(): React.JSX.Element {
         version={dshState?.version ?? null}
         appVersion={appVersion}
         maximized={maximized}
+        adminPanel={adminPanel}
+        onToggleAdminPanel={() => setAdminPanel((v) => !v)}
       />
-      {/* 服务运行中时，此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖 */}
+      {/* 服务运行中时，此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖；
+          管理面板打开时主进程会隐藏该视图，露出 Dashboard */}
       <div className="min-h-0 flex-1">
-        {!running ? (
+        {!running || adminPanel ? (
           <Dashboard
             state={dshState}
             onStart={handleStart}

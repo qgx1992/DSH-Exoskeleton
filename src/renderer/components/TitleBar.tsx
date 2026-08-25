@@ -7,6 +7,10 @@ interface Props {
   version: string | null
   appVersion: string
   maximized: boolean
+  /** 管理面板是否打开（打开时隐藏 DSH Web UI 视图） */
+  adminPanel: boolean
+  /** 切换管理面板显隐 */
+  onToggleAdminPanel: () => void
 }
 
 const STATUS_META: Record<DSHStatus, { label: string; color: string; pulse?: boolean }> = {
@@ -16,7 +20,7 @@ const STATUS_META: Record<DSHStatus, { label: string; color: string; pulse?: boo
   error: { label: '服务异常', color: '#ef4444' }
 }
 
-export function TitleBar({ status, port, version, appVersion, maximized }: Props): React.JSX.Element {
+export function TitleBar({ status, port, version, appVersion, maximized, adminPanel, onToggleAdminPanel }: Props): React.JSX.Element {
   const meta = STATUS_META[status] ?? STATUS_META.starting
   return (
     <header className="titlebar-drag flex h-9 shrink-0 items-center gap-3 border-b border-slate-800 bg-[#0d111a] px-3">
@@ -51,6 +55,29 @@ export function TitleBar({ status, port, version, appVersion, maximized }: Props
 
       {/* 窗口控制按钮（圆角 hover 背景，Windows 11 风格） */}
       <div className="titlebar-no-drag flex items-center">
+        <button
+          className={`flex h-7 w-11 items-center justify-center rounded-lg transition-colors ${
+            adminPanel
+              ? 'bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/20'
+              : 'text-slate-400 hover:bg-white/[0.08] hover:text-slate-100 active:bg-white/[0.14]'
+          }`}
+          title={adminPanel ? '关闭管理面板' : '打开管理面板'}
+          onClick={onToggleAdminPanel}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
         <button
           className="flex h-7 w-11 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-white/[0.08] hover:text-slate-100 active:bg-white/[0.14]"
           title="最小化"

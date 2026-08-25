@@ -103,6 +103,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('window:toggleMaximize', () => windowManager.toggleMaximize())
   ipcMain.handle('window:close', () => windowManager.getWindow()?.hide())
   ipcMain.handle('window:isMaximized', () => windowManager.isMaximized())
+  ipcMain.handle('window:setAdminPanelVisible', (_e, visible: boolean) => {
+    windowManager.setAdminPanelVisible(visible === true)
+  })
 
   // ---------- 托盘 ----------
   ipcMain.handle('tray:show', () => windowManager.show())

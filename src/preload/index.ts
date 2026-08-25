@@ -59,7 +59,8 @@ const api: DesktopApi = {
     toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
     close: () => ipcRenderer.invoke('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
-    onMaximizeChange: (callback) => subscribe('window:maximizeChange', callback)
+    onMaximizeChange: (callback) => subscribe('window:maximizeChange', callback),
+    setAdminPanelVisible: (visible) => ipcRenderer.invoke('window:setAdminPanelVisible', visible)
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
