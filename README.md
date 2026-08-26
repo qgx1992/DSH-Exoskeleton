@@ -27,6 +27,13 @@
 
 Electron + TypeScript + React + Tailwind CSS + Vite（electron-vite）+ electron-builder
 
+## 架构总览
+
+![DSH-Exoskeleton 架构](docs/dsh-architecture-preview.png)
+
+> 可交互动画版：[查看架构图（GitHub Pages）](https://qgx1992.github.io/DSH-Exoskeleton/docs/dsh-architecture.html)
+> 未启用 Pages 时可用第三方预览：[htmlpreview](https://htmlpreview.github.io/?https://github.com/qgx1992/DSH-Exoskeleton/blob/main/docs/dsh-architecture.html)
+
 ## 目录结构
 
 ```
