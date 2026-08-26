@@ -21,6 +21,12 @@ const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
 const HEALTH_PATHS = ['/health', '/api/health', '/']
 const READY_TIMEOUT_MS = 60_000
 const RESTART_BACKOFF_MS = 3_000
+/** 崩溃重启退避上限（指数退避封顶） */
+const RESTART_BACKOFF_MAX_MS = 60_000
+/** 连续崩溃上限（达到后进入 error 等待人工干预，替代原失效的 >=10 判断） */
+const MAX_RESTARTS = 10
+/** 稳定运行超过该时长后再崩溃视为新一轮（重置崩溃计数） */
+const STABLE_RESET_MS = 60_000
 
 export class DSHManager extends EventEmitter {
   private child: ChildProcess | null = null
@@ -38,6 +44,10 @@ export class DSHManager extends EventEmitter {
   private executable: { command: string; args: string[] } | null = null
   private nodeExe: string | null = null
   private healthTimer: NodeJS.Timeout | null = null
+  /** H2: 进行中的 start()（并发防护：并发调用复用同一实例） */
+  private startInFlight: Promise<void> | null = null
+  /** H1: 最近一次进入 running 的时间（区分"稳定后崩溃"与"连续崩溃循环"） */
+  private stableSince: number | null = null
 
   getState(): DSHState {
     return {
@@ -205,13 +215,28 @@ export class DSHManager extends EventEmitter {
     })
   }
 
+  /** 并发防护入口：进行中的 start() 复用同一实例（H2） */
   async start(): Promise<void> {
+    if (this.startInFlight) {
+      logger.info('dsh start already in flight, awaiting')
+      await this.startInFlight
+      return
+    }
+    this.startInFlight = this.doStart()
+    try {
+      await this.startInFlight
+    } finally {
+      this.startInFlight = null
+    }
+  }
+
+  private async doStart(): Promise<void> {
     if (this.child && this.pid !== null && this.status !== 'stopped' && this.status !== 'error') {
       logger.info('dsh already running, skip start')
       return
     }
     this.stopping = false
-    this.restartCount = 0
+    // H1: 崩溃计数不再在此无条件重置（改为 onExit 按稳定运行时长判定），避免 >=MAX 上限失效
     this.lastError = null
     this.stdoutBuffer = ''
     this.setStatus('starting')
@@ -236,7 +261,7 @@ export class DSHManager extends EventEmitter {
       this.pid = child.pid ?? null
       this.startedAt = Date.now()
 
-      child.stdout?.on('data', (chunk: Buffer) => this.onStdout(chunk))
+      child.stdout?.on('data', (chunk: Buffer) => this.onStdout(chunk, child))
       child.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString().trim()
         if (text) logger.debug('[dsh stderr]', text)
@@ -246,7 +271,7 @@ export class DSHManager extends EventEmitter {
         logger.error('dsh spawn error', err.message)
         this.setStatus('error')
       })
-      child.on('exit', (code, signal) => this.onExit(code, signal))
+      child.on('exit', (code, signal) => this.onExit(code, signal, child))
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err)
       logger.error('dsh start failed', this.lastError)
@@ -254,7 +279,9 @@ export class DSHManager extends EventEmitter {
     }
   }
 
-  private onStdout(chunk: Buffer): void {
+  private onStdout(chunk: Buffer, child: ChildProcess): void {
+    // H2: 只处理当前代子进程的输出，忽略旧进程晚到的数据
+    if (this.child !== child) return
     this.stdoutBuffer += chunk.toString()
     // 只保留最后 4KB，防止无限增长
     if (this.stdoutBuffer.length > 8192) this.stdoutBuffer = this.stdoutBuffer.slice(-4096)
@@ -285,29 +312,39 @@ export class DSHManager extends EventEmitter {
 
   /** 健康检查：HTTP 轮询任一候选路径直到成功，期间保持 starting */
   private beginHealthCheck(port: number): void {
-    if (this.healthTimer) clearInterval(this.healthTimer)
+    // R-4: 自调度 setTimeout 链（完成后再排下一次），避免 interval 回调重叠堆积探测请求
+    if (this.healthTimer) {
+      clearTimeout(this.healthTimer)
+      this.healthTimer = null
+    }
     const deadline = Date.now() + READY_TIMEOUT_MS
-    this.healthTimer = setInterval(async () => {
-      try {
-        const ok = await this.checkHealth(port)
-        if (ok && this.status === 'starting') {
-          clearInterval(this.healthTimer!)
-          this.healthTimer = null
-          this.port = port
-          this.setStatus('running')
-          return
+    const tick = (): void => {
+      void (async () => {
+        try {
+          const ok = await this.checkHealth(port)
+          if (ok && this.status === 'starting') {
+            this.healthTimer = null
+            this.port = port
+            // H1: 记录稳定运行起点（用于崩溃循环 vs 稳定后崩溃的判定）
+            this.stableSince = Date.now()
+            this.setStatus('running')
+            return
+          }
+          if (Date.now() > deadline) {
+            this.healthTimer = null
+            this.lastError = '健康检查超时（' + READY_TIMEOUT_MS / 1000 + 's）'
+            logger.error('dsh health check timeout', { port })
+            this.setStatus('error')
+            return
+          }
+        } catch {
+          /* 轮询期间失败继续重试 */
         }
-        if (Date.now() > deadline) {
-          clearInterval(this.healthTimer!)
-          this.healthTimer = null
-          this.lastError = `健康检查超时（${READY_TIMEOUT_MS / 1000}s）`
-          logger.error('dsh health check timeout', { port })
-          this.setStatus('error')
-        }
-      } catch {
-        /* 轮询期间失败继续重试 */
-      }
-    }, 800)
+        // 下一轮
+        this.healthTimer = setTimeout(tick, 800)
+      })()
+    }
+    this.healthTimer = setTimeout(tick, 0)
   }
 
   private checkHealth(port: number): Promise<boolean> {
@@ -334,12 +371,17 @@ export class DSHManager extends EventEmitter {
     })
   }
 
-  private onExit(code: number | null, signal: string | null): void {
+  private onExit(code: number | null, signal: string | null, child: ChildProcess): void {
+    // H2: 只处理当前代子进程的退出，忽略旧进程（并发 start 泄漏的）exit 事件
+    if (this.child !== child) {
+      logger.debug('stale dsh child exit ignored', { code, signal })
+      return
+    }
     this.pid = null
     this.port = null
     this.child = null
     if (this.healthTimer) {
-      clearInterval(this.healthTimer)
+      clearTimeout(this.healthTimer)
       this.healthTimer = null
     }
     const wasStopping = this.stopping
@@ -350,27 +392,49 @@ export class DSHManager extends EventEmitter {
       this.setStatus('stopped')
       return
     }
-    // 崩溃自动重启（退避，最多连续 10 次）
-    if (this.restartCount >= 10) {
-      this.lastError = '连续崩溃超过 10 次，停止自动重启'
+    // H1: 崩溃计数——稳定运行 >=STABLE_RESET_MS 后再崩溃视为新一轮（重置为 1）；
+    //     否则连续崩溃循环中持续累加，达到 MAX_RESTARTS 后停止自动重启（上限真实生效）
+    if (this.restartCount === 0 || (this.stableSince !== null && Date.now() - this.stableSince >= STABLE_RESET_MS)) {
+      this.restartCount = 1
+    } else {
+      this.restartCount += 1
+    }
+    if (this.restartCount >= MAX_RESTARTS) {
+      this.lastError = '连续崩溃超过 ' + MAX_RESTARTS + ' 次，停止自动重启（请检查 DSH 内核配置或查看日志）'
       this.setStatus('error')
       return
     }
-    this.restartCount += 1
+    // 指数退避：3s -> 6s -> 12s -> ... -> 封顶 60s
+    const delay = Math.min(RESTART_BACKOFF_MS * 2 ** (this.restartCount - 1), RESTART_BACKOFF_MAX_MS)
     this.setStatus('starting')
-    logger.warn(`dsh crashed, restarting (attempt ${this.restartCount})`)
+    logger.warn('dsh crashed, restarting (attempt ' + this.restartCount + ', backoff ' + delay + 'ms)')
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null
       void this.start()
-    }, RESTART_BACKOFF_MS)
+    }, delay)
   }
 
   async stop(): Promise<void> {
+    // H2: 等待进行中的 start 完成，避免 start 中途被 stop 的竞态
+    if (this.startInFlight) {
+      try {
+        await this.startInFlight
+      } catch {
+        /* noop */
+      }
+    }
     if (this.restartTimer) {
       clearTimeout(this.restartTimer)
       this.restartTimer = null
     }
+    if (this.healthTimer) {
+      clearTimeout(this.healthTimer)
+      this.healthTimer = null
+    }
     if (!this.child || this.child.pid === undefined) {
+      // H1: 手动停止后重置崩溃计数（下一次启动视为新一轮）
+      this.restartCount = 0
+      this.stableSince = null
       this.setStatus('stopped')
       return
     }
@@ -396,6 +460,9 @@ export class DSHManager extends EventEmitter {
     })
     // 清理 Timer，避免悬挂
     this.stopping = false
+    // H1: 停止成功后重置崩溃计数与稳定起点
+    this.restartCount = 0
+    this.stableSince = null
   }
 
   private isPidAlive(pid: number): boolean {
@@ -478,17 +545,47 @@ export class DSHManager extends EventEmitter {
     return new Promise((resolvePromise) => {
       const child = spawn(exe.command, fullArgs, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
       let acc = ''
+      let settled = false
       child.stdout?.on('data', (c: Buffer) => (acc += c.toString()))
-      child.on('close', () => resolvePromise(acc))
-      child.on('error', () => resolvePromise(''))
-      setTimeout(() => {
+      const timer = setTimeout(() => {
+        // R-18: 超时也归还已收集输出（防止 close 不触发导致 Promise 永不 resolve）
         if (!child.killed) child.kill()
+        if (!settled) { settled = true; resolvePromise(acc) }
       }, 10_000)
+      child.on('close', () => {
+        clearTimeout(timer)
+        if (!settled) { settled = true; resolvePromise(acc) }
+      })
+      child.on('error', () => {
+        clearTimeout(timer)
+        if (!settled) { settled = true; resolvePromise('') }
+      })
     })
   }
 
+  /** R-2: 退出前同步强杀进程树（不等异步 stop，保证 dsh 孙进程/端口也被清理） */
+  killTreeNow(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    if (this.healthTimer) {
+      clearTimeout(this.healthTimer)
+      this.healthTimer = null
+    }
+    const pid = this.child?.pid
+    if (pid) {
+      try {
+        this.child?.kill()
+      } catch {
+        /* noop */
+      }
+      this.killTree(pid)
+    }
+  }
+
   async shutdown(): Promise<void> {
-    if (this.restartTimer) clearTimeout(this.restartTimer)
+    this.killTreeNow()
     await this.stop()
   }
 }

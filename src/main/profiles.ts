@@ -44,8 +44,13 @@ export function deleteProfile(id: string): { ok: boolean; error?: string } {
 
 export function activateProfile(id: string): { ok: boolean; error?: string } {
   const cfg = configStore.get()
-  if (!(cfg.profiles ?? []).some((p) => p.id === id)) return { ok: false, error: '档案不存在' }
+  const profile = (cfg.profiles ?? []).find((p) => p.id === id)
+  if (!profile) return { ok: false, error: '档案不存在' }
   if (cfg.activeProfileId === id) return { ok: true }
+  // R-23: 校验绑定内核已安装（未安装则拒绝切换，避免静默回退 system dsh）
+  if (profile.kernelVersion !== null && !kernelManager.listInstalled().some((k) => k.version === profile.kernelVersion)) {
+    return { ok: false, error: '档案绑定的内核 v' + profile.kernelVersion + ' 未安装，请先在内核面板安装或解除绑定' }
+  }
   configStore.set({ activeProfileId: id })
   return { ok: true }
 }

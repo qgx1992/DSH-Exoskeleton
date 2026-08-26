@@ -24,6 +24,8 @@ const NODE_DIST = process.env.DSH_NODE_DIST || 'https://nodejs.org/dist'
 const FALLBACK_VERSION = 'v24.14.0'
 /** 下载超时（无数据 60s 视为断线） */
 const DOWNLOAD_IDLE_TIMEOUT_MS = 60_000
+/** 安装完成标记文件（H5：防止半装/损坏残留被误判为已安装） */
+const RUNTIME_OK_MARKER = '.dsh-runtime-ok'
 
 export class RuntimeManager extends EventEmitter {
   private runtimesDir = ''
@@ -126,7 +128,10 @@ export class RuntimeManager extends EventEmitter {
   /** 下载并安装内置 Node 运行时（进度事件推送） */
   async download(): Promise<{ ok: boolean; error?: string }> {
     if (this.busy !== 'idle') return { ok: false, error: '运行时操作进行中' }
-    if (this.getNodeExe()) return { ok: false, error: '内置 Node 运行时已安装' }
+    // H5: 只有带完成标记的运行时才算"已安装"；无标记（老版本安装/损坏残留）允许重装覆盖
+    if (this.getNodeExe() && fs.existsSync(path.join(this.runtimesDir, 'node', RUNTIME_OK_MARKER))) {
+      return { ok: false, error: '内置 Node 运行时已安装' }
+    }
 
     this.busy = 'downloading'
     this.emitProgress({ stage: 'downloading', percent: 2, message: '获取 Node 版本信息…' })
@@ -148,6 +153,9 @@ export class RuntimeManager extends EventEmitter {
           message: '下载 Node ' + ver + '（' + (percent * 100).toFixed(0) + '%）'
         })
       })
+
+      // 1.5) R-11: sha256 完整性校验（SHASUMS256.txt，防下载损坏/篡改）
+      await this.verifySha256(zipPath, ver, zipName)
 
       // 2) 解压
       this.busy = 'extracting'
@@ -172,6 +180,8 @@ export class RuntimeManager extends EventEmitter {
       if (!got.startsWith(ver.slice(0, 4))) {
         throw new Error('运行时自检异常：期望 ' + ver + '，实际 ' + got)
       }
+      // H5: 写入安装完成标记（download 重装判定依赖它）
+      fs.writeFileSync(path.join(target, RUNTIME_OK_MARKER), got, 'utf-8')
       this.emitProgress({ stage: 'done', percent: 100, message: '内置 Node ' + got + ' 就绪' })
       logger.info('node runtime installed', { version: got, dir: target })
       return { ok: true }
@@ -182,6 +192,9 @@ export class RuntimeManager extends EventEmitter {
         for (const f of fs.readdirSync(this.runtimesDir)) {
           if (f.startsWith('.extract-') || f.endsWith('.tmp')) fs.rmSync(path.join(this.runtimesDir, f), { recursive: true, force: true })
         }
+        // H5: 自检失败时已 rename 就位的 node/ 必须一并删除，否则 getNodeExe 判定"已安装"导致永久无法重装
+        const nodeDir = path.join(this.runtimesDir, 'node')
+        if (fs.existsSync(nodeDir)) fs.rmSync(nodeDir, { recursive: true, force: true })
       } catch {
         /* noop */
       }
@@ -191,6 +204,20 @@ export class RuntimeManager extends EventEmitter {
     } finally {
       this.busy = 'idle'
     }
+  }
+
+  /** R-11: 通过官方 SHASUMS256.txt 校验下载文件完整性 */
+  private async verifySha256(file: string, version: string, zipName: string): Promise<void> {
+    const sumsUrl = NODE_DIST + '/' + version + '/SHASUMS256.txt'
+    const res = await fetch(sumsUrl, { signal: AbortSignal.timeout(15_000) })
+    if (!res.ok) throw new Error('完整性校验文件获取失败（HTTP ' + res.status + '）')
+    const text = await res.text()
+    const line = text.split(/\r?\n/).find((l) => l.trim().endsWith(zipName))
+    if (!line) throw new Error('完整性校验文件中未找到 ' + zipName)
+    const expected = line.trim().split(/\s+/)[0]?.toLowerCase()
+    if (!expected) throw new Error('完整性校验文件格式异常')
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
+    if (actual !== expected) throw new Error('sha256 校验失败（' + zipName + ' 可能损坏）')
   }
 
   /** 删除内置运行时 */
@@ -214,14 +241,18 @@ export class RuntimeManager extends EventEmitter {
     }
   }
 
-  /** 流式下载文件并报告进度（0~1） */
-  private downloadFile(url: string, dest: string, onProgress: (p: number) => void): Promise<void> {
+  /** 流式下载文件并报告进度（0~1）；R-11: 重定向上限 + 完整性校验 */
+  private downloadFile(url: string, dest: string, onProgress: (p: number) => void, redirects = 0): Promise<void> {
     return new Promise((resolvePromise, rejectPromise) => {
       const mod = url.startsWith('https:') ? https : http
       const req = mod.get(url, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          // 重定向
-          this.downloadFile(res.headers.location, dest, onProgress).then(resolvePromise, rejectPromise)
+          // R-11: 重定向上限（防镜像配置错误无限跳转）
+          if (redirects >= 5) {
+            rejectPromise(new Error('下载重定向次数过多（>5）'))
+            return
+          }
+          this.downloadFile(res.headers.location, dest, onProgress, redirects + 1).then(resolvePromise, rejectPromise)
           return
         }
         if (!res.statusCode || res.statusCode >= 400) {
@@ -251,9 +282,17 @@ export class RuntimeManager extends EventEmitter {
         out.on('error', (err) => rejectPromise(err))
         out.on('finish', () => {
           if (idleTimer) clearTimeout(idleTimer)
+          // R-11: content-length 校验（服务器提前断开时拒绝残缺文件）
+          if (total > 0 && received < total) {
+            rejectPromise(new Error('下载不完整（' + received + '/' + total + ' 字节）'))
+            return
+          }
           onProgress(1)
           resolvePromise()
         })
+        // R-11: 连接被中断时立即失败，避免白等 idle 超时
+        res.on('aborted', () => rejectPromise(new Error('下载被中断（aborted）')))
+        res.on('error', (err) => rejectPromise(err))
         res.pipe(out)
       })
       req.on('error', (err) => rejectPromise(err))
@@ -264,20 +303,39 @@ export class RuntimeManager extends EventEmitter {
   private extractZip(zipPath: string, dest: string): Promise<boolean> {
     return new Promise((resolvePromise) => {
       const tryTar = (): void => {
+        let t: NodeJS.Timeout | null = null
         const child = spawn('tar.exe', ['-xf', zipPath, '-C', dest], { windowsHide: true, stdio: 'ignore' })
-        const t = setTimeout(() => {
-          child.kill()
+        let fellBack = false
+        // R-24: 回退前清空解压目录，避免与残留/并发进程同写
+        const cleanDest = (): void => {
+          try {
+            fs.rmSync(dest, { recursive: true, force: true })
+            fs.mkdirSync(dest, { recursive: true })
+          } catch {
+            /* noop */
+          }
+        }
+        const fallback = (): void => {
+          if (fellBack) return
+          fellBack = true
+          if (t) clearTimeout(t)
+          cleanDest()
           tryExpand()
+        }
+        t = setTimeout(() => {
+          // 超时：kill 后等进程完全退出再清目录回退（防双进程同写 extractDir）
+          child.kill()
+          child.once('close', () => fallback())
         }, 120_000)
         child.on('close', (code) => {
-          clearTimeout(t)
-          if (code === 0) resolvePromise(true)
-          else tryExpand()
+          if (code === 0) {
+            if (t) clearTimeout(t)
+            resolvePromise(true)
+          } else {
+            fallback()
+          }
         })
-        child.on('error', () => {
-          clearTimeout(t)
-          tryExpand()
-        })
+        child.on('error', () => fallback())
       }
       const tryExpand = (): void => {
         const child = spawn('powershell.exe', ['-NoProfile', '-Command', "Expand-Archive -LiteralPath '" + zipPath + "' -DestinationPath '" + dest + "' -Force"], {

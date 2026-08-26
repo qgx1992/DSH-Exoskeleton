@@ -20,8 +20,11 @@ import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
 import { decodeWorkspaceName, projectNameFromPath } from '../shared/session-jsonl'
 
-/** 轮询间隔（只影响发现新帧的时延） */
-const POLL_MS = Number(process.env.DSH_SESSION_POLL_MS ?? 2_000)
+/** 轮询间隔（只影响发现新帧的时延；非法值回落默认，限制在 [500ms, 60s]） */
+const POLL_RAW = Number(process.env.DSH_SESSION_POLL_MS ?? 2_000)
+const POLL_MS = Number.isFinite(POLL_RAW) ? Math.min(60_000, Math.max(500, POLL_RAW)) : 2_000
+/** 单会话去重记录上限（防止超长会话的 notifiedTurns 无限增长） */
+const MAX_NOTIFIED_TURNS = 200
 
 interface Tracked {
   readOffset: number
@@ -76,17 +79,21 @@ export class SessionWatcher extends EventEmitter {
       }
       let workspaceDirs: string[] = []
       try {
-        workspaceDirs = fs.readdirSync(sessionsRoot)
+        // H3: 异步目录遍历，避免阻塞主进程事件循环
+        workspaceDirs = await fs.promises.readdir(sessionsRoot)
       } catch {
         return
       }
+
+      // H3: 本轮扫描到的会话键集合，用于清理已删除会话的 tracked 条目
+      const seen = new Set<string>()
 
       for (const ws of workspaceDirs) {
         const wsDir = path.join(sessionsRoot, ws)
         let sessionDirs: string[] = []
         try {
-          if (!fs.statSync(wsDir).isDirectory()) continue
-          sessionDirs = fs.readdirSync(wsDir)
+          if (!(await fs.promises.stat(wsDir)).isDirectory()) continue
+          sessionDirs = await fs.promises.readdir(wsDir)
         } catch {
           continue
         }
@@ -95,10 +102,11 @@ export class SessionWatcher extends EventEmitter {
           const sessionDir = path.join(wsDir, s)
           const file = path.join(sessionDir, 'session.jsonl.zstd')
           const key = sessionDir
+          seen.add(key)
 
           let size = 0
           try {
-            size = fs.statSync(file).size
+            size = (await fs.promises.stat(file)).size
           } catch {
             continue
           }
@@ -111,12 +119,19 @@ export class SessionWatcher extends EventEmitter {
             continue
           }
 
+          // H3: 文件被截断/重写（repair re-encode）后 size 变小：重置基线，避免永久漏报
+          if (size < t.readOffset) {
+            t.readOffset = size
+            continue
+          }
+
           if (size > t.readOffset) {
             const oldOffset = t.readOffset
-            t.readOffset = size
             // 解析新增帧中的轮次结束事件：每轮（非 interrupted）结束立即通知
             const r = await zstdWorker.request('frameEvents', { file, offset: oldOffset })
             if (r.ok) {
+              // H3: 成功后才推进偏移——失败不推进，下一轮重试（避免该批新帧被永久跳过）
+              t.readOffset = size
               for (const te of r.turnEnds ?? []) {
                 // interrupted = 崩溃恢复时持久层合成的关闭标记，不代表一轮完成
                 if (te.kind === 'interrupted') continue
@@ -124,6 +139,10 @@ export class SessionWatcher extends EventEmitter {
                 const turnKey = te.turn ?? te.seq
                 if (t.notifiedTurns.has(turnKey)) continue
                 t.notifiedTurns.add(turnKey)
+                // H3: 去重记录设上限，防止超长会话内存增长
+                if (t.notifiedTurns.size > MAX_NOTIFIED_TURNS) {
+                  t.notifiedTurns = new Set([...t.notifiedTurns].slice(-MAX_NOTIFIED_TURNS))
+                }
                 this.emitComplete({
                   sessionDir,
                   workspace: ws,
@@ -133,9 +152,12 @@ export class SessionWatcher extends EventEmitter {
                 })
               }
             }
-            continue
           }
         }
+      }
+      // H3: 清理已删除会话的 tracked 条目（防内存增长）
+      for (const k of this.tracked.keys()) {
+        if (!seen.has(k)) this.tracked.delete(k)
       }
     } finally {
       this.scanning = false

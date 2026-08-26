@@ -369,6 +369,8 @@ export class WindowManager {
       this.geometryTimer = null
       this.persistGeometry()
     }
+    // R-16: 同步落盘（persist 已改异步防抖，退出前必须 flush 保证最后一次写入不丢）
+    configStore.flush()
     this.detachDshView()
     app.quit()
   }

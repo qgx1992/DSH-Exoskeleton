@@ -43,7 +43,7 @@ app.whenReady().then(async () => {
     assert(!fs.existsSync(path.join(snapDir, 'profiles-node-modules巨目录占位.txt')), '候选列表外文件不备份')
 
     console.log('3) 列表')
-    const list = backupManager.list()
+    const list = await backupManager.list()
     assert(list.some((b) => b.id === info.id), 'list 包含新快照')
     assert(list[0].createdAt === info.createdAt, '按时间倒序')
 
@@ -53,8 +53,8 @@ app.whenReady().then(async () => {
     assert(r.ok, 'restore ok')
     assert(fs.readFileSync(path.join(fakeHome, 'settings.yaml'), 'utf-8').includes('welcomeNoticeVersion'), 'settings.yaml 已恢复')
     // 恢复前保护快照
-    const list2 = backupManager.list()
-    assert(list2.some((b) => b.trigger === `restore:${info.id}`), '恢复前自动创建保护快照')
+    const list2 = await backupManager.list()
+    assert(list2.some((b) => b.trigger === 'restore:' + info.id), '恢复前自动创建保护快照')
 
     console.log('5) 自动快照 + 触发标记')
     const auto = await backupManager.autoSnapshot('plugin-install:test')
@@ -62,7 +62,7 @@ app.whenReady().then(async () => {
 
     console.log('6) 删除')
     const del = backupManager.delete(info.id)
-    assert(del.ok && !backupManager.list().some((b) => b.id === info.id), 'delete 生效')
+    assert(del.ok && !(await backupManager.list()).some((b) => b.id === info.id), 'delete 生效')
   } catch (e) {
     console.error('TEST CRASH:', e)
     failed++

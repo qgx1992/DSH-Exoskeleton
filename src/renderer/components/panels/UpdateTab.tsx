@@ -29,16 +29,9 @@ export function UpdateTab(): React.JSX.Element {
         setDownloaded(true)
       }
     })
-    const t = setTimeout(() => {
-      void window.dshDesktop.updater.check().then((u) => {
-        setInfo(u)
-        if (u.downloaded) setDownloaded(true)
-        if (u.progress && u.progress.percent < 100) setDownloading(u.progress)
-      })
-    }, 600)
+    // R-30: 移除挂载即自动网络检查（改为用户手动点击「检查更新」触发）
     return () => {
       off()
-      clearTimeout(t)
     }
   }, [])
 

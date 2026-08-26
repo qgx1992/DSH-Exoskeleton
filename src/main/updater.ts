@@ -19,6 +19,8 @@ class Updater extends EventEmitter {
   private cache: UpdateInfo | null = null
   private installing = false
   private initialized = false
+  /** R-19: 进度广播节流（下载进度事件可能每秒数十次，避免高频 IPC） */
+  private lastProgressEmit = 0
 
   /** 仅打包版初始化 electron-updater */
   init(): void {
@@ -51,7 +53,12 @@ class Updater extends EventEmitter {
         progress: { percent: Math.round(p.percent * 10) / 10, transferred: p.transferred, total: p.total },
         url: RELEASES_URL
       }
-      this.emitStatus()
+      // R-19: 250ms 节流广播（进度回调频率可达每秒数十次）
+      const now = Date.now()
+      if (now - this.lastProgressEmit >= 250) {
+        this.lastProgressEmit = now
+        this.emitStatus()
+      }
     })
     autoUpdater.on('update-downloaded', (info) => {
       logger.info('update downloaded', { version: info.version })

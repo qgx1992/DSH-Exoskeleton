@@ -41,6 +41,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('kernels:install', (_e, version: string, registry?: string) => kernelManager.install(version, registry))
   ipcMain.handle('kernels:uninstall', (_e, version: string) => kernelManager.uninstall(version))
   ipcMain.handle('kernels:setDefault', async (_e, version: string | null) => {
+    // R-1: 设置前校验版本已安装（默认内核不允许指向未安装版本）
+    if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装，无法设为默认' }
+    }
     const cfg = configStore.set({ defaultKernelVersion: version })
     // 服务运行中则自动换内核重启
     if (dshManager.getState().status === 'running') {

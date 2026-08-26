@@ -9,7 +9,7 @@ import { app } from 'electron'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn, execFile } from 'node:child_process'
 import { logger } from './logger'
 import { configStore } from './config'
 import { runtimeManager } from './runtime-manager'
@@ -39,6 +39,10 @@ export class KernelManager extends EventEmitter {
   private kernelsDir = ''
   private index: KernelIndex = { kernels: {} }
   private nodeExe: string | null = null
+  /** H4: 正在安装/下载中的版本（并发防护：同一版本禁止并发 install） */
+  private busyVersions = new Set<string>()
+  /** R-15: 内置运行时目录大小缓存（30s TTL，避免 quota() 每次全量同步扫描） */
+  private runtimeSizeCache: { at: number; mb: number } | null = null
 
   init(): void {
     this.kernelsDir = path.join(app.getPath('userData'), 'kernels')
@@ -63,7 +67,10 @@ export class KernelManager extends EventEmitter {
 
   private persistIndex(): void {
     try {
-      fs.writeFileSync(this.indexFile(), JSON.stringify(this.index, null, 2), 'utf-8')
+      // R-3: 原子写入（临时文件 + rename），避免崩溃/断电写坏 kernels.json
+      const tmp = this.indexFile() + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(this.index, null, 2), 'utf-8')
+      fs.renameSync(tmp, this.indexFile())
     } catch (err) {
       logger.error('kernels index persist failed', err)
     }
@@ -114,8 +121,12 @@ export class KernelManager extends EventEmitter {
   /** npm registry 可用版本列表 */
   async listAvailable(): Promise<KernelRemoteVersion[]> {
     try {
-      const res = await fetch(REGISTRY_URL, { headers: { Accept: 'application/vnd.npm.install-v1+json' } })
-      if (!res.ok) throw new Error(`registry ${res.status}`)
+      // R-12: 网络黑洞时 15s 超时，避免面板永久转圈
+      const res = await fetch(REGISTRY_URL, {
+        headers: { Accept: 'application/vnd.npm.install-v1+json' },
+        signal: AbortSignal.timeout(15_000)
+      })
+      if (!res.ok) throw new Error('registry ' + res.status)
       const data = (await res.json()) as {
         versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>
         time?: Record<string, string>
@@ -136,7 +147,7 @@ export class KernelManager extends EventEmitter {
     logger.info(`kernel ${p.stage}`, { version: p.version, percent: p.percent })
   }
 
-  private resolveNode(): string | null {
+  private async resolveNode(): Promise<string | null> {
     if (this.nodeExe && fs.existsSync(this.nodeExe)) return this.nodeExe
     // 1) 内置 Node 运行时（阶段 B：真零门槛）
     const embedded = runtimeManager.getNodeExe()
@@ -149,15 +160,12 @@ export class KernelManager extends EventEmitter {
       this.nodeExe = process.env.DSH_NODE
       return this.nodeExe
     }
-    try {
-      const out = execFileSyncSafe('where', ['node'])
-      const p = out?.trim().split(/\r?\n/)[0]
-      if (p && fs.existsSync(p)) {
-        this.nodeExe = p
-        return p
-      }
-    } catch {
-      /* noop */
+    // R-13: 异步 where（原 execFileSync 最坏阻塞主进程 8s）
+    const out = await this.execFileAsync('where', ['node'])
+    const p = out?.trim().split(/\r?\n/)[0]
+    if (p && fs.existsSync(p)) {
+      this.nodeExe = p
+      return p
     }
     return null
   }
@@ -167,16 +175,13 @@ export class KernelManager extends EventEmitter {
     return fs.existsSync(c) ? c : null
   }
 
-  private findCommand(cmd: string): string | null {
+  private async findCommand(cmd: string): Promise<string | null> {
     // 常见位置优先（npm 全局标准布局）
     const candidates: string[] = []
     if (process.env.APPDATA) candidates.push(path.join(process.env.APPDATA, 'npm', 'pnpm.cmd'))
-    try {
-      const out = execFileSync('where', [cmd], { windowsHide: true, timeout: 8_000, encoding: 'utf-8' })
-      candidates.push(...out.trim().split(/\r?\n/))
-    } catch {
-      /* noop */
-    }
+    // R-13: 异步 where
+    const out = await this.execFileAsync('where', [cmd])
+    if (out) candidates.push(...out.trim().split(/\r?\n/))
     for (const c of candidates) {
       if (!c) continue
       try {
@@ -188,6 +193,16 @@ export class KernelManager extends EventEmitter {
     return null
   }
 
+  /** R-13: 异步执行命令取 stdout（避免 execFileSync 阻塞主进程） */
+  private execFileAsync(cmd: string, args: string[], timeoutMs = 8_000): Promise<string | null> {
+    return new Promise((resolvePromise) => {
+      execFile(cmd, args, { windowsHide: true, timeout: timeoutMs, encoding: 'utf-8' }, (err, stdout) => {
+        if (err) resolvePromise(null)
+        else resolvePromise(stdout)
+      })
+    })
+  }
+
   /**
    * 依赖安装器：优先 node 直接运行 JS 入口（避免 .cmd/.bat 的 cmd.exe 引号问题）：
    * 1) Node 内置 corepack pnpm → 2) 系统 pnpm 的 pnpm.cjs → 3) npm-cli.js
@@ -197,7 +212,7 @@ export class KernelManager extends EventEmitter {
    * 1) Node 内置 corepack pnpm → 2) 系统 pnpm 的 pnpm.cjs → 3) npm-cli.js
    * 缓存/存储定向到内核仓库（#3：pnpm store 内容寻址跨版本复用，不污染 %LOCALAPPDATA%\pnpm）
    */
-  private installCommand(registry: string): { command: string; args: string[] } | null {
+  private async installCommand(registry: string): Promise<{ command: string; args: string[] } | null> {
     const nodeExe = this.nodeExe
     if (!nodeExe) return null
 
@@ -210,7 +225,7 @@ export class KernelManager extends EventEmitter {
     if (fs.existsSync(corepackPnpm)) {
       return { command: nodeExe, args: [corepackPnpm, 'install', '--prod', '--registry', registry, '--store-dir', storeDir] }
     }
-    const pnpmCmd = this.findCommand('pnpm.cmd') ?? this.findCommand('pnpm')
+    const pnpmCmd = (await this.findCommand('pnpm.cmd')) ?? (await this.findCommand('pnpm'))
     if (pnpmCmd) {
       const entry = path.join(path.dirname(pnpmCmd), 'node_modules', 'pnpm', 'bin', 'pnpm.cjs')
       if (fs.existsSync(entry)) {
@@ -224,7 +239,13 @@ export class KernelManager extends EventEmitter {
     return { command: 'npm.cmd', args: ['install', '--omit=dev', '--no-audit', '--no-fund', '--cache', npmCacheDir, '--registry', registry] }
   }
 
-  private run(command: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  /** H4: 执行子命令；超时自动终止进程树（默认 10 分钟，内核依赖树较大） */
+  private run(
+    command: string,
+    args: string[],
+    opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+    timeoutMs = 600_000
+  ): Promise<{ code: number | null; stdout: string; stderr: string }> {
     return new Promise((resolvePromise) => {
       // .cmd/.bat 无法直接 spawn（Windows EINVAL）→ 经 cmd.exe 执行
       const isBatch = /\.(cmd|bat)$/i.test(command)
@@ -240,11 +261,38 @@ export class KernelManager extends EventEmitter {
       })
       let stdout = ''
       let stderr = ''
+      let timedOut = false
       child.stdout?.on('data', (c: Buffer) => (stdout += c.toString()))
       child.stderr?.on('data', (c: Buffer) => (stderr += c.toString()))
-      child.on('close', (code) => resolvePromise({ code, stdout, stderr }))
-      child.on('error', (err) => resolvePromise({ code: -1, stdout: '', stderr: err.message }))
+      const timer = setTimeout(() => {
+        timedOut = true
+        logger.warn('kernel command timeout, killing process tree', { command, timeoutMs })
+        this.killTree(child.pid ?? 0)
+      }, timeoutMs)
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        if (timedOut) resolvePromise({ code: -1, stdout, stderr: '命令超时（>' + timeoutMs / 1000 + 's），已终止' })
+        else resolvePromise({ code, stdout, stderr })
+      })
+      child.on('error', (err) => {
+        clearTimeout(timer)
+        resolvePromise({ code: -1, stdout: '', stderr: err.message })
+      })
     })
+  }
+
+  /** H4: 强制结束进程树（Windows taskkill /T /F；其他平台直接 kill） */
+  private killTree(pid: number): void {
+    if (!pid) return
+    try {
+      if (process.platform === 'win32') {
+        execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => { /* noop */ })
+      } else {
+        try { process.kill(-pid, 'SIGKILL') } catch { process.kill(pid, 'SIGKILL') }
+      }
+    } catch {
+      /* noop */
+    }
   }
 
   /** 安装指定版本内核；registryOverride 可指定镜像源（如 npmmirror）提升国内下载速度 */
@@ -260,7 +308,7 @@ export class KernelManager extends EventEmitter {
     // 磁盘空间 + 配额检查（阶段 C）
     const spaceErr = this.checkDiskSpace()
     if (spaceErr) return { ok: false, error: spaceErr }
-    const nodeExe = this.resolveNode()
+    const nodeExe = await this.resolveNode()
     if (!nodeExe) {
       return { ok: false, error: '未找到可用的 Node.js 运行时。请安装 Node.js，或在「内核」面板一键下载内置运行时。' }
     }
@@ -269,6 +317,12 @@ export class KernelManager extends EventEmitter {
 
     const dirName = KernelManager.safeDirName(version)
     const kernelDir = path.join(this.kernelsDir, dirName)
+
+    // H4: 并发防护——同一版本正在安装时拒绝重复触发（避免并发 npm/pnpm 写坏 node_modules）
+    if (this.busyVersions.has(version)) {
+      return { ok: false, error: '内核 v' + version + ' 正在安装中，请稍候' }
+    }
+    this.busyVersions.add(version)
 
     fs.mkdirSync(kernelDir, { recursive: true })
     const meta: KernelMeta = {
@@ -286,7 +340,10 @@ export class KernelManager extends EventEmitter {
     try {
       // 1) registry 元数据（确认版本存在）
       this.emitProgress({ version, stage: 'downloading', percent: 4, message: '获取版本元数据…' })
-      const reg = (await (await fetch(registryRoot + '/@deepseek-ai/dsh')).json()) as {
+      // R-12: 网络黑洞时 15s 超时，避免安装永久悬挂
+      const regRes = await fetch(registryRoot + '/@deepseek-ai/dsh', { signal: AbortSignal.timeout(15_000) })
+      if (!regRes.ok) throw new Error('registry 元数据获取失败（HTTP ' + regRes.status + '）')
+      const reg = (await regRes.json()) as {
         versions?: Record<string, { dist?: { tarball?: string; integrity?: string } }>
       }
       const dist = reg.versions?.[version]?.dist
@@ -305,7 +362,7 @@ export class KernelManager extends EventEmitter {
       meta.status = 'installing'
       this.persistIndex()
 
-      const installer = this.installCommand(registryRoot)
+      const installer = await this.installCommand(registryRoot)
       if (!installer) throw new Error('未找到可用的包管理器（pnpm/npm）')
       let r = await this.run(installer.command, installer.args, { cwd: kernelDir })
       // pnpm 10+ 默认忽略依赖 build scripts，并以 exit 1 + ERR_PNPM_IGNORED_BUILDS 提示——
@@ -341,10 +398,18 @@ export class KernelManager extends EventEmitter {
       const msg = err instanceof Error ? err.message : String(err)
       meta.status = 'error'
       meta.error = msg
+      // H4: 清理失败残留，避免下次安装在新目录上叠加损坏的 node_modules
+      try {
+        if (fs.existsSync(kernelDir)) fs.rmSync(kernelDir, { recursive: true, force: true })
+      } catch {
+        /* noop */
+      }
       this.persistIndex()
       this.emitProgress({ version, stage: 'error', percent: 0, message: msg })
       logger.error('kernel install failed', { version, error: msg })
       return { ok: false, error: msg }
+    } finally {
+      this.busyVersions.delete(version)
     }
   }
 
@@ -391,7 +456,14 @@ export class KernelManager extends EventEmitter {
     let runtimeMB = 0
     try {
       const r = runtimeManager.getRuntimeDir()
-      if (fs.existsSync(r)) runtimeMB = Math.round(dirSizeSync(r) / (1024 * 1024))
+      if (fs.existsSync(r)) {
+        // R-15: 缓存 30s，避免每次打开面板全量同步扫描数百 MB 的 runtimes/
+        const now = Date.now()
+        if (this.runtimeSizeCache === null || now - this.runtimeSizeCache.at > 30_000) {
+          this.runtimeSizeCache = { at: now, mb: Math.round(dirSizeSync(r) / (1024 * 1024)) }
+        }
+        runtimeMB = this.runtimeSizeCache.mb
+      }
     } catch {
       /* noop */
     }
@@ -453,14 +525,6 @@ export class KernelManager extends EventEmitter {
   }
 }
 
-function execFileSyncSafe(cmd: string, args: string[]): string | null {
-  try {
-    return execFileSync(cmd, args, { windowsHide: true, timeout: 8_000, encoding: 'utf-8' })
-  } catch {
-    return null
-  }
-}
-
 function dirSizeSync(dir: string): number {
   let s = 0
   try {
@@ -506,7 +570,32 @@ function compareVersions(a: string, b: string): number {
   if (pa.pre === pb.pre) return 0
   if (!pa.pre) return 1 // 稳定版 > prerelease
   if (!pb.pre) return -1
-  return pa.pre < pb.pre ? -1 : 1
+  // R-22: prerelease 逐段比较（数字段数值比较、标识符字典序、数字 < 标识符、段多 > 段少）
+  // 修复原字符串比较导致 rc.10 < rc.2 的错误判定
+  const paParts = pa.pre.split('.')
+  const pbParts = pb.pre.split('.')
+  const n = Math.max(paParts.length, pbParts.length)
+  for (let i = 0; i < n; i++) {
+    const x = i < paParts.length ? paParts[i] : undefined
+    const y = i < pbParts.length ? pbParts[i] : undefined
+    if (x === y) continue
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const xNum = /^\d+$/.test(x)
+    const yNum = /^\d+$/.test(y)
+    if (xNum && yNum) {
+      const xn = parseInt(x, 10)
+      const yn = parseInt(y, 10)
+      if (xn !== yn) return xn > yn ? 1 : -1
+    } else if (xNum) {
+      return -1 // 数字标识符 < 字母标识符
+    } else if (yNum) {
+      return 1
+    } else if (x !== y) {
+      return x < y ? -1 : 1
+    }
+  }
+  return 0
 }
 
 export const kernelManager = new KernelManager()

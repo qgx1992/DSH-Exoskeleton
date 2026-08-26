@@ -59,7 +59,7 @@ export function editCredentialsText(
     const out = [...lines]
     if (out[out.length - 1]?.trim()) out.push('')
     out.push('refs:')
-    out.push(`  ${env}: ${value}`)
+    out.push('  ' + env + ': ' + yamlScalar(value))
     return out.join('\n') + '\n'
   }
   // 遍历替换已有行
@@ -81,7 +81,7 @@ export function editCredentialsText(
       }
       const m = line.match(new RegExp(`^(\\s{2})${escapeRegExp(env)}:\\s*(.*)$`))
       if (m) {
-        out.push(`  ${env}: ${value}`)
+        out.push('  ' + env + ': ' + yamlScalar(value))
         replaced = true
         continue
       }
@@ -93,9 +93,15 @@ export function editCredentialsText(
   if (!replaced) {
     let insertAt = refsIdx + 1
     while (insertAt < out.length && /^\s{2}/.test(out[insertAt])) insertAt++
-    out.splice(insertAt, 0, `  ${env}: ${value}`)
+    out.splice(insertAt, 0, '  ' + env + ': ' + yamlScalar(value))
   }
   return out.join('\n') + '\n'
+}
+
+/** R-21: YAML 标量安全写入（值含 # : 引号 空格等特殊字符时用单引号包裹，防 parseRefs 截断/误解析） */
+function yamlScalar(value: string): string {
+  if (/^[A-Za-z0-9_.\-/@+]+$/.test(value)) return value
+  return "'" + value.replace(/'/g, "''") + "'"
 }
 
 function escapeRegExp(s: string): string {

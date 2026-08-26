@@ -26,16 +26,12 @@ export default function App(): React.JSX.Element {
         setShowOnboarding(true)
       }
     })()
-    // 等待窗口显示后同步一次最新状态（主进程可能在挂载后更新过）
-    const t = setTimeout(() => {
-      void api.dsh.getState().then(setDshState)
-    }, 400)
-
+    // R-29: 移除 400ms 延迟二次 getState（与 onStateChange 推送构成双数据源，可能旧盖新）；
+    //       状态更新由主进程推送驱动，挂载时已有一次 getState 兜底
     const offStatus = api.dsh.onStateChange(setDshState)
     const offMax = api.window.onMaximizeChange(setMaximized)
     void api.window.isMaximized().then(setMaximized)
     return () => {
-      clearTimeout(t)
       offStatus()
       offMax()
     }

@@ -14,6 +14,8 @@ import type { PluginCatalogItem, InstalledPlugin, PluginActionResult } from '../
 
 const GITHUB_SEARCH = 'https://api.github.com/search/repositories?q=topic:dsh-plugin&sort=stars&order=desc&per_page=40'
 const NPM_SEARCH = 'https://registry.npmjs.org/-/v1/search?text=keywords:dsh-plugin&size=30'
+/** R-10: 插件安装/卸载互斥锁（同一 profile 并发操作会写坏依赖树） */
+let pluginOpBusy = false
 
 function profileDir(): string {
   return path.join(dshManager.resolveDshHome(), 'profiles', 'web')
@@ -50,7 +52,11 @@ export async function listCatalog(query = ''): Promise<PluginCatalogItem[]> {
 
   // GitHub topic
   try {
-    const res = await fetch(GITHUB_SEARCH, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop' } })
+    // R-12: 网络黑洞时 15s 超时，避免面板永久转圈
+    const res = await fetch(GITHUB_SEARCH, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop' },
+      signal: AbortSignal.timeout(15_000)
+    })
     if (res.ok) {
       const data = (await res.json()) as {
         items?: { full_name?: string; name?: string; description?: string | null; stargazers_count?: number; html_url?: string }[]
@@ -75,7 +81,7 @@ export async function listCatalog(query = ''): Promise<PluginCatalogItem[]> {
 
   // npm 搜索
   try {
-    const res = await fetch(NPM_SEARCH)
+    const res = await fetch(NPM_SEARCH, { signal: AbortSignal.timeout(15_000) })
     if (res.ok) {
       const data = (await res.json()) as {
         objects?: { package?: { name?: string; version?: string; description?: string; links?: { npm?: string } } }[]
@@ -113,39 +119,55 @@ function conflictCheck(target: string, installed: InstalledPlugin[]): string | n
   return null
 }
 
-/** 安装插件：自动备份 → 冲突预检 → dsh plugin add */
+/** 安装插件：自动备份 → 冲突预检 → dsh plugin add（R-10: 互斥锁防并发写坏 profile） */
 export async function installPlugin(pkg: string): Promise<PluginActionResult> {
+  if (pluginOpBusy) return { ok: false, error: '插件操作进行中，请稍候' }
   const target = (pkg ?? '').trim()
   if (!target) return { ok: false, error: '包名不能为空' }
   const installed = listInstalled()
   const conflict = conflictCheck(target, installed)
   if (conflict) return { ok: false, error: conflict }
 
-  await backupManager.autoSnapshot(`plugin-install:${target}`)
-  logger.info('installing plugin', { pkg: target })
-  const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'add', target])
-  const output = `${r.stdout}\n${r.stderr}`.trim()
-  if (r.code === 0) {
-    return { ok: true, output }
+  pluginOpBusy = true
+  try {
+    // R-25: 操作前自动备份失败则中止（避免无保护直接改动 profile）
+    const snap = await backupManager.autoSnapshot('plugin-install:' + target)
+    if (!snap) return { ok: false, error: '操作前自动备份失败，已中止' }
+    logger.info('installing plugin', { pkg: target })
+    const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'add', target])
+    const output = (r.stdout + '\n' + r.stderr).trim()
+    if (r.code === 0) {
+      return { ok: true, output }
+    }
+    return { ok: false, error: '安装失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
+  } finally {
+    pluginOpBusy = false
   }
-  return { ok: false, error: `安装失败（exit ${r.code}）`, output: output.slice(0, 2000) }
 }
 
-/** 卸载插件 */
+/** 卸载插件（R-10: 与安装共享互斥锁） */
 export async function uninstallPlugin(pkg: string): Promise<PluginActionResult> {
+  if (pluginOpBusy) return { ok: false, error: '插件操作进行中，请稍候' }
   const target = (pkg ?? '').trim()
   if (!target) return { ok: false, error: '包名不能为空' }
   const installed = listInstalled()
   if (!installed.some((i) => i.name === target)) {
-    return { ok: false, error: `插件「${target}」不在当前 profile 依赖中` }
+    return { ok: false, error: '插件「' + target + '」不在当前 profile 依赖中' }
   }
 
-  await backupManager.autoSnapshot(`plugin-uninstall:${target}`)
-  logger.info('uninstalling plugin', { pkg: target })
-  const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'remove', target])
-  const output = `${r.stdout}\n${r.stderr}`.trim()
-  if (r.code === 0) {
-    return { ok: true, output }
+  pluginOpBusy = true
+  try {
+    // R-25: 操作前自动备份失败则中止
+    const snap = await backupManager.autoSnapshot('plugin-uninstall:' + target)
+    if (!snap) return { ok: false, error: '操作前自动备份失败，已中止' }
+    logger.info('uninstalling plugin', { pkg: target })
+    const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'remove', target])
+    const output = (r.stdout + '\n' + r.stderr).trim()
+    if (r.code === 0) {
+      return { ok: true, output }
+    }
+    return { ok: false, error: '卸载失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
+  } finally {
+    pluginOpBusy = false
   }
-  return { ok: false, error: `卸载失败（exit ${r.code}）`, output: output.slice(0, 2000) }
 }

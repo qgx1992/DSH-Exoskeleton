@@ -3,6 +3,7 @@
  * - 手动存档 + 自动快照（插件安装/卸载、自动更新前）
  * - 一键回退到指定快照（恢复前自动再拍快照保护）
  * - 快照存储于 userData/backups/
+ * R-9: 复制/统计全部异步化并增量累加（避免同步阻塞主进程与重复全量扫描）
  */
 import { app } from 'electron'
 import fs from 'node:fs'
@@ -72,16 +73,48 @@ class BackupManager {
     }
   }
 
+  /** 异步遍历目录统计（size/count 一次完成，避免多次全量扫描） */
+  private async scanDirAsync(dir: string): Promise<{ size: number; count: number }> {
+    let size = 0
+    let count = 0
+    const stack: string[] = [dir]
+    while (stack.length) {
+      const cur = stack.pop()
+      if (!cur) continue
+      let entries: fs.Dirent[] = []
+      try {
+        entries = await fs.promises.readdir(cur, { withFileTypes: true })
+      } catch {
+        continue
+      }
+      for (const e of entries) {
+        const p = path.join(cur, e.name)
+        if (e.isDirectory()) {
+          stack.push(p)
+        } else {
+          count++
+          try {
+            size += (await fs.promises.stat(p)).size
+          } catch {
+            /* noop */
+          }
+        }
+      }
+    }
+    return { size, count }
+  }
+
   /** 创建快照：source <= ~/.dsh 中存在的子路径 */
   async create(name: string, kind: 'manual' | 'auto' = 'manual', trigger = ''): Promise<BackupInfo | null> {
     this.init()
     const dshHome = this.getDshHome()
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    // R-20: 保留毫秒精度，避免同秒同名（如连续 auto 快照）撞目录互相覆盖
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     const safeName = (name || (kind === 'auto' ? 'auto' : 'manual'))
       .trim()
       .replace(/[\\/:*?"<>|]/g, '_')
       .slice(0, 40)
-    const id = `${stamp}_${safeName}`
+    const id = stamp + '_' + safeName
     const dest = path.join(this.backupDir, id)
 
     const meta: BackupMeta = { name: safeName, createdAt: Date.now(), kind, trigger }
@@ -100,11 +133,11 @@ class BackupManager {
         const dst = path.join(dest, rel)
         if (fs.statSync(src).isFile()) {
           fs.mkdirSync(path.dirname(dst), { recursive: true })
-          fs.copyFileSync(src, dst)
-          size += fs.statSync(dst).size
+          await fs.promises.copyFile(src, dst)
+          size += (await fs.promises.stat(dst)).size
           entryCount++
         } else {
-          fs.cpSync(src, dst, {
+          await fs.promises.cp(src, dst, {
             recursive: true,
             filter: (s) => {
               const relPath = path.relative(src, s)
@@ -113,14 +146,16 @@ class BackupManager {
               return true
             }
           })
-          entryCount += this.countFiles(dst)
-          size = this.sumSize(dest)
+          // R-9: 只统计刚复制的子目录，避免每次对整个 dest 全量重扫
+          const st = await this.scanDirAsync(dst)
+          entryCount += st.count
+          size += st.size
         }
       }
       fs.writeFileSync(path.join(dest, '.backup-meta.json'), JSON.stringify(meta, null, 2), 'utf-8')
-      logger.info(`backup created (${kind})`, { id, trigger, size })
-      this.prune()
-      return this.readMeta(dest) ? this.getInfo(id) : null
+      logger.info('backup created (' + kind + ')', { id, trigger, size })
+      await this.prune()
+      return this.readMeta(dest) ? await this.getInfo(id) : null
     } catch (err) {
       logger.error('backup create failed', err)
       try {
@@ -132,77 +167,43 @@ class BackupManager {
     }
   }
 
-  private countFiles(dir: string): number {
-    let n = 0
-    try {
-      const stack = [dir]
-      while (stack.length) {
-        const cur = stack.pop()
-        if (!cur) continue
-        for (const e of fs.readdirSync(cur, { withFileTypes: true })) {
-          const p = path.join(cur, e.name)
-          if (e.isDirectory()) stack.push(p)
-          else n++
-        }
-      }
-    } catch {
-      /* noop */
-    }
-    return n
-  }
-
-  private sumSize(dir: string): number {
-    let s = 0
-    try {
-      const stack = [dir]
-      while (stack.length) {
-        const cur = stack.pop()
-        if (!cur) continue
-        for (const e of fs.readdirSync(cur, { withFileTypes: true })) {
-          const p = path.join(cur, e.name)
-          if (e.isDirectory()) stack.push(p)
-          else s += fs.statSync(p).size
-        }
-      }
-    } catch {
-      /* noop */
-    }
-    return s
-  }
-
-  list(): BackupInfo[] {
+  async list(): Promise<BackupInfo[]> {
     this.init()
     const out: BackupInfo[] = []
     let dirs: string[] = []
     try {
-      dirs = fs.readdirSync(this.backupDir)
+      dirs = await fs.promises.readdir(this.backupDir)
     } catch {
       return []
     }
     for (const d of dirs) {
       const full = path.join(this.backupDir, d)
-      if (!fs.statSync(full).isDirectory()) continue
-      const info = this.getInfo(d)
+      try {
+        if (!(await fs.promises.stat(full)).isDirectory()) continue
+      } catch {
+        continue
+      }
+      const info = await this.getInfo(d)
       if (info) out.push(info)
     }
     return out.sort((a, b) => b.createdAt - a.createdAt)
   }
 
-  private getInfo(id: string): BackupInfo | null {
+  private async getInfo(id: string): Promise<BackupInfo | null> {
     const dir = path.join(this.backupDir, id)
     const meta = this.readMeta(dir)
     if (!meta) return null
-    // 总大小 = 目录大小 - meta 文件
-    const size = Math.max(0, this.sumSize(dir) - (this.readMetaFileSize(dir) ?? 0))
-    const entryCount = Math.max(0, this.countFiles(dir) - 1)
+    // 总大小 = 目录大小 - meta 文件（单次遍历同时取得 size/count）
+    const scan = await this.scanDirAsync(dir)
+    const metaSize = this.readMetaFileSize(dir) ?? 0
     return {
       id,
       name: meta.name,
       createdAt: meta.createdAt,
       kind: meta.kind,
       trigger: meta.trigger,
-      size,
-      entryCount
+      size: Math.max(0, scan.size - metaSize),
+      entryCount: Math.max(0, scan.count - 1)
     }
   }
 
@@ -223,19 +224,20 @@ class BackupManager {
     }
     const dshHome = this.getDshHome()
     try {
-      // 恢复前保护快照
-      await this.create('pre-restore', 'auto', `restore:${id}`)
+      // 恢复前保护快照（R-25: 失败则中止恢复，避免无保护直接覆盖）
+      const guard = await this.create('pre-restore', 'auto', 'restore:' + id)
+      if (!guard) return { ok: false, error: '恢复前保护快照创建失败，已中止恢复' }
       // 复制快照中的每个顶层条目（排除 meta 文件）
-      for (const entry of fs.readdirSync(src)) {
+      for (const entry of await fs.promises.readdir(src)) {
         if (entry === '.backup-meta.json') continue
         const s = path.join(src, entry)
         const d = path.join(dshHome, entry)
-        if (fs.statSync(s).isDirectory()) {
+        if ((await fs.promises.stat(s)).isDirectory()) {
           fs.mkdirSync(d, { recursive: true })
-          fs.cpSync(s, d, { recursive: true })
+          await fs.promises.cp(s, d, { recursive: true })
         } else {
           fs.mkdirSync(path.dirname(d), { recursive: true })
-          fs.copyFileSync(s, d)
+          await fs.promises.copyFile(s, d)
         }
       }
       logger.info('backup restored', { id, dshHome })
@@ -260,17 +262,21 @@ class BackupManager {
   }
 
   /** 保留策略：最多保留 MAX_BACKUPS 个；自动/定时快照优先清理，手动存档尽量保留 */
-  private prune(): void {
-    const all = this.list()
-    if (all.length <= MAX_BACKUPS) return
-    const excess = all.slice(MAX_BACKUPS)
-    const autos = excess.filter((b) => b.kind === 'auto')
-    if (autos.length > 0) {
-      for (const b of autos) this.delete(b.id)
-      return
+  private async prune(): Promise<void> {
+    let removed = 0
+    let all = await this.list()
+    while (all.length > MAX_BACKUPS) {
+      const excess = all.slice(MAX_BACKUPS)
+      // 自动快照优先清理；无自动快照时才清手动存档（循环直到不超过上限）
+      const victims = excess.filter((b) => b.kind === 'auto')
+      const toRemove = victims.length > 0 ? victims : excess
+      for (const b of toRemove) {
+        this.delete(b.id)
+        removed++
+      }
+      all = await this.list()
     }
-    for (const b of excess) this.delete(b.id)
-    logger.info('pruned old backups', { removed: excess.length })
+    if (removed > 0) logger.info('pruned old backups', { removed })
   }
 
   /** 供插件管理/自动更新调用的自动快照 */

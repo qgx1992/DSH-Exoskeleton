@@ -141,5 +141,7 @@ app.on('before-quit', () => {
 })
 
 app.on('will-quit', () => {
-  void dshManager.shutdown().finally(() => destroyTray())
+  // R-2: 同步强杀 dsh 进程树（Electron 不等 will-quit 中的异步，避免孙进程/端口残留）
+  dshManager.killTreeNow()
+  destroyTray()
 })

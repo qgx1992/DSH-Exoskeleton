@@ -52,6 +52,8 @@ export function BackupTab(): React.JSX.Element {
     try {
       const r = await window.dshDesktop.backup.restore(b.id)
       setMessage(r.ok ? { type: 'ok', text: '恢复完成。建议重启 DSH 服务以生效。' } : { type: 'err', text: r.error ?? '恢复失败' })
+      // R-27: 恢复会额外生成保护快照，刷新列表展示
+      await refresh()
     } finally {
       setBusyId(null)
     }

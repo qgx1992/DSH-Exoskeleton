@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AppConfig,
   KernelInfo,
@@ -35,6 +35,8 @@ export function KernelsTab(): React.JSX.Element {
   const [quotaInput, setQuotaInput] = useState('')
   // #5：内核安装源（空 = 官方 npmjs）
   const [registry, setRegistry] = useState('')
+  // R-7: 运行时进度收尾定时器（卸载时清理）
+  const rtTimerRef = useRef<number | null>(null)
 
   const refresh = useCallback(async () => {
     setInstalled(await window.dshDesktop.kernels.installed())
@@ -45,11 +47,12 @@ export function KernelsTab(): React.JSX.Element {
     setQuota(await window.dshDesktop.kernels.quota())
   }, [])
 
+  // R-6: 函数式更新，避免 selected 依赖导致切换下拉框触发 effect 连锁重跑（6+ 次 IPC + 整页刷新）
   const loadVersions = useCallback(async () => {
     const list = await window.dshDesktop.kernels.available()
     setAvailable(list)
-    if (!selected) setSelected(list[0]?.version ?? '')
-  }, [selected])
+    setSelected((prev) => prev || (list[0]?.version ?? ''))
+  }, [])
 
   useEffect(() => {
     void refresh()
@@ -71,7 +74,10 @@ export function KernelsTab(): React.JSX.Element {
     const offRt = window.dshDesktop.runtime.onProgress((p) => {
       setRtProgress(p)
       if (p.stage === 'done' || p.stage === 'error') {
-        setTimeout(() => {
+        // R-7: timer 存 ref，卸载时清理（避免卸载后 setState + 多余 IPC）
+        if (rtTimerRef.current !== null) window.clearTimeout(rtTimerRef.current)
+        rtTimerRef.current = window.setTimeout(() => {
+          rtTimerRef.current = null
           setRtProgress(null)
           void refresh()
         }, 800)
@@ -80,6 +86,10 @@ export function KernelsTab(): React.JSX.Element {
     return () => {
       off()
       offRt()
+      if (rtTimerRef.current !== null) {
+        window.clearTimeout(rtTimerRef.current)
+        rtTimerRef.current = null
+      }
     }
   }, [loadVersions, refresh])
 
@@ -141,11 +151,22 @@ export function KernelsTab(): React.JSX.Element {
       setMessage({ type: 'err', text: r.error ?? '升级失败' })
       return
     }
-    // 等待安装落盘后设为默认
+    // R-1: 等待安装落盘并确认已安装后才设为默认（避免默认内核指向未安装版本）
+    let installedOk = false
     for (let i = 0; i < 30; i++) {
       await new Promise((res) => setTimeout(res, 500))
       const inst = await window.dshDesktop.kernels.installed()
-      if (inst.some((k) => k.version === latest && k.status === 'installed')) break
+      if (inst.some((k) => k.version === latest && k.status === 'installed')) {
+        installedOk = true
+        break
+      }
+    }
+    if (!installedOk) {
+      setInstalling(null)
+      setMessage({ type: 'err', text: '内核 v' + latest + ' 安装状态未确认（可能尚未落盘），未切换默认版本，请稍后重试' })
+      await refresh()
+      void window.dshDesktop.kernels.checkUpdate().then(setUpdate)
+      return
     }
     const dr = await window.dshDesktop.kernels.setDefault(latest)
     setInstalling(null)

@@ -2,17 +2,22 @@
  * 官方 DeepSeek 鲸鱼图标（黑金配色）
  * 矢量来源: fe-static.deepseek.com/chat/favicon.svg（官方路径，仅改配色）
  */
+import { useId } from 'react'
+
 interface Props {
   size?: number
   className?: string
   gradientId?: string
 }
 
-export function WhaleIcon({ size = 16, className, gradientId = 'whale-gold' }: Props) {
+export function WhaleIcon({ size = 16, className, gradientId }: Props) {
+  // R-28: 默认使用实例唯一 id，避免多实例同屏时 gradient id 重复（未来改配色会串色）
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '')
+  const gid = gradientId ?? 'whale-gold-' + uid
   return (
     <svg width={size} height={size} viewBox="0 0 50 50" fill="none" className={className}>
       <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="0.2" y2="1">
+        <linearGradient id={gid} x1="0" y1="0" x2="0.2" y2="1">
           <stop offset="0%" stopColor="#F7E08B" />
           <stop offset="52%" stopColor="#D4AF37" />
           <stop offset="100%" stopColor="#8C6114" />

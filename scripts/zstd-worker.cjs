@@ -95,98 +95,109 @@ function handle(req, res) {
       res({ ok: false, error: 'node zstd unsupported' })
       return
     }
-    const buf = fs.readFileSync(req.file)
-    if (req.cmd === 'frameEvents') {
-      const offset = req.offset || 0
-      if (offset >= buf.length) {
-        res({ ok: true, events: [], turnEndMax: 0 })
-        return
-      }
-      // 从 offset 前 64 字节起扫描（容忍新块从帧中间开始），定位首个 magic 作为帧起点
-      const tailStart = Math.max(0, offset - 64)
-      const tail = buf.subarray(tailStart)
-      let magicAt = -1
-      for (let o = 0; o < tail.length - 4; o++) {
-        if (tail.readUInt32LE(o) === ZSTD_MAGIC) { magicAt = o; break }
-      }
-      if (magicAt < 0) {
-        res({ ok: true, events: [], turnEndMax: 0 })
-        return
-      }
-      const frames = scanZstdFrames(tail.subarray(magicAt))
-      let events = []
-      let turnEndMax = 0
-      const turnEnds = []
-      let turnStarts = 0
-      // 本批最后一个 turn 事件（按 seq 最大者判定类型）：
-      //   - 'end'   → 本批以轮次结束收尾，更新完成候选
-      //   - 'start' → 本批以新一轮开始收尾，会话仍活跃，清除候选
-      let lastTurnType = null
-      let lastTurnSeq = -1
-      // 本批所有非 interrupted turn/end 的最大事件时间（ms）
-      let lastEndTime = 0
-      const frameStartOfs = tailStart + magicAt
-      // 最多解析 64 帧：正常运行每次 flush 仅 1 帧（批窗口 200ms），
-      // 但崩溃修复（repair re-encode）或观察间隔较长时一次增长可达数十帧
-      for (const fr of frames.slice(0, 64)) {
-        if (frameStartOfs + fr.end <= offset) continue // 仅处理位于 offset 之后的帧
-        for (const ev of parseEvents(decompress(tail.subarray(magicAt), fr))) {
-          events.push(ev)
-          if (ev.type === 'turn/end') {
-            if (ev.seq > turnEndMax) turnEndMax = ev.seq
-            turnEnds.push({ seq: ev.seq, time: ev.time, kind: ev.kind, turn: ev.turn })
-            if (ev.kind !== 'interrupted' && ev.time > lastEndTime) lastEndTime = ev.time
-            if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'end' }
-          } else if (ev.type === 'turn/start') {
-            turnStarts++
-            if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'start' }
+    // H3: 按需 seek 读取，避免整文件 readFileSync（长会话文件可达数百 MB）
+    const fh = fs.openSync(req.file, 'r')
+    try {
+      const size = fs.fstatSync(fh).size
+      if (req.cmd === 'frameEvents') {
+        const offset = req.offset || 0
+        if (offset >= size) {
+          res({ ok: true, events: [], turnEndMax: 0 })
+          return
+        }
+        // 从 offset 前 64 字节起只读尾部（容忍新块从帧中间开始），定位首个 magic 作为帧起点
+        const tailStart = Math.max(0, offset - 64)
+        const tail = Buffer.alloc(size - tailStart)
+        fs.readSync(fh, tail, 0, tail.length, tailStart)
+        let magicAt = -1
+        for (let o = 0; o < tail.length - 4; o++) {
+          if (tail.readUInt32LE(o) === ZSTD_MAGIC) { magicAt = o; break }
+        }
+        if (magicAt < 0) {
+          res({ ok: true, events: [], turnEndMax: 0 })
+          return
+        }
+        const frames = scanZstdFrames(tail.subarray(magicAt))
+        let events = []
+        let turnEndMax = 0
+        const turnEnds = []
+        let turnStarts = 0
+        // 本批最后一个 turn 事件（按 seq 最大者判定类型）：
+        //   - 'end'   → 本批以轮次结束收尾，更新完成候选
+        //   - 'start' → 本批以新一轮开始收尾，会话仍活跃，清除候选
+        let lastTurnType = null
+        let lastTurnSeq = -1
+        // 本批所有非 interrupted turn/end 的最大事件时间（ms）
+        let lastEndTime = 0
+        const frameStartOfs = tailStart + magicAt
+        // 最多解析 64 帧：正常运行每次 flush 仅 1 帧（批窗口 200ms），
+        // 但崩溃修复（repair re-encode）或观察间隔较长时一次增长可达数十帧
+        for (const fr of frames.slice(0, 64)) {
+          if (frameStartOfs + fr.end <= offset) continue // 仅处理位于 offset 之后的帧
+          for (const ev of parseEvents(decompress(tail.subarray(magicAt), fr))) {
+            events.push(ev)
+            if (ev.type === 'turn/end') {
+              if (ev.seq > turnEndMax) turnEndMax = ev.seq
+              turnEnds.push({ seq: ev.seq, time: ev.time, kind: ev.kind, turn: ev.turn })
+              if (ev.kind !== 'interrupted' && ev.time > lastEndTime) lastEndTime = ev.time
+              if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'end' }
+            } else if (ev.type === 'turn/start') {
+              turnStarts++
+              if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'start' }
+            }
           }
         }
+        res({ ok: true, events, turnEndMax, turnEnds, turnStarts, lastTurnType, lastEndTime })
+        return
       }
-      res({ ok: true, events, turnEndMax, turnEnds, turnStarts, lastTurnType, lastEndTime })
-      return
-    }
-    if (req.cmd === 'headInfo') {
-      const frames = scanZstdFrames(buf)
-      const records = []
-      let cwd = ''
-      let title = ''
-      let firstUserText = ''
-      for (const fr of frames.slice(0, 16)) {
-        for (const line of decompress(buf, fr).split('\n')) {
-          if (!line.trim()) continue
-          try {
-            const j = JSON.parse(line)
-            if (j.type === 'session' && typeof j.cwd === 'string' && !cwd) cwd = j.cwd
-            if ((j.type === 'session/title' || j.type === 'session/title-llm-request') && !title) {
-              const t = j.data && j.data.title
-              if (typeof t === 'string' && t.trim()) title = t.trim().slice(0, 80)
-            }
-            if (!title && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
-              for (const part of j.data.content) {
-                if (part && typeof part.text === 'string' && part.text.trim()) {
-                  title = part.text.trim().slice(0, 80)
-                  break
+      if (req.cmd === 'headInfo') {
+        // 只读头部（最多 512KB，足够前 16 帧取标题/cwd），避免整文件读入
+        const headLen = Math.min(size, 512 * 1024)
+        const buf = Buffer.alloc(headLen)
+        fs.readSync(fh, buf, 0, headLen, 0)
+        const frames = scanZstdFrames(buf)
+        const records = []
+        let cwd = ''
+        let title = ''
+        let firstUserText = ''
+        for (const fr of frames.slice(0, 16)) {
+          for (const line of decompress(buf, fr).split('\n')) {
+            if (!line.trim()) continue
+            try {
+              const j = JSON.parse(line)
+              if (j.type === 'session' && typeof j.cwd === 'string' && !cwd) cwd = j.cwd
+              if ((j.type === 'session/title' || j.type === 'session/title-llm-request') && !title) {
+                const t = j.data && j.data.title
+                if (typeof t === 'string' && t.trim()) title = t.trim().slice(0, 80)
+              }
+              if (!title && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
+                for (const part of j.data.content) {
+                  if (part && typeof part.text === 'string' && part.text.trim()) {
+                    title = part.text.trim().slice(0, 80)
+                    break
+                  }
                 }
               }
-            }
-            // 首条用户消息（列表显示用同一来源），始终收集
-            if (!firstUserText && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
-              for (const part of j.data.content) {
-                if (part && typeof part.text === 'string' && part.text.trim()) {
-                  firstUserText = part.text.trim().slice(0, 80)
-                  break
+              // 首条用户消息（列表显示用同一来源），始终收集
+              if (!firstUserText && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
+                for (const part of j.data.content) {
+                  if (part && typeof part.text === 'string' && part.text.trim()) {
+                    firstUserText = part.text.trim().slice(0, 80)
+                    break
+                  }
                 }
               }
-            }
-          } catch { /* noop */ }
+            } catch { /* noop */ }
+          }
+          if (cwd && title && firstUserText) break
         }
-        if (cwd && title && firstUserText) break
+        res({ ok: true, cwd, title, firstUserText })
+        return
       }
-      res({ ok: true, cwd, title, firstUserText })
-      return
+      res({ ok: false, error: 'unknown cmd: ' + req.cmd })
+    } finally {
+      fs.closeSync(fh)
     }
-    res({ ok: false, error: 'unknown cmd: ' + req.cmd })
   } catch (e) {
     res({ ok: false, error: e.message })
   }

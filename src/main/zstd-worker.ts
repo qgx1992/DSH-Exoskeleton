@@ -28,7 +28,8 @@ interface WorkerPayload {
 
 export class ZstdWorkerClient {
   private proc: ChildProcess | null = null
-  private pending = new Map<number, (v: WorkerPayload) => void>()
+  /** R-17: pending 附带超时定时器（响应到达/退出时清理，避免悬挂 15s） */
+  private pending = new Map<number, { resolve: (v: WorkerPayload) => void; timer: NodeJS.Timeout }>()
   private seq = 0
   private buffer = ''
 
@@ -77,17 +78,29 @@ export class ZstdWorkerClient {
           if (!line.trim()) continue
           try {
             const msg = JSON.parse(line) as WorkerPayload & { id?: number }
-            const resolve = this.pending.get(msg.id ?? -1)
-            if (resolve) {
+            const entry = this.pending.get(msg.id ?? -1)
+            if (entry) {
               this.pending.delete(msg.id ?? -1)
-              resolve(msg)
+              clearTimeout(entry.timer)
+              entry.resolve(msg)
             }
           } catch { /* noop */ }
         }
       })
       this.proc.on('exit', () => {
         this.proc = null
-        for (const [, r] of this.pending) r({ ok: false, error: 'worker exited' })
+        for (const [, entry] of this.pending) {
+          clearTimeout(entry.timer)
+          entry.resolve({ ok: false, error: 'worker exited' })
+        }
+        this.pending.clear()
+      })
+      // R-17: stdin 写失败（worker 已退出/EPIPE）时拒绝所有 pending，避免未捕获异常
+      this.proc.stdin?.on('error', () => {
+        for (const [, entry] of this.pending) {
+          clearTimeout(entry.timer)
+          entry.resolve({ ok: false, error: 'worker stdin error' })
+        }
         this.pending.clear()
       })
       return true
@@ -108,21 +121,24 @@ export class ZstdWorkerClient {
         return
       }
       const id = this.seq++
-      this.pending.set(id, resolvePromise as (v: WorkerPayload) => void)
+      // R-17: 超时定时器随请求入 pending，响应/退出时一并清理
+      const timer = setTimeout(() => {
+        const entry = this.pending.get(id)
+        if (entry) {
+          this.pending.delete(id)
+          clearTimeout(entry.timer)
+          entry.resolve({ ok: false, error: 'worker timeout' })
+        }
+      }, 15_000)
+      this.pending.set(id, { resolve: resolvePromise as (v: WorkerPayload) => void, timer })
       const stdin = proc.stdin
       if (!stdin) {
         this.pending.delete(id)
+        clearTimeout(timer)
         resolvePromise({ ok: false, error: 'worker stdin closed' })
         return
       }
       stdin.write(JSON.stringify({ ...payload, cmd, id }) + '\n')
-      // 超时兜底
-      setTimeout(() => {
-        if (this.pending.has(id)) {
-          this.pending.delete(id)
-          resolvePromise({ ok: false, error: 'worker timeout' })
-        }
-      }, 15_000)
     })
   }
 

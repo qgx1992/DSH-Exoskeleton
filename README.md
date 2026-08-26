@@ -75,8 +75,8 @@ npm run dist
 ## 打包产物
 
 ```
-dist/DSH-Exoskeleton-Setup-0.6.2.exe          # NSIS 安装器
-dist/DSH-Exoskeleton-Portable-0.6.2.exe       # 单文件便携版
+dist/DSH-Exoskeleton-Setup-0.6.3.exe          # NSIS 安装器
+dist/DSH-Exoskeleton-Portable-0.6.3.exe       # 单文件便携版
 dist/win-unpacked/                            # 免安装绿色版文件夹
 ```
 

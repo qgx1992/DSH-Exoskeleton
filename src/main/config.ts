@@ -34,6 +34,8 @@ const ENCRYPTED_PREFIX = 'enc:'
 class ConfigStore {
   private file = ''
   private cache: AppConfig | null = null
+  /** R-16: 落盘防抖定时器（高频更新如窗口几何时合并写盘） */
+  private persistTimer: NodeJS.Timeout | null = null
 
   init(): void {
     this.file = path.join(app.getPath('userData'), 'config.json')
@@ -47,7 +49,8 @@ class ConfigStore {
         this.cache = this.normalize({ ...DEFAULTS, ...raw })
       } else {
         this.cache = this.normalize({ ...DEFAULTS })
-        this.persist()
+        // R-16: 首次创建默认配置同步落盘（不等防抖）
+        this.writeFile()
       }
     } catch (err) {
       logger.warn('config load failed, using defaults', err)
@@ -67,9 +70,30 @@ class ConfigStore {
   }
 
   private persist(): void {
+    // R-16: 异步防抖落盘（窗口拖动等高频 set 合并写盘，避免同步全量写阻塞主进程）
+    if (this.persistTimer) clearTimeout(this.persistTimer)
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.writeFile()
+    }, 200)
+  }
+
+  /** R-16: 同步落盘（退出前调用，确保最后一次修改不丢失） */
+  flush(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+      this.writeFile()
+    }
+  }
+
+  private writeFile(): void {
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true })
-      fs.writeFileSync(this.file, JSON.stringify(this.cache, null, 2), 'utf-8')
+      // R-3: 原子写入（临时文件 + rename），避免崩溃/断电写坏 config.json 导致配置回退默认
+      const tmp = this.file + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(this.cache, null, 2), 'utf-8')
+      fs.renameSync(tmp, this.file)
     } catch (err) {
       logger.error('config persist failed', err)
     }
@@ -91,13 +115,23 @@ class ConfigStore {
     const next = { ...this.get(), ...patch }
     // apiKey 使用 OS 级加密存储（Windows DPAPI / macOS Keychain），避免明文落盘
     if (patch.apiKey !== undefined) {
-      try {
-        if (safeStorage.isEncryptionAvailable() && patch.apiKey && !patch.apiKey.startsWith(ENCRYPTED_PREFIX)) {
-          const buf = safeStorage.encryptString(patch.apiKey)
-          next.apiKey = ENCRYPTED_PREFIX + buf.toString('base64')
+      const current = this.cache?.apiKey
+      // R-26: 明文与已存解密值相同 → 保持原密文，避免重复加密 + 全量写盘
+      const samePlaintext =
+        !!current &&
+        current.startsWith(ENCRYPTED_PREFIX) &&
+        patch.apiKey === this.getApiKey()
+      if (samePlaintext) {
+        next.apiKey = current
+      } else {
+        try {
+          if (safeStorage.isEncryptionAvailable() && patch.apiKey && !patch.apiKey.startsWith(ENCRYPTED_PREFIX)) {
+            const buf = safeStorage.encryptString(patch.apiKey)
+            next.apiKey = ENCRYPTED_PREFIX + buf.toString('base64')
+          }
+        } catch (err) {
+          logger.warn('apiKey encryption unavailable, storing as-is (local only)', err)
         }
-      } catch (err) {
-        logger.warn('apiKey encryption unavailable, storing as-is (local only)', err)
       }
     }
     this.cache = next
