@@ -435,6 +435,8 @@ export class DSHManager extends EventEmitter {
       // H1: 手动停止后重置崩溃计数（下一次启动视为新一轮）
       this.restartCount = 0
       this.stableSince = null
+      // 无运行中进程也要失效缓存：崩溃残留的旧入口/旧版本号不得被下一次 start 复用
+      this.invalidateKernelCache()
       this.setStatus('stopped')
       return
     }
@@ -463,6 +465,8 @@ export class DSHManager extends EventEmitter {
     // H1: 停止成功后重置崩溃计数与稳定起点
     this.restartCount = 0
     this.stableSince = null
+    // 服务已完全停止：失效内核/运行时缓存（切换内核后 restart 会重新解析新入口并重探测版本）
+    this.invalidateKernelCache()
   }
 
   private isPidAlive(pid: number): boolean {
@@ -484,9 +488,25 @@ export class DSHManager extends EventEmitter {
     }
   }
 
+  /**
+   * 失效内核/运行时缓存：切换托管内核（默认版本/模式/Profile 绑定）后必须重新解析
+   * 入口并重探测版本，否则 restart 会复用缓存的旧 executable/nodeExe/version，
+   * 导致新内核不生效且标题栏/状态页版本号不刷新。
+   */
+  invalidateKernelCache(): void {
+    this.executable = null
+    this.nodeExe = null
+    this.version = null
+  }
+
   async restart(): Promise<void> {
     await this.stop()
     await this.start()
+    // 切换内核后基于新入口重探测版本并推送（新进程 stdout 版本行可能延迟/缺失；
+    // stop 已清 version 缓存，此处必然走 --version 重新探测）
+    void this.readVersion().then((v) => {
+      if (v) this.emit('statusChange', this.getState())
+    })
   }
 
   async readVersion(): Promise<string | null> {
