@@ -19,6 +19,7 @@ const DEFAULTS: AppConfig = {
   notifyServiceEvents: true,
   notifySessionDone: true,
   onboardingDone: false,
+  defaultPluginsProvisioned: false,
   kernelMode: 'managed',
   defaultKernelVersion: null,
   windowBounds: null,

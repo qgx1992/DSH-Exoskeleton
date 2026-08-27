@@ -155,6 +155,11 @@ export function PluginsTab(): React.JSX.Element {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-mono text-[13px] font-medium text-amber-200/90">{p.name}</span>
+                    {p.defaultEnabled && (
+                      <span className="shrink-0 rounded-full border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-px text-[10px] text-cyan-300">
+                        默认启用
+                      </span>
+                    )}
                     <span
                       className={'shrink-0 rounded-full border px-1.5 py-px text-[10px] ' + (p.source === 'github' ? 'border-slate-600/60 bg-slate-700/20 text-slate-400' : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300')}
                     >

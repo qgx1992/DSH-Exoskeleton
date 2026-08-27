@@ -16,6 +16,8 @@ export interface RecommendedPlugin {
   source: 'npm' | 'github'
   /** 主页链接 */
   url: string
+  /** 内置默认启用：首次运行（服务就绪时）自动安装并注册进 bundles，新装即自带 */
+  defaultEnabled?: boolean
 }
 
 export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
@@ -69,11 +71,12 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     url: 'https://github.com/baihejiangnan/dsh-session-context-menu'
   },
   {
-    // 本地插件：以 link: 绝对路径指向 ~/.dsh/local-plugins 下的源码，安装即默认启用（注册进 dsh.profile.bundles）
-    installTarget: 'link:C:/Users/QIU/.dsh/local-plugins/dsh-model-select-style',
+    // 内置默认启用：新装（首次服务就绪）自动安装到 web profile 并注册进 dsh.profile.bundles（= 默认启用）
+    installTarget: 'github:qgx1992/dsh-model-select-style',
     name: 'dsh-model-select-style',
     description: '输入框「模型选择」改版：供应商 + 模型两级联动按钮，选择逻辑复用官方组件',
-    source: 'npm',
-    url: 'file:///C:/Users/QIU/.dsh/local-plugins/dsh-model-select-style'
+    source: 'github',
+    url: 'https://github.com/qgx1992/dsh-model-select-style',
+    defaultEnabled: true
   }
 ]

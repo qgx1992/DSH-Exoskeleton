@@ -40,6 +40,8 @@ export interface AppConfig {
   notifySessionDone: boolean
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
+  /** 内置默认插件是否已完成首装预置（true 后不再自动补装，尊重用户手动卸载） */
+  defaultPluginsProvisioned: boolean
   /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */
   kernelMode: 'managed' | 'system'
   /** 托管内核默认版本 */

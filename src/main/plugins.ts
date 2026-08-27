@@ -10,6 +10,8 @@ import path from 'node:path'
 import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { backupManager } from './backup'
+import { configStore } from './config'
+import { RECOMMENDED_PLUGINS } from '../shared/recommended-plugins'
 import type { PluginCatalogItem, InstalledPlugin, PluginActionResult } from '../shared/types'
 
 const GITHUB_SEARCH = 'https://api.github.com/search/repositories?q=topic:dsh-plugin&sort=stars&order=desc&per_page=40'
@@ -169,5 +171,47 @@ export async function uninstallPlugin(pkg: string): Promise<PluginActionResult> 
     return { ok: false, error: '卸载失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
   } finally {
     pluginOpBusy = false
+  }
+}
+
+/**
+ * 内置默认插件预置（§4.3.3 扩展）：新装即默认启用
+ * - 在 DSH 服务就绪（web profile 已由内核初始化）后调用，幂等：
+ *   profile 缺少依赖或缺少 bundles 注册时自动 `dsh plugin add`（装完自动注册进
+ *   dsh.profile.bundles = 默认启用，仅需一次重启加载）。
+ * - 只执行一次：成功后写 config.defaultPluginsProvisioned 标记；之后即使手动卸载
+ *   也不再补装，尊重用户选择。
+ */
+const DEFAULT_PLUGINS = RECOMMENDED_PLUGINS.filter((p) => p.defaultEnabled)
+
+export async function provisionDefaultPlugins(): Promise<void> {
+  try {
+    const cfg = configStore.get()
+    if (cfg.defaultPluginsProvisioned || DEFAULT_PLUGINS.length === 0) return
+
+    // profile 未初始化前（首次 dsh 启动之前）跳过，等下次服务就绪再预置
+    let manifest: { dependencies?: Record<string, string>; dsh?: { profile?: { bundles?: string[] } } } = {}
+    try {
+      manifest = JSON.parse(fs.readFileSync(path.join(profileDir(), 'package.json'), 'utf-8'))
+    } catch {
+      return
+    }
+
+    const deps = manifest.dependencies ?? {}
+    const bundles = manifest.dsh?.profile?.bundles ?? []
+    for (const p of DEFAULT_PLUGINS) {
+      // 已安装且已注册进 bundles（默认启用）→ 无需处理
+      if (deps[p.name] !== undefined && bundles.includes(p.name)) continue
+      logger.info('provisioning default plugin', { name: p.name, installTarget: p.installTarget })
+      const r = await installPlugin(p.installTarget)
+      if (!r.ok) {
+        logger.warn('default plugin provisioning failed', { name: p.name, error: r.error })
+        return // 失败不落标记，下次服务就绪自动重试
+      }
+    }
+    configStore.set({ defaultPluginsProvisioned: true })
+    logger.info('default plugins provisioned', { names: DEFAULT_PLUGINS.map((p) => p.name) })
+  } catch (err) {
+    logger.warn('default plugin provisioning error', err instanceof Error ? err.message : String(err))
   }
 }
