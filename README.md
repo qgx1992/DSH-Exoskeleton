@@ -1,5 +1,7 @@
 # DeepSeek Harness 桌面客户端（DSH-Exoskeleton）
 
+[中文](README.md) | [English](README.en.md)
+
 > 基于社区 7 个 DSH 桌面端项目调研后的统一开发方案（[开发文档](DEV_DOC.md)）。
 
 轻量、纯净、功能完整的 DSH 桌面外壳：把官方 `dsh web` 封装为**双击即用**的 Windows 桌面程序。
