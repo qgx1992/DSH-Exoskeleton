@@ -256,8 +256,8 @@ export interface DesktopApi {
     uninstall: (pkg: string) => Promise<PluginActionResult>
     /** 联网检测全部已安装插件是否有新版本（返回附带 update 结果的已安装列表） */
     checkUpdate: () => Promise<InstalledPlugin[]>
-    /** 升级插件到最新版（内部复用 dsh plugin add，升级前自动备份） */
-    upgrade: (name: string) => Promise<PluginActionResult>
+    /** 升级插件到最新版（latest = 检测到的最新版本；npm 必须传精确版本，否则 range 内会 no-op） */
+    upgrade: (name: string, latest?: string) => Promise<PluginActionResult>
   }
   kernels: {
     installed: () => Promise<KernelInfo[]>

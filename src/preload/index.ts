@@ -38,7 +38,7 @@ const api: DesktopApi = {
     install: (pkg) => ipcRenderer.invoke('plugins:install', pkg),
     uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg),
     checkUpdate: () => ipcRenderer.invoke('plugins:checkUpdate'),
-    upgrade: (name) => ipcRenderer.invoke('plugins:upgrade', name)
+    upgrade: (name, latest) => ipcRenderer.invoke('plugins:upgrade', name, latest)
   },
   kernels: {
     installed: () => ipcRenderer.invoke('kernels:installed'),

@@ -35,7 +35,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('plugins:install', (_e, pkg: string) => installPlugin(pkg))
   ipcMain.handle('plugins:uninstall', (_e, pkg: string) => uninstallPlugin(pkg))
   ipcMain.handle('plugins:checkUpdate', () => checkPluginUpdates())
-  ipcMain.handle('plugins:upgrade', (_e, name: string) => upgradePlugin(name))
+  ipcMain.handle('plugins:upgrade', (_e, name: string, latest?: string) => upgradePlugin(name, latest))
 
   // ---------- 内核管理（多版本共存）----------
   ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())

@@ -117,14 +117,14 @@ export function PluginsTab(): React.JSX.Element {
     }
   }
 
-  const upgrade = async (name: string): Promise<void> => {
+  const upgrade = async (name: string, latest?: string): Promise<void> => {
     setBusyName(name)
     setMessage(null)
     try {
-      const r = await window.dshDesktop.plugins.upgrade(name)
+      const r = await window.dshDesktop.plugins.upgrade(name, latest)
       setMessage(
         r.ok
-          ? { type: 'ok', text: '已升级插件 ' + name + '（升级前已自动备份）' }
+          ? { type: 'ok', text: '已升级插件 ' + name + (latest ? ' 到 v' + latest : '') + '（升级前已自动备份）' }
           : { type: 'err', text: r.error ?? '升级 ' + name + ' 失败' }
       )
       // 升级成功后静默重检，让「有新版本」徽标即时归零
@@ -192,7 +192,7 @@ export function PluginsTab(): React.JSX.Element {
                   )}
                   {upgradable && (
                     <button
-                      onClick={() => void upgrade(p.name)}
+                      onClick={() => void upgrade(p.name, upd?.latest ?? undefined)}
                       disabled={busyName === p.name}
                       className="shrink-0 rounded-md bg-amber-400/90 px-2.5 py-1 text-[12px] font-medium text-slate-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
                     >

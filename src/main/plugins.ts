@@ -59,8 +59,19 @@ function readInstalledVersion(name: string): string | null {
 /** 按声明 spec 推断插件来源 */
 function detectSource(declared: string): PluginUpdateInfo['source'] {
   if (/^github:/i.test(declared)) return 'github'
+  // gh-proxy / codeload 等 URL 形式：github 域名可出现在任意位置（如 gh-proxy.com 包裹 codeload.github.com）
+  if (/https?:\/\//i.test(declared) && /(?:github\.com|codeload\.github\.com)/i.test(declared)) return 'github'
   if (/^(link|file):/i.test(declared)) return 'local'
   return 'npm'
+}
+
+/** 从声明 spec 提取 GitHub owner/repo（支持 github:owner/repo 与 github.com / codeload.github.com URL 两种形式） */
+function parseGithubSpec(spec: string): { owner: string; repo: string } | null {
+  const m = /^github:([^/]+)\/([^#/]+)/i.exec(spec.trim())
+  if (m) return { owner: m[1], repo: m[2].replace(/\.git$/, '') }
+  const u = /(?:github\.com|codeload\.github\.com)\/([^/\s]+)\/([^/\s#?]+)/i.exec(spec)
+  if (u) return { owner: u[1], repo: u[2].replace(/\.git$/, '') }
+  return null
 }
 
 /** 去掉常见 Git tag 的前导 v/V，再进逐段比较 */
@@ -79,10 +90,9 @@ async function fetchNpmLatest(name: string): Promise<string | null> {
 
 /** GitHub 最新版本：优先 releases/latest；无 release 的仓库回退 tags 首条类 semver tag */
 async function fetchGithubLatest(spec: string): Promise<string | null> {
-  const m = /^github:([^/]+)\/([^#/]+)/i.exec(spec.trim())
-  if (!m) throw new Error('无效的 github spec')
-  const owner = m[1]
-  const repo = m[2].replace(/\.git$/, '')
+  const gh = parseGithubSpec(spec)
+  if (!gh) throw new Error('无法识别 GitHub 来源 spec')
+  const { owner, repo } = gh
   const hdrs = { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop' }
   const relRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/releases/latest`, {
     headers: hdrs,
@@ -276,20 +286,31 @@ export async function uninstallPlugin(pkg: string): Promise<PluginActionResult> 
 
 /**
  * 升级插件到最新版：
- * - 自动备份（R-25）→ 按来源重放 `dsh plugin --profile web add <spec>`，pnpm 解析最新版本；
- * - npm 插件传裸包名（pnpm add <name> 拉 latest）；GitHub 插件重放原 `github:owner/repo` spec；
- * - 本地链接（link:/file:）无远端来源，拒绝升级。
+ * - 自动备份（R-25）→ 按来源重放 `dsh plugin --profile web add <spec>`；
+ * - npm 插件必须传**精确版本** `<name>@<latest>`：实测 `add <name>`（裸包名）与
+ *   `add <name>@latest`（tag）对已存在的同级范围依赖都是 no-op（exit 0 但 `added 0`，
+ *   pnpm 判 "Already up to date"），只有显式精确版本才强制解析并落地；
+ * - GitHub 插件（`github:owner/repo`）重放原 spec 重解析默认分支最新；
+ * - 本地链接（link:/file:）与 URL 固定提交（codeload/gh-proxy）来源无法远程升级，明确拒绝。
  */
-export async function upgradePlugin(name: string): Promise<PluginActionResult> {
+export async function upgradePlugin(name: string, latest?: string): Promise<PluginActionResult> {
   if (pluginOpBusy) return { ok: false, error: '插件操作进行中，请稍候' }
   const target = (name ?? '').trim()
   if (!target) return { ok: false, error: '包名不能为空' }
   const installed = listInstalled()
   const p = installed.find((i) => i.name === target || i.name.toLowerCase() === target.toLowerCase())
   if (!p) return { ok: false, error: '插件「' + target + '」不在当前 profile 依赖中' }
-  const source = detectSource(p.version)
+  const isGithubRef = /^github:/i.test(p.version)
+  const source = isGithubRef ? 'github' : detectSource(p.version)
   if (source === 'local') return { ok: false, error: '本地链接插件（link:）无远端来源，无法升级' }
-  const spec = source === 'github' ? p.version : target
+  if (source === 'github' && !isGithubRef) {
+    return { ok: false, error: '该插件由 URL 固定提交安装（版本被提交 sha 锁定），无法直接升级；请先卸载后重新安装最新版' }
+  }
+  if (!isGithubRef && !latest) {
+    return { ok: false, error: '未获取到最新版本号，请先点击「检查更新」后再升级' }
+  }
+  // npm 用精确版本强制升级；GitHub 重放原 spec（其余来源已在上方拒绝）
+  const spec = isGithubRef ? p.version : target + '@' + latest
 
   pluginOpBusy = true
   try {
