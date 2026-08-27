@@ -9,11 +9,37 @@ export function PluginsTab(): React.JSX.Element {
   const [loadingCatalog, setLoadingCatalog] = useState(false)
   const [busyName, setBusyName] = useState<string | null>(null)
   const [installingAll, setInstallingAll] = useState(false)
+  const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   const refreshInstalled = useCallback(async () => {
     const list = await window.dshDesktop.plugins.installed()
     setInstalled(list)
+  }, [])
+
+  /** 联网重检全部已安装插件（静默：只刷新列表与徽标，不覆盖提示消息） */
+  const refreshUpdates = useCallback(async (): Promise<void> => {
+    setInstalled(await window.dshDesktop.plugins.checkUpdate())
+  }, [])
+
+  /** 顶部「检查更新」：联网检测并给出汇总提示 */
+  const checkUpdates = useCallback(async (): Promise<void> => {
+    setCheckingUpdates(true)
+    setMessage(null)
+    try {
+      const list = await window.dshDesktop.plugins.checkUpdate()
+      setInstalled(list)
+      const n = list.filter((p) => p.update?.available).length
+      setMessage(
+        n > 0
+          ? { type: 'ok', text: '检查完成：' + n + ' 个插件有新版本可升级' }
+          : { type: 'ok', text: '检查完成：所有已安装插件均是最新版本' }
+      )
+    } catch (err) {
+      setMessage({ type: 'err', text: err instanceof Error ? err.message : '检查更新失败' })
+    } finally {
+      setCheckingUpdates(false)
+    }
   }, [])
 
   const loadCatalog = useCallback(async (q: string): Promise<void> => {
@@ -91,6 +117,23 @@ export function PluginsTab(): React.JSX.Element {
     }
   }
 
+  const upgrade = async (name: string): Promise<void> => {
+    setBusyName(name)
+    setMessage(null)
+    try {
+      const r = await window.dshDesktop.plugins.upgrade(name)
+      setMessage(
+        r.ok
+          ? { type: 'ok', text: '已升级插件 ' + name + '（升级前已自动备份）' }
+          : { type: 'err', text: r.error ?? '升级 ' + name + ' 失败' }
+      )
+      // 升级成功后静默重检，让「有新版本」徽标即时归零
+      if (r.ok) await refreshUpdates()
+    } finally {
+      setBusyName(null)
+    }
+  }
+
   const pendingCount = RECOMMENDED_PLUGINS.filter((p) => !isRecommendedInstalled(p)).length
 
   return (
@@ -109,26 +152,63 @@ export function PluginsTab(): React.JSX.Element {
 
       {/* 已安装 */}
       <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">
-          已安装（{installed.length}）
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">
+            已安装（{installed.length}）
+          </h3>
+          <button
+            onClick={() => void checkUpdates()}
+            disabled={checkingUpdates || installed.length === 0}
+            className="shrink-0 rounded-lg bg-slate-800 px-3 py-1.5 text-[12px] text-slate-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {checkingUpdates ? '检查中…' : '检查更新'}
+          </button>
+        </div>
         {installed.length === 0 ? (
           <div className="mt-3 text-[13px] text-slate-500">当前 Web Profile 暂无独立插件依赖</div>
         ) : (
           <div className="mt-3 space-y-2">
-            {installed.map((p) => (
-              <div key={p.name} className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-slate-200">{p.name}</span>
-                <span className="shrink-0 font-mono text-[11px] text-slate-500">{p.version}</span>
-                <button
-                  onClick={() => void uninstall(p.name)}
-                  disabled={busyName === p.name}
-                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
-                >
-                  {busyName === p.name ? '处理中…' : '卸载'}
-                </button>
-              </div>
-            ))}
+            {installed.map((p) => {
+              const upd = p.update
+              const upgradable = !!upd?.available && !!upd.latest
+              return (
+                <div key={p.name} className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-slate-200" title={upd?.current && upd.current !== upd.declared ? '当前实际 v' + upd.current : p.name}>
+                    {p.name}
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-slate-500" title={upd?.current ? '当前实际 v' + upd.current : undefined}>
+                    {p.version}
+                  </span>
+                  {upgradable && (
+                    <span className="shrink-0 rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-px text-[10px] text-amber-300">
+                      有新版本 v{upd!.latest}
+                    </span>
+                  )}
+                  {!upgradable && upd && !upd.error && upd.latest && upd.current && (
+                    <span className="shrink-0 text-[10px] text-emerald-400/70">已是最新</span>
+                  )}
+                  {upd?.error && (
+                    <span className="shrink-0 text-[10px] text-slate-500" title={upd.error}>检测失败</span>
+                  )}
+                  {upgradable && (
+                    <button
+                      onClick={() => void upgrade(p.name)}
+                      disabled={busyName === p.name}
+                      className="shrink-0 rounded-md bg-amber-400/90 px-2.5 py-1 text-[12px] font-medium text-slate-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                    >
+                      {busyName === p.name ? '升级中…' : '升级'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => void uninstall(p.name)}
+                    disabled={busyName === p.name}
+                    className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
+                  >
+                    {busyName === p.name ? '处理中…' : '卸载'}
+                  </button>
+                </div>
+              )
+            })}
           </div>
         )}
       </section>

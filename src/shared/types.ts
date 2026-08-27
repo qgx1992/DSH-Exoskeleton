@@ -181,6 +181,8 @@ export interface BackupInfo {
   trigger: string
   size: number
   entryCount: number
+  /** 快照顶层条目（如 settings.yaml / profiles / plugins…），用于任选恢复 */
+  entries: string[]
 }
 
 /** 社区插件目录条目（§4.3.3 插件管理器） */
@@ -199,6 +201,26 @@ export interface PluginCatalogItem {
 export interface InstalledPlugin {
   name: string
   version: string
+  /** 最近一次插件更新检测结果（null = 尚未检测） */
+  update: PluginUpdateInfo | null
+}
+
+/** 插件更新检测结果（plugins:checkUpdate 逐插件产出） */
+export interface PluginUpdateInfo {
+  /** 声明 spec（profile package.json dependencies 原始值，如 ^1.2.3 / github:owner/repo / link:…） */
+  declared: string
+  /** 解析后实际安装版本（node_modules 内 package.json 的 version；读不到为 null） */
+  current: string | null
+  /** 远端最新版本（npm dist-tags.latest / GitHub 最新发布 tag；本地链接或不可检测为 null） */
+  latest: string | null
+  /** 是否有可升级的新版本（current 已知且 latest > current） */
+  available: boolean
+  /** 来源类型 */
+  source: 'npm' | 'github' | 'local' | 'unknown'
+  /** 本次检测时间（ms） */
+  checkedAt: number
+  /** 检测失败信息（网络受限等；正常为 null） */
+  error: string | null
 }
 
 export interface PluginActionResult extends SaveResult {
@@ -223,7 +245,8 @@ export interface DesktopApi {
   backup: {
     list: () => Promise<BackupInfo[]>
     create: (name?: string) => Promise<BackupInfo | null>
-    restore: (id: string) => Promise<SaveResult>
+    /** entries 为空/缺省 = 恢复全部顶层条目；指定则只恢复所选条目 */
+    restore: (id: string, entries?: string[]) => Promise<SaveResult>
     delete: (id: string) => Promise<SaveResult>
   }
   plugins: {
@@ -231,6 +254,10 @@ export interface DesktopApi {
     installed: () => Promise<InstalledPlugin[]>
     install: (pkg: string) => Promise<PluginActionResult>
     uninstall: (pkg: string) => Promise<PluginActionResult>
+    /** 联网检测全部已安装插件是否有新版本（返回附带 update 结果的已安装列表） */
+    checkUpdate: () => Promise<InstalledPlugin[]>
+    /** 升级插件到最新版（内部复用 dsh plugin add，升级前自动备份） */
+    upgrade: (name: string) => Promise<PluginActionResult>
   }
   kernels: {
     installed: () => Promise<KernelInfo[]>
