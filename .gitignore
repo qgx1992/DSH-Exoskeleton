@@ -11,3 +11,8 @@ main.js
 dsh-probe-test.log
 dsh-probe-test.log.err
 .DS_Store
+# 本地开发助手文档，默认不推送到 GitHub
+AGENT.md
+# 会话安装插件的临时产物（与本项目无关，安装完成后记得删除）
+.dsh-vision-router/
+dsh-pet-running-*.png
