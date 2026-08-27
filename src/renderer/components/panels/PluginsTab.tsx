@@ -145,7 +145,7 @@ export function PluginsTab(): React.JSX.Element {
             {installingAll ? '安装中…' : pendingCount === 0 ? '全部已安装' : '一键安装全部（' + pendingCount + '）'}
           </button>
         </div>
-        <p className="mt-1 text-[12px] text-slate-500">精选社区插件，覆盖搜索、看图、计费、侧边栏、远程访问与右键菜单，一键补齐常用能力。</p>
+        <p className="mt-1 text-[12px] text-slate-500">精选社区插件，覆盖搜索、视觉、计费、侧边栏、远程访问与右键菜单，一键补齐常用能力。</p>
         <div className="mt-3 space-y-2">
           {RECOMMENDED_PLUGINS.map((p) => {
             const done = isRecommendedInstalled(p)

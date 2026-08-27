@@ -36,11 +36,11 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     url: 'https://www.npmjs.com/package/@liustack/modsearch'
   },
   {
-    installTarget: '@liustack/modlens',
-    name: '@liustack/modlens',
-    description: '视觉桥接：贴图即可识别/分析图片，text-only 模型也能看图',
+    installTarget: 'dsh-vision-router',
+    name: 'dsh-vision-router',
+    description: 'text-only 模型也能看图：内置免费视觉链 + 像素级视觉工具（问答/定位/裁剪/OCR/抠图/截图）',
     source: 'npm',
-    url: 'https://www.npmjs.com/package/@liustack/modlens'
+    url: 'https://github.com/ysr666/dsh-vision-router'
   },
   {
     installTarget: 'dsh-cost-meter',
