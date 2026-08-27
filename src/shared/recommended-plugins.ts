@@ -80,10 +80,12 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     defaultEnabled: true
   },
   {
+    // 内置默认启用：新装（首次服务就绪）自动安装到 web profile 并注册进 dsh.profile.bundles（= 默认启用）
     installTarget: 'github:qgx1992/dsh-workspace-collapse',
     name: 'dsh-workspace-collapse',
     description: '侧边栏底座：一键折叠/展开全部工作区分组（极简，不添加其他元素）',
     source: 'github',
-    url: 'https://github.com/qgx1992/dsh-workspace-collapse'
+    url: 'https://github.com/qgx1992/dsh-workspace-collapse',
+    defaultEnabled: true
   }
 ]
