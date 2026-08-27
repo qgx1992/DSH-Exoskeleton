@@ -67,5 +67,13 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     description: '更好的右键：会话/工作区/对话正文的原生风格上下文菜单',
     source: 'github',
     url: 'https://github.com/baihejiangnan/dsh-session-context-menu'
+  },
+  {
+    // 本地插件：以 link: 绝对路径指向 ~/.dsh/local-plugins 下的源码，安装即默认启用（注册进 dsh.profile.bundles）
+    installTarget: 'link:C:/Users/QIU/.dsh/local-plugins/dsh-model-select-style',
+    name: 'dsh-model-select-style',
+    description: '输入框「模型选择」改版：供应商 + 模型两级联动按钮，选择逻辑复用官方组件',
+    source: 'npm',
+    url: 'file:///C:/Users/QIU/.dsh/local-plugins/dsh-model-select-style'
   }
 ]

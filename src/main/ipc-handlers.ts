@@ -158,7 +158,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('app:getVersion', () => app.getVersion())
   ipcMain.handle('app:getDshHome', () => dshManager.resolveDshHome())
   ipcMain.handle('app:openExternal', (_e, url: string) => {
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+    // http(s) 走系统浏览器；file:// 用于本地插件「主页」按钮（在资源管理器中打开其源码目录）
+    if (typeof url === 'string' && /^(?:https?|file):\/\//i.test(url)) {
       void shell.openExternal(url)
     }
   })
