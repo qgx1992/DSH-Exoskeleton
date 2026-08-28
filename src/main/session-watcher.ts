@@ -21,9 +21,11 @@ import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
 import { decodeWorkspaceName, projectNameFromPath } from '../shared/session-jsonl'
 
-/** 轮询间隔（只影响发现新帧的时延；非法值回落默认，限制在 [500ms, 60s]） */
-const POLL_RAW = Number(process.env.DSH_SESSION_POLL_MS ?? 2_000)
-const POLL_MS = Number.isFinite(POLL_RAW) ? Math.min(60_000, Math.max(500, POLL_RAW)) : 2_000
+/** 兜底轮询间隔（主触发是 fs.watch，这是 fs.watch 失效时的保底；非法值回落默认，限制在 [500ms, 60s]） */
+const POLL_RAW = Number(process.env.DSH_SESSION_POLL_MS ?? 500)
+const POLL_MS = Number.isFinite(POLL_RAW) ? Math.min(60_000, Math.max(500, POLL_RAW)) : 500
+/** fs.watch 触发后的扫描防抖（一次写入可能触发多次 change 事件，合并为一次扫描） */
+const WATCH_DEBOUNCE_MS = 120
 /** 单会话去重记录上限（防止超长会话的 notifiedTurns 无限增长） */
 const MAX_NOTIFIED_TURNS = 200
 
@@ -43,7 +45,12 @@ export interface SessionDoneEvent {
 }
 
 export class SessionWatcher extends EventEmitter {
+  /** 兜底轮询定时器 */
   private timer: NodeJS.Timeout | null = null
+  /** fs.watch 递归监听 sessions 根目录（主触发，近零延迟）；不可用时回退纯轮询 */
+  private watcher: fs.FSWatcher | null = null
+  /** fs.watch 事件防抖定时器 */
+  private debounceTimer: NodeJS.Timeout | null = null
   private tracked = new Map<string, Tracked>()
   private scanning = false
 
@@ -55,8 +62,11 @@ export class SessionWatcher extends EventEmitter {
   start(): void {
     if (this.timer) return
     void this.scan()
+    // 主触发：fs.watch 递归监听 sessions 目录，文件一变化即扫描（近零延迟，方案 B）
+    this.setupWatcher()
+    // 兜底轮询：fs.watch 漏事件 / 新建目录未纳入监听时，保证最差一个轮询间隔内发现（方案 A，500ms）
     this.timer = setInterval(() => void this.scan(), POLL_MS)
-    logger.info('session watcher started (event-driven)')
+    logger.info(`session watcher started (fs.watch + fallback poll ${POLL_MS}ms)`)
   }
 
   stop(): void {
@@ -64,9 +74,54 @@ export class SessionWatcher extends EventEmitter {
       clearInterval(this.timer)
       this.timer = null
     }
+    this.closeWatcher()
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer)
+      this.debounceTimer = null
+    }
     this.tracked.clear()
     zstdWorker.close()
     logger.info('session watcher stopped')
+  }
+
+  /** fs.watch 递归监听 sessions 根；目录不存在时静默等待（scan 里目录就绪后补挂），挂不上则纯轮询 */
+  private setupWatcher(): void {
+    const root = path.join(dshManager.resolveDshHome(), 'sessions')
+    try {
+      if (!fs.existsSync(root)) {
+        this.watcher = null
+        return
+      }
+      this.watcher = fs.watch(root, { recursive: true }, () => this.scheduleScan())
+      this.watcher.on('error', (err) => {
+        logger.warn('session fs.watch error, fallback to poll', err)
+        this.closeWatcher()
+      })
+      logger.debug('session fs.watch armed', { root })
+    } catch (err) {
+      logger.warn('session fs.watch unavailable, fallback to poll', err)
+      this.watcher = null
+    }
+  }
+
+  private closeWatcher(): void {
+    if (this.watcher) {
+      try {
+        this.watcher.close()
+      } catch {
+        /* 忽略 */
+      }
+      this.watcher = null
+    }
+  }
+
+  /** fs.watch 事件防抖：一次写入可能触发多次 change，合并为一次扫描 */
+  private scheduleScan(): void {
+    if (this.debounceTimer) clearTimeout(this.debounceTimer)
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null
+      void this.scan()
+    }, WATCH_DEBOUNCE_MS)
   }
 
   private async scan(): Promise<void> {
@@ -79,6 +134,8 @@ export class SessionWatcher extends EventEmitter {
         this.tracked.clear()
         return
       }
+      // fs.watch 若未挂上（启动时 sessions 目录尚未创建），目录就绪后补挂一次
+      if (!this.watcher && fs.existsSync(sessionsRoot)) this.setupWatcher()
       let workspaceDirs: string[] = []
       try {
         // H3: 异步目录遍历，避免阻塞主进程事件循环
