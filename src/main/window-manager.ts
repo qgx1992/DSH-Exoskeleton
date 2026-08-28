@@ -137,6 +137,12 @@ export class WindowManager {
     // 通知点击回执 → 唤起窗口（webview 通道；会话激活由页面内插件 ctx.sessions.open 完成）
     notificationHub.setOnClick(() => this.show())
 
+    // 窗口可见性探针 → 通知 auto 路由（可见→webview，隐藏/最小化→原生，防止最小化时漏看）
+    notificationHub.setWindowVisible(() => {
+      const w = this.win
+      return !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized()
+    })
+
     // 状态变化时通知 renderer（仪表盘/标题栏状态点）
     dshManager.on('statusChange', (state) => {
       this.win?.webContents.send('dsh:statusChange', state)

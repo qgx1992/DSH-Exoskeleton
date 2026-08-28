@@ -146,6 +146,33 @@ app.whenReady().then(async () => {
     assert(okOff === false, 'webview 离线：requestActivate 返回 false（回退 DOM hack）')
     assert(received.length === 1, 'webview 离线：不再多投递任何事件', received.length)
 
+    console.log('9) auto 路由含窗口可见性：隐藏/最小化时必须走原生（防漏看）')
+    // 注册可见性探针：默认不可见
+    let visFlag = false
+    notificationHub.setWindowVisible(() => visFlag)
+    received.length = 0
+    notificationHub.markWebviewReady(true)
+    await configStore.set({ notifyChannel: 'auto' })
+    notificationHub.dispatch(mk('session-done', { session: { uuid: 'hid-1' } }))
+    assert(received.length === 0, '窗口隐藏 + webview 在线 + auto → 不投递 webview（走原生）', received)
+    // 可见 → webview
+    visFlag = true
+    received.length = 0
+    notificationHub.dispatch(mk('session-done', { session: { uuid: 'vis-1' } }))
+    assert(received.length === 1 && received[0].session.uuid === 'vis-1', '窗口可见 + webview 在线 + auto → 投递 webview', received)
+    // 强制 native → 无论可见性都走原生
+    received.length = 0
+    await configStore.set({ notifyChannel: 'native' })
+    notificationHub.dispatch(mk('session-done', { session: { uuid: 'nat-1' } }))
+    assert(received.length === 0, 'notifyChannel=native 强制 → 不走 webview', received)
+    assert(notificationHub.status().channel === 'native', 'status() 反映强制 native', notificationHub.status())
+    // 可见性回归：恢复默认（无探针 = 可见）
+    notificationHub.setWindowVisible(null)
+    await configStore.set({ notifyChannel: 'auto' })
+    received.length = 0
+    notificationHub.dispatch(mk('session-done', { session: { uuid: 'def-1' } }))
+    assert(received.length === 1, '无探针（默认可见）→ 走 webview（向后兼容）', received)
+
     notificationHub.setWebview(null)
   } catch (e) {
     console.error('TEST CRASH:', e)
