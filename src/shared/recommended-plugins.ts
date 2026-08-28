@@ -78,5 +78,12 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     source: 'github',
     url: 'https://github.com/qgx1992/dsh-ui-tools',
     defaultEnabled: true
+  },
+  {
+    installTarget: 'github:qgx1992/dsh-notify',
+    name: 'dsh-notify',
+    description: '通知显示层：全局 toast 栈（对话完成/服务事件/更新就绪），点击经官方 sessions runtime 程序化跳转会话（替代壳侧 DOM hack）；无壳时降级自绘',
+    source: 'github',
+    url: 'https://github.com/qgx1992/dsh-notify'
   }
 ]

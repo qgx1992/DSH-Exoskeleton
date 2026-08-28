@@ -16,3 +16,5 @@ AGENT.md
 # 会话安装插件的临时产物（与本项目无关，安装完成后记得删除）
 .dsh-vision-router/
 dsh-pet-running-*.png
+# 自研插件源码不在桌面端仓库维护（已独立到各插件自己的 GitHub 仓库，如 qgx1992/dsh-notify）
+plugins/
