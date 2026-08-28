@@ -184,6 +184,17 @@ export function wireSessionWatcher(): void {
     // off 时跳过 headInfo 取数（避免无谓 zstd IO）；粒度终判仍以 notification-hub 为准
     if (configStore.get().notifySessionDone === 'off') return
 
+    // 会话感知抑制（壳侧实现，不依赖插件）：窗口聚焦（用户在看着 DSH）且完成会话 ==
+    // UI 当前选中会话 → 不弹（正在看的会话无需打扰）；后台会话完成才弹。
+    // 读不到当前会话（SPA 结构变化）时回退为不抑制——宁可多弹不漏报。
+    if (windowManager.isWindowActive()) {
+      const current = await windowManager.getActiveSessionId()
+      if (current && current === ev.uuid) {
+        logger.debug('notification suppressed (active session in view)', { uuid: ev.uuid })
+        return
+      }
+    }
+
     let title = `会话 ${ev.uuid.slice(0, 8)}`
     let project = ''
     let firstUserText = ''

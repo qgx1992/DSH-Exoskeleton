@@ -139,10 +139,7 @@ export class WindowManager {
 
     // 窗口激活探针 → 通知 auto 路由（焦点感知）：DSH 窗口是前台焦点且 webview 可见才用
     // 页面内 toast；失焦/最小化/隐藏/管理面板打开（webview 被隐藏）→ 原生通知，防漏看
-    notificationHub.setWindowActive(() => {
-      const w = this.win
-      return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible
-    })
+    notificationHub.setWindowActive(() => this.isWindowActive())
 
     // 状态变化时通知 renderer（仪表盘/标题栏状态点）
     dshManager.on('statusChange', (state) => {
@@ -255,6 +252,47 @@ export class WindowManager {
       logger.info('admin panel visibility', { visible, hasDshView: true })
     } else {
       logger.info('admin panel visibility', { visible, hasDshView: false })
+    }
+  }
+
+  /** 窗口是否对用户激活（前台焦点且未打开管理面板）——通知 auto 路由与会话抑制共用 */
+  isWindowActive(): boolean {
+    const w = this.win
+    return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible
+  }
+
+  /**
+   * 读取 DSH Web UI 当前选中会话的 uuid（壳侧会话感知抑制用，不依赖插件）。
+   * 复用 activateSessionInWebUi 的 React fiber 读取：取选中行
+   * [aria-selected]/[class*="selected"] 的 __reactFiber$ 向上找 memoizedProps.node.id，
+   * 归一化去掉 session- 前缀；读不到返回 null（调用方回退为不抑制，宁可多弹不漏报）。
+   */
+  async getActiveSessionId(): Promise<string | null> {
+    const view = this.view
+    if (!view || view.webContents.isDestroyed()) return null
+    const script = `(() => {
+      const readId = (el) => {
+        const k = el && Object.keys(el).find(x => x.startsWith('__reactFiber'));
+        if (!k) return null;
+        let f = el[k];
+        for (let i = 0; i < 8 && f; i++) {
+          const p = f.memoizedProps;
+          if (p && p.node && typeof p.node.id === 'string' && p.node.id) return p.node.id;
+          f = f.return;
+        }
+        return null;
+      };
+      const sels = [...document.querySelectorAll('[class*="sessionRow"][aria-selected="true"], [class*="sessionRow"][class*="selected"]')];
+      if (sels.length === 0) return null;
+      const id = readId(sels[sels.length - 1]);
+      return id ? id.replace(/^session-/, '') : null;
+    })()`
+    try {
+      const r = await view.webContents.executeJavaScript(script)
+      return typeof r === 'string' && r ? r : null
+    } catch (err) {
+      logger.debug('read active session failed', err)
+      return null
     }
   }
 
