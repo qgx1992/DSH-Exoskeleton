@@ -222,6 +222,8 @@ export function wireSessionWatcher(): void {
       // （可靠、会话 ID 精确）；webview 离线才回退 executeJavaScript DOM hack。
       actions: {
         onClick: () => {
+          // 诊断日志：确认原生通知点击链路触发（置顶问题排查用）
+          logger.debug('native notification clicked (session-done)', { uuid: ev.uuid })
           windowManager.show()
           if (!notificationHub.requestActivate(ev.uuid)) {
             windowManager.activateSessionInWebUi(title, firstUserText, ev.uuid)

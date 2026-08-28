@@ -377,10 +377,27 @@ export class WindowManager {
   }
 
   show(): void {
-    if (!this.win) return
+    if (!this.win || this.win.isDestroyed()) return
     if (this.win.isMinimized()) this.win.restore()
     this.win.show()
     this.win.focus()
+    // Windows 前台锁对策（修复：点击原生通知不置顶）——窗口可见但被其他窗口盖住时，
+    // focus() 受 SetForegroundWindow 限制不会抬到最前；moveTop() 强制提升 z-order，
+    // 再临时置顶一帧后取消，彻底绕开前台锁把窗口带到最前。
+    if (process.platform === 'win32') {
+      try {
+        this.win.moveTop()
+        if (!this.win.isAlwaysOnTop()) {
+          this.win.setAlwaysOnTop(true)
+          setTimeout(() => {
+            if (this.win && !this.win.isDestroyed()) this.win.setAlwaysOnTop(false)
+          }, 0)
+        }
+      } catch (err) {
+        logger.warn('window force-front failed', err)
+      }
+    }
+    logger.debug('window show called', {})
   }
 
   hide(): void {
