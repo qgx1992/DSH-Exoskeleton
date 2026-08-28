@@ -34,10 +34,18 @@ export interface AppConfig {
   minimizeToTray: boolean
   /** 应用启动时自动启动 DSH 服务 */
   autoStartService: boolean
-  /** 服务状态变化时发送原生通知 */
+  /** 服务事件通知开关（保留原字段） */
   notifyServiceEvents: boolean
-  /** 会话完成时发送原生通知（§4.2.3 任务完成） */
-  notifySessionDone: boolean
+  /**
+   * 会话完成通知粒度（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.3）
+   * - off：不通知；per-turn：每轮立即通知（现状行为）；aggregate：窗口内按会话 uuid 合并
+   * 兼容旧 boolean：true→'per-turn'、false→'off'（config.ts 迁移）
+   */
+  notifySessionDone: 'off' | 'per-turn' | 'aggregate'
+  /** 通知显示渠道：auto = webview 在线优先，否则 native（§3.3） */
+  notifyChannel: 'auto' | 'native' | 'webview'
+  /** 聚合窗口（ms）：同一会话 N ms 内多轮合并为「已完成 N 轮」（§3.3，默认 5000） */
+  notifyAggregateWindowMs: number
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
   /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */
@@ -56,6 +64,39 @@ export interface AppConfig {
   kernelsQuotaMB: number
   /** 内核安装 registry 根（空 = 官方 npmjs；如 https://registry.npmmirror.com 加速国内） */
   kernelRegistry: string
+}
+
+/** 通知事件类型（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.1，壳↔webview 桥与插件的契约） */
+export type NotificationEventKind =
+  | 'session-done' // 一轮对话完成
+  | 'service-ready' // 服务就绪
+  | 'service-error' // 服务异常
+  | 'service-restarting' // 崩溃自动重启
+  | 'update-ready' // 更新下载完成待安装
+
+/** 通知事件（检测层产出的事实；显示是策略——由 notification-hub 选 Provider、插件渲染） */
+export interface NotificationEvent {
+  /** 事件唯一 ID（去重 / 回执 / 点击关联用） */
+  id: string
+  kind: NotificationEventKind
+  title: string
+  body: string
+  ts: number
+  /** 每类事件的附带载荷 */
+  session?: {
+    sessionDir: string
+    workspace: string
+    uuid: string
+    file: string
+    turn?: number
+    project?: string
+    sessionTitle?: string
+    firstUserText?: string
+  }
+  service?: { port?: number; error?: string; restartCount?: number }
+  update?: { version?: string }
+  /** 原生 provider 专用：主进程侧点击动作（函数不可跨 IPC；webview 投递前剥离） */
+  actions?: { onClick?: () => void }
 }
 
 /** 托管 DSH 内核（多版本共存）信息 */

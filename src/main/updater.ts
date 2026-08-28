@@ -6,9 +6,10 @@
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { EventEmitter } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { windowManager } from './window-manager'
-import { notify } from './notify'
+import { notificationHub } from './notification-hub'
 import type { UpdateInfo } from '../shared/types'
 
 const REPO = 'qgx1992/DSH-Exoskeleton'
@@ -62,11 +63,16 @@ class Updater extends EventEmitter {
     })
     autoUpdater.on('update-downloaded', (info) => {
       logger.info('update downloaded', { version: info.version })
-      notify(
-        'DSH-Exoskeleton 更新已就绪',
-        `新版本 v${info.version} 已下载完成，点击重启安装。`,
-        () => this.install()
-      )
+      // 设计 §4.2：通知改走事件中枢（native/webview 由 hub 路由，点击一致触发安装）
+      notificationHub.dispatch({
+        id: randomUUID(),
+        kind: 'update-ready',
+        title: 'DSH-Exoskeleton 更新已就绪',
+        body: `新版本 v${info.version} 已下载完成，点击重启安装。`,
+        ts: Date.now(),
+        update: { version: info.version },
+        actions: { onClick: () => this.install() }
+      })
       this.cache = {
         ...this.base(),
         latest: this.cache?.latest ?? info.version,

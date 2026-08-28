@@ -9,6 +9,7 @@ import path from 'node:path'
 import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
+import { notificationHub } from './notification-hub'
 
 const TITLEBAR_HEIGHT = 36
 const DEFAULT_WIDTH = 1200
@@ -133,6 +134,9 @@ export class WindowManager {
 
     this.loadRenderer()
 
+    // 通知点击回执 → 唤起窗口（webview 通道；会话激活由页面内插件 ctx.sessions.open 完成）
+    notificationHub.setOnClick(() => this.show())
+
     // 状态变化时通知 renderer（仪表盘/标题栏状态点）
     dshManager.on('statusChange', (state) => {
       this.win?.webContents.send('dsh:statusChange', state)
@@ -163,10 +167,34 @@ export class WindowManager {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
-        spellcheck: false
+        spellcheck: false,
+        // 设计 §5：DSH 视图专用预加载桥（window.__dshExo 白名单，与主壳 preload 分开）
+        preload: path.join(__dirname, '../preload/dsh-view.js')
       }
     })
     this.win.contentView.addChildView(this.view)
+    // 通知事件中枢 webview 通道（R-26：投递回执；投递前 hub 已剥离 actions）
+    notificationHub.setWebview({
+      deliver: (ev) => {
+        const v = this.view
+        if (!v || v.webContents.isDestroyed()) return false
+        try {
+          v.webContents.send('dsh-notify:event', ev)
+          return true
+        } catch {
+          return false
+        }
+      }
+    })
+    // 页面 → 壳（作用域限定该 view，不污染 ipcMain 全局通道；R-27）
+    this.view.webContents.on('ipc-message', (_event, channel, ...args) => {
+      if (channel !== 'dsh-exo') return
+      notificationHub.handleViewMessage(String(args[0]), args[1])
+    })
+    // 每次加载/重载后复位握手，等页面 __dshExo.ready() 重新握手（防事件先于页面就绪被丢）
+    this.view.webContents.on('did-finish-load', () => {
+      notificationHub.markWebviewReady(false)
+    })
     this.view.webContents.setWindowOpenHandler(({ url: u }) => {
       void shell.openExternal(u)
       return { action: 'deny' }
@@ -182,6 +210,8 @@ export class WindowManager {
 
   detachDshView(): void {
     if (this.view && this.win) {
+      // 通知中枢 webview 通道下线（服务重启重挂载后自动重新注册）
+      notificationHub.setWebview(null)
       this.win.contentView.removeChildView(this.view)
       this.view.webContents.close()
       this.view = null

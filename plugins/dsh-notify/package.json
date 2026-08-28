@@ -1,0 +1,46 @@
+{
+  "name": "dsh-notify",
+  "version": "0.1.0",
+  "description": "DSH 通知显示层插件（可插拔通知显示层的 web 侧）：全局右上角 toast 栈，订阅桌面壳 __dshExo 桥事件（对话完成 / 服务事件 / 更新就绪），点击经官方 dsh-client-runtime 的 sessions store 程序化激活会话（替代壳侧 DOM hack）；无壳（直接用浏览器开 dsh web）时自动降级订阅 sessions store 自绘轮次完成 toast。纯自建覆盖层渲染、不搬 DSH slot 节点，独立 locale NS 与 data-* 前缀，不改 DSH 源码。注意：本插件默认本地分发（不发布 npm / 不上传 GitHub），通过 `dsh plugin --profile web add link:<本地路径>` 安装。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "web",
+    "notification",
+    "notify",
+    "toast",
+    "session",
+    "ui",
+    "zh",
+    "en"
+  ],
+  "license": "MIT"
+}

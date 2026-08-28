@@ -12,9 +12,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
+import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { dshManager } from './dsh-manager'
-import { notify } from './notify'
+import { notificationHub } from './notification-hub'
 import { configStore } from './config'
 import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
@@ -73,7 +74,8 @@ export class SessionWatcher extends EventEmitter {
     this.scanning = true
     try {
       const sessionsRoot = path.join(dshManager.resolveDshHome(), 'sessions')
-      if (!configStore.get().notifySessionDone) {
+      // off 时跳过目录扫描（性能）；粒度终判仍以 notification-hub 为准（hub 会再 gate）
+      if (configStore.get().notifySessionDone === 'off') {
         this.tracked.clear()
         return
       }
@@ -176,17 +178,20 @@ export class SessionWatcher extends EventEmitter {
 
 export const sessionWatcher = new SessionWatcher()
 
-/** 接线：DSH 状态变化 → watcher；每轮对话完成 → 系统通知（标题/项目/轮次，点击唤起主窗口并尝试定位会话） */
+/** 接线：DSH 状态变化 → watcher；每轮对话完成 → 通知事件中枢（显示层可插拔，点击唤起窗口+定位会话） */
 export function wireSessionWatcher(): void {
   sessionWatcher.on('complete', async (ev: SessionDoneEvent) => {
-    if (!configStore.get().notifySessionDone) return
+    // off 时跳过 headInfo 取数（避免无谓 zstd IO）；粒度终判仍以 notification-hub 为准
+    if (configStore.get().notifySessionDone === 'off') return
 
     let title = `会话 ${ev.uuid.slice(0, 8)}`
     let project = ''
+    let firstUserText = ''
     const head = await zstdWorker.request('headInfo', { file: ev.file })
     if (head.ok) {
       const cwd = head.cwd ?? ''
       title = head.title || title
+      firstUserText = head.firstUserText ?? ''
       project = cwd ? projectNameFromPath(cwd) : ''
     } else {
       logger.warn('session head info unavailable (zstd), fallback ids', ev.uuid)
@@ -196,11 +201,29 @@ export function wireSessionWatcher(): void {
     // 正文带轮次：项目「X」· 标题（第 N 轮）
     const turnSuffix = ev.turn ? `（第 ${ev.turn} 轮）` : ''
     const body = project ? `项目「${project}」· ${title}${turnSuffix}` : `${title}${turnSuffix}`
-    notify('DSH 对话完成', body, () => {
-      windowManager.show()
-      // 跳转优先级：会话 ID 精确匹配（React fiber node.id）→ 通知标题(LLM 版)
-      // + 首条用户消息(列表显示版) → "刚刚"时间兜底
-      windowManager.activateSessionInWebUi(title, head.firstUserText, ev.uuid)
+    notificationHub.dispatch({
+      id: randomUUID(),
+      kind: 'session-done',
+      title: 'DSH 对话完成',
+      body,
+      ts: Date.now(),
+      session: {
+        sessionDir: ev.sessionDir,
+        workspace: ev.workspace,
+        uuid: ev.uuid,
+        file: ev.file,
+        turn: ev.turn,
+        project,
+        sessionTitle: title,
+        firstUserText
+      },
+      // 原生通道点击：唤起窗口 + 定位会话（DOM hack 兜底；webview 通道由插件 ctx.sessions.open 激活）
+      actions: {
+        onClick: () => {
+          windowManager.show()
+          windowManager.activateSessionInWebUi(title, firstUserText, ev.uuid)
+        }
+      }
     })
   })
 }

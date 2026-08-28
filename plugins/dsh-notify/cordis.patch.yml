@@ -1,0 +1,25 @@
+# ============================================================================
+# dsh-notify 的 bundle patch —— 把通知显示层插件挂进 DSH 配置树
+# ============================================================================
+#
+# 【这是什么】
+#   这是 dsh-notify 的「挂载声明」。DSH 启动时按 bundle 层栈把各插件的
+#   patch 叠起来组成配置树。本文件就是 dsh-notify 这一层的内容。
+#
+# 【工作原理】
+#   - insert：往配置树里添加新的插件行（entry）
+#   - 每个 entry 有 id（行标识，patch 覆盖时按它定位）和 name（插件模块）
+#   - name: 'dsh-notify' 会解析包入口 lib/index.js（宿主半侧）
+#   - 因为 package.json 声明了 dsh.client.platform=web，DSH 的模块系统
+#     同时把这个包扫描为「浏览器插件」，提供 /plugins/dsh-notify/client.js
+#     给页面 —— 浏览器侧的渲染逻辑全部在 client bundle 里。
+#
+# 【与壳侧协作】桌面壳（DSH-Exoskeleton）安装本插件后无需额外配置：
+#   - 壳侧预加载桥暴露 window.__dshExo（onEvent/send/ready/appInfo）
+#   - 插件检测到桥 → 订阅壳推送的通知事件 → 渲染 toast
+#   - 无桥（直接开浏览器）→ 自动降级订阅 sessions store 自绘
+# ============================================================================
+
+- insert:
+    - id: notify                  # 插件行 id（唯一）
+      name: 'dsh-notify'          # 模块名：解析到 lib/index.js

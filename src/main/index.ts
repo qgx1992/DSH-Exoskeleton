@@ -5,13 +5,14 @@
  * - DSH 子进程自动启动与 WebContentsView 挂载
  */
 import { app } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { configStore } from './config'
 import { windowManager } from './window-manager'
 import { createTray, destroyTray, rebuildMenu } from './tray'
 import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
-import { notify } from './notify'
+import { notificationHub } from './notification-hub'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
@@ -22,7 +23,9 @@ const isHiddenLaunch = process.argv.includes('--hidden')
 // 应用名必须早于 requestSingleInstanceLock 设置，才能决定 userData 目录
 // （%APPDATA%\DSH-Exoskeleton：日志/配置存放处）
 app.setName('DSH-Exoskeleton')
-app.setAppUserModelId('io.dsh.desktop')
+// P0：AUMID 对齐 electron-builder.yml 的 appId —— Windows toast 要求与开始菜单快捷方式
+// 一致，不一致会被系统静默丢弃（设计 NOTIFICATION-PLUGIN-DESIGN.md §4.3）
+app.setAppUserModelId('io.dsh.exoskeleton')
 
 // 单实例锁（文档 §4.1.4）
 const gotTheLock = app.requestSingleInstanceLock()
@@ -88,21 +91,40 @@ async function bootstrap(): Promise<void> {
     sessionWatcher.syncWithService(state.status)
     rebuildMenu()
 
-    // 原生通知（文档 §4.2.3）：就绪仅窗口隐藏时提示；异常总是提示
+    // 服务事件通知（设计 §4.2：只改投递目标，检测/门控逻辑不变——hub 负责渠道路由）
     if (configStore.get().notifyServiceEvents) {
       const winVisible = windowManager.getWindow()?.isVisible() ?? false
       if (state.status === 'running' && state.port) {
         if (!winVisible) {
-          notify(
-            'DSH-Exoskeleton 服务已就绪',
-            `DSH Web UI 运行于 http://127.0.0.1:${state.port}`,
-            () => windowManager.show()
-          )
+          notificationHub.dispatch({
+            id: randomUUID(),
+            kind: 'service-ready',
+            title: 'DSH-Exoskeleton 服务已就绪',
+            body: `DSH Web UI 运行于 http://127.0.0.1:${state.port}`,
+            ts: Date.now(),
+            service: { port: state.port },
+            actions: { onClick: () => windowManager.show() }
+          })
         }
       } else if (state.status === 'error') {
-        notify('DSH 服务异常', state.lastError ?? '未知错误，请查看日志', () => windowManager.show())
+        notificationHub.dispatch({
+          id: randomUUID(),
+          kind: 'service-error',
+          title: 'DSH 服务异常',
+          body: state.lastError ?? '未知错误，请查看日志',
+          ts: Date.now(),
+          service: { error: state.lastError ?? undefined },
+          actions: { onClick: () => windowManager.show() }
+        })
       } else if (state.status === 'starting' && state.restartCount > 0) {
-        notify(`DSH 服务正在重启（第 ${state.restartCount} 次）`, '检测到进程异常退出，正在自动恢复…')
+        notificationHub.dispatch({
+          id: randomUUID(),
+          kind: 'service-restarting',
+          title: `DSH 服务正在重启（第 ${state.restartCount} 次）`,
+          body: '检测到进程异常退出，正在自动恢复…',
+          ts: Date.now(),
+          service: { restartCount: state.restartCount }
+        })
       }
     }
   })
@@ -114,6 +136,8 @@ async function bootstrap(): Promise<void> {
 
   // 自动更新：初始化并向渲染层推送状态（打包版后台静默检查）
   updater.init()
+  // P2 review 修正：webview 通道的「更新就绪」toast 点击 → notify:install → 触发安装
+  notificationHub.setOnInstall(() => updater.install())
   updater.on('status', (info) => {
     windowManager.broadcast('updater:status', info)
   })
