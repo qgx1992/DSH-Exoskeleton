@@ -136,7 +136,10 @@ export function SettingsTab(): React.JSX.Element {
               <div className="text-slate-200">会话完成通知</div>
               <div className="mt-0.5 text-[12px] text-slate-500">Agent 会话结束后发送 Windows 通知</div>
             </div>
-            <Toggle checked={cfg.notifySessionDone} onChange={(v) => void save({ notifySessionDone: v })} />
+            <Toggle
+              checked={cfg.notifySessionDone !== 'off'}
+              onChange={(v) => void save({ notifySessionDone: v ? 'per-turn' : 'off' })}
+            />
           </div>
 
           <div className="flex items-center justify-between">

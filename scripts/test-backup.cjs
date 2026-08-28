@@ -56,11 +56,43 @@ app.whenReady().then(async () => {
     const list2 = await backupManager.list()
     assert(list2.some((b) => b.trigger === 'restore:' + info.id), '恢复前自动创建保护快照')
 
-    console.log('5) 自动快照 + 触发标记')
+    console.log('5) 任选恢复：只恢复 plugins')
+    // 先放一个插件文件再创建快照（快照里应包含 keep.txt）
+    fs.mkdirSync(path.join(fakeHome, 'plugins'), { recursive: true })
+    fs.writeFileSync(path.join(fakeHome, 'plugins', 'keep.txt'), 'original', 'utf-8')
+    const info2 = await backupManager.create('unit-test-partial', 'manual')
+    assert(Array.isArray(info2.entries) && info2.entries.includes('plugins'), 'BackupInfo 带顶层条目 entries')
+    assert(info2.entries.includes('settings.yaml'), 'entries 含 settings.yaml')
+    // 篡改 settings.yaml + 删掉插件文件
+    fs.writeFileSync(path.join(fakeHome, 'settings.yaml'), '# changed again', 'utf-8')
+    fs.rmSync(path.join(fakeHome, 'plugins', 'keep.txt'), { force: true })
+    const rp = await backupManager.restore(info2.id, ['plugins'])
+    assert(rp.ok, 'partial restore(只 plugins) ok')
+    assert(
+      fs.existsSync(path.join(fakeHome, 'plugins', 'keep.txt')) &&
+        fs.readFileSync(path.join(fakeHome, 'plugins', 'keep.txt'), 'utf-8') === 'original',
+      'plugins 已恢复（勾选项）'
+    )
+    assert(
+      fs.readFileSync(path.join(fakeHome, 'settings.yaml'), 'utf-8').includes('# changed again'),
+      'settings.yaml 未被误恢复（未勾选项不受影响）'
+    )
+    const rbad = await backupManager.restore(info2.id, ['不存在的条目'])
+    assert(!rbad.ok, '非法恢复项被拒绝')
+    // 缺省 entries = 恢复全部（回归）
+    fs.writeFileSync(path.join(fakeHome, 'settings.yaml'), '# broke', 'utf-8')
+    const rall = await backupManager.restore(info2.id)
+    assert(rall.ok, '缺省 entries 恢复全部 ok')
+    assert(
+      fs.readFileSync(path.join(fakeHome, 'settings.yaml'), 'utf-8').includes('welcomeNoticeVersion'),
+      '缺省恢复还原 settings.yaml'
+    )
+
+    console.log('6) 自动快照 + 触发标记')
     const auto = await backupManager.autoSnapshot('plugin-install:test')
     assert(auto.kind === 'auto' && auto.trigger === 'plugin-install:test', 'auto 快照带 trigger')
 
-    console.log('6) 删除')
+    console.log('7) 删除')
     const del = backupManager.delete(info.id)
     assert(del.ok && !(await backupManager.list()).some((b) => b.id === info.id), 'delete 生效')
   } catch (e) {

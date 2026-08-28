@@ -193,6 +193,13 @@ class BackupManager {
     const dir = path.join(this.backupDir, id)
     const meta = this.readMeta(dir)
     if (!meta) return null
+    // 顶层条目（排除 meta 文件）= 可任选恢复的项目
+    let entries: string[] = []
+    try {
+      entries = (await fs.promises.readdir(dir)).filter((e) => e !== '.backup-meta.json').sort()
+    } catch {
+      /* noop */
+    }
     // 总大小 = 目录大小 - meta 文件（单次遍历同时取得 size/count）
     const scan = await this.scanDirAsync(dir)
     const metaSize = this.readMetaFileSize(dir) ?? 0
@@ -203,7 +210,8 @@ class BackupManager {
       kind: meta.kind,
       trigger: meta.trigger,
       size: Math.max(0, scan.size - metaSize),
-      entryCount: Math.max(0, scan.count - 1)
+      entryCount: Math.max(0, scan.count - 1),
+      entries
     }
   }
 
@@ -215,21 +223,39 @@ class BackupManager {
     }
   }
 
-  /** 恢复：先把当前状态拍一份保护快照，再把快照内容合并拷回 ~/.dsh */
-  async restore(id: string): Promise<{ ok: boolean; error?: string }> {
+  /**
+   * 恢复：先把当前状态拍一份保护快照，再把快照内容合并拷回 ~/.dsh。
+   * entries 为空/缺省 = 恢复全部顶层条目；指定则只恢复所选条目（如只恢复 plugins）。
+   */
+  async restore(id: string, entries?: string[]): Promise<{ ok: boolean; error?: string }> {
     this.init()
     const src = path.join(this.backupDir, id)
     if (!fs.existsSync(src) || !fs.statSync(src).isDirectory()) {
       return { ok: false, error: '快照不存在' }
     }
     const dshHome = this.getDshHome()
+    // 快照顶层条目（排除 meta）作为可恢复集合的唯一权威来源
+    let top: string[] = []
+    try {
+      top = (await fs.promises.readdir(src)).filter((e) => e !== '.backup-meta.json')
+    } catch {
+      return { ok: false, error: '读取快照内容失败' }
+    }
+    // 任选恢复：条目必须真实属于该快照顶层（天然排除路径穿越/越界）
+    let targets: string[] = top
+    if (entries && entries.length > 0) {
+      const bad = entries.filter((e) => typeof e !== 'string' || !top.includes(e) || e === '.backup-meta.json')
+      if (bad.length > 0) {
+        return { ok: false, error: '包含无法识别的恢复项：' + bad.join('、') }
+      }
+      targets = entries
+    }
     try {
       // 恢复前保护快照（R-25: 失败则中止恢复，避免无保护直接覆盖）
       const guard = await this.create('pre-restore', 'auto', 'restore:' + id)
       if (!guard) return { ok: false, error: '恢复前保护快照创建失败，已中止恢复' }
-      // 复制快照中的每个顶层条目（排除 meta 文件）
-      for (const entry of await fs.promises.readdir(src)) {
-        if (entry === '.backup-meta.json') continue
+      // 复制所选顶层条目（排除 meta 文件）
+      for (const entry of targets) {
         const s = path.join(src, entry)
         const d = path.join(dshHome, entry)
         if ((await fs.promises.stat(s)).isDirectory()) {
@@ -240,7 +266,7 @@ class BackupManager {
           await fs.promises.copyFile(s, d)
         }
       }
-      logger.info('backup restored', { id, dshHome })
+      logger.info('backup restored', { id, dshHome, entries: targets })
       return { ok: true }
     } catch (err) {
       logger.error('backup restore failed', err)

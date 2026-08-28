@@ -11,7 +11,7 @@ import { updater } from './updater'
 import { rebuildMenu } from './tray'
 import { checkSetupStatus, saveApiKey, clearApiKey } from './setup'
 import { backupManager } from './backup'
-import { listInstalled, listCatalog, installPlugin, uninstallPlugin } from './plugins'
+import { listInstalled, listCatalog, installPlugin, uninstallPlugin, checkPluginUpdates, upgradePlugin } from './plugins'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } from './profiles'
@@ -26,7 +26,7 @@ export function registerIpcHandlers(): void {
   // ---------- 备份与回滚（§4.3.4）----------
   ipcMain.handle('backup:list', () => backupManager.list())
   ipcMain.handle('backup:create', (_e, name?: string) => backupManager.create(name ?? 'manual', 'manual'))
-  ipcMain.handle('backup:restore', (_e, id: string) => backupManager.restore(id))
+  ipcMain.handle('backup:restore', (_e, id: string, entries?: string[]) => backupManager.restore(id, entries))
   ipcMain.handle('backup:delete', (_e, id: string) => backupManager.delete(id))
 
   // ---------- 插件管理（§4.3.3）----------
@@ -34,6 +34,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('plugins:installed', () => listInstalled())
   ipcMain.handle('plugins:install', (_e, pkg: string) => installPlugin(pkg))
   ipcMain.handle('plugins:uninstall', (_e, pkg: string) => uninstallPlugin(pkg))
+  ipcMain.handle('plugins:checkUpdate', () => checkPluginUpdates())
+  ipcMain.handle('plugins:upgrade', (_e, name: string, latest?: string) => upgradePlugin(name, latest))
 
   // ---------- 内核管理（多版本共存）----------
   ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())

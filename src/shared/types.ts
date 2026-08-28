@@ -34,12 +34,22 @@ export interface AppConfig {
   minimizeToTray: boolean
   /** 应用启动时自动启动 DSH 服务 */
   autoStartService: boolean
-  /** 服务状态变化时发送原生通知 */
+  /** 服务事件通知开关（保留原字段） */
   notifyServiceEvents: boolean
-  /** 会话完成时发送原生通知（§4.2.3 任务完成） */
-  notifySessionDone: boolean
+  /**
+   * 会话完成通知粒度（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.3）
+   * - off：不通知；per-turn：每轮立即通知（现状行为）；aggregate：窗口内按会话 uuid 合并
+   * 兼容旧 boolean：true→'per-turn'、false→'off'（config.ts 迁移）
+   */
+  notifySessionDone: 'off' | 'per-turn' | 'aggregate'
+  /** 通知显示渠道：auto = webview 在线优先，否则 native（§3.3） */
+  notifyChannel: 'auto' | 'native' | 'webview'
+  /** 聚合窗口（ms）：同一会话 N ms 内多轮合并为「已完成 N 轮」（§3.3，默认 5000） */
+  notifyAggregateWindowMs: number
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
+  /** 内置默认插件是否已完成首装预置（true 后不再自动补装，尊重用户手动卸载） */
+  defaultPluginsProvisioned: boolean
   /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */
   kernelMode: 'managed' | 'system'
   /** 托管内核默认版本 */
@@ -56,6 +66,40 @@ export interface AppConfig {
   kernelsQuotaMB: number
   /** 内核安装 registry 根（空 = 官方 npmjs；如 https://registry.npmmirror.com 加速国内） */
   kernelRegistry: string
+}
+
+/** 通知事件类型（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.1，壳↔webview 桥与插件的契约） */
+export type NotificationEventKind =
+  | 'session-done' // 一轮对话完成
+  | 'service-ready' // 服务就绪
+  | 'service-error' // 服务异常
+  | 'service-restarting' // 崩溃自动重启
+  | 'update-ready' // 更新下载完成待安装
+  | 'session-activate' // 控制类事件（非用户通知）：通知点击后的会话激活请求（webview 插件激活，不渲染 toast）
+
+/** 通知事件（检测层产出的事实；显示是策略——由 notification-hub 选 Provider、插件渲染） */
+export interface NotificationEvent {
+  /** 事件唯一 ID（去重 / 回执 / 点击关联用） */
+  id: string
+  kind: NotificationEventKind
+  title: string
+  body: string
+  ts: number
+  /** 每类事件的附带载荷 */
+  session?: {
+    sessionDir: string
+    workspace: string
+    uuid: string
+    file: string
+    turn?: number
+    project?: string
+    sessionTitle?: string
+    firstUserText?: string
+  }
+  service?: { port?: number; error?: string; restartCount?: number }
+  update?: { version?: string }
+  /** 原生 provider 专用：主进程侧点击动作（函数不可跨 IPC；webview 投递前剥离） */
+  actions?: { onClick?: () => void }
 }
 
 /** 托管 DSH 内核（多版本共存）信息 */
@@ -179,6 +223,8 @@ export interface BackupInfo {
   trigger: string
   size: number
   entryCount: number
+  /** 快照顶层条目（如 settings.yaml / profiles / plugins…），用于任选恢复 */
+  entries: string[]
 }
 
 /** 社区插件目录条目（§4.3.3 插件管理器） */
@@ -197,6 +243,26 @@ export interface PluginCatalogItem {
 export interface InstalledPlugin {
   name: string
   version: string
+  /** 最近一次插件更新检测结果（null = 尚未检测） */
+  update: PluginUpdateInfo | null
+}
+
+/** 插件更新检测结果（plugins:checkUpdate 逐插件产出） */
+export interface PluginUpdateInfo {
+  /** 声明 spec（profile package.json dependencies 原始值，如 ^1.2.3 / github:owner/repo / link:…） */
+  declared: string
+  /** 解析后实际安装版本（node_modules 内 package.json 的 version；读不到为 null） */
+  current: string | null
+  /** 远端最新版本（npm dist-tags.latest / GitHub 最新发布 tag；本地链接或不可检测为 null） */
+  latest: string | null
+  /** 是否有可升级的新版本（current 已知且 latest > current） */
+  available: boolean
+  /** 来源类型 */
+  source: 'npm' | 'github' | 'local' | 'unknown'
+  /** 本次检测时间（ms） */
+  checkedAt: number
+  /** 检测失败信息（网络受限等；正常为 null） */
+  error: string | null
 }
 
 export interface PluginActionResult extends SaveResult {
@@ -221,7 +287,8 @@ export interface DesktopApi {
   backup: {
     list: () => Promise<BackupInfo[]>
     create: (name?: string) => Promise<BackupInfo | null>
-    restore: (id: string) => Promise<SaveResult>
+    /** entries 为空/缺省 = 恢复全部顶层条目；指定则只恢复所选条目 */
+    restore: (id: string, entries?: string[]) => Promise<SaveResult>
     delete: (id: string) => Promise<SaveResult>
   }
   plugins: {
@@ -229,6 +296,10 @@ export interface DesktopApi {
     installed: () => Promise<InstalledPlugin[]>
     install: (pkg: string) => Promise<PluginActionResult>
     uninstall: (pkg: string) => Promise<PluginActionResult>
+    /** 联网检测全部已安装插件是否有新版本（返回附带 update 结果的已安装列表） */
+    checkUpdate: () => Promise<InstalledPlugin[]>
+    /** 升级插件到最新版（latest = 检测到的最新版本；npm 必须传精确版本，否则 range 内会 no-op） */
+    upgrade: (name: string, latest?: string) => Promise<PluginActionResult>
   }
   kernels: {
     installed: () => Promise<KernelInfo[]>

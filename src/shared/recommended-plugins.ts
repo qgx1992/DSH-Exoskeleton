@@ -16,6 +16,8 @@ export interface RecommendedPlugin {
   source: 'npm' | 'github'
   /** 主页链接 */
   url: string
+  /** 内置默认启用：首次运行（服务就绪时）自动安装并注册进 bundles，新装即自带 */
+  defaultEnabled?: boolean
 }
 
 export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
@@ -34,11 +36,11 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     url: 'https://www.npmjs.com/package/@liustack/modsearch'
   },
   {
-    installTarget: '@liustack/modlens',
-    name: '@liustack/modlens',
-    description: '视觉桥接：贴图即可识别/分析图片，text-only 模型也能看图',
+    installTarget: 'dsh-vision-router',
+    name: 'dsh-vision-router',
+    description: 'text-only 模型也能看图：内置免费视觉链 + 像素级视觉工具（问答/定位/裁剪/OCR/抠图/截图）',
     source: 'npm',
-    url: 'https://www.npmjs.com/package/@liustack/modlens'
+    url: 'https://github.com/ysr666/dsh-vision-router'
   },
   {
     installTarget: 'dsh-cost-meter',
@@ -67,5 +69,21 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     description: '更好的右键：会话/工作区/对话正文的原生风格上下文菜单',
     source: 'github',
     url: 'https://github.com/baihejiangnan/dsh-session-context-menu'
+  },
+  {
+    // 内置默认启用：新装（首次服务就绪）自动安装到 web profile 并注册进 dsh.profile.bundles（= 默认启用）
+    installTarget: 'github:qgx1992/dsh-ui-tools',
+    name: 'dsh-ui-tools',
+    description: 'UI 工具集：输入框「模型选择」双按钮（供应商+模型两级联动）+ 侧边栏工作区折叠/展开',
+    source: 'github',
+    url: 'https://github.com/qgx1992/dsh-ui-tools',
+    defaultEnabled: true
+  },
+  {
+    installTarget: 'github:qgx1992/dsh-notify',
+    name: 'dsh-notify',
+    description: '通知显示层：全局 toast 栈（对话完成/服务事件/更新就绪），点击经官方 sessions runtime 程序化跳转会话（替代壳侧 DOM hack）；无壳时降级自绘',
+    source: 'github',
+    url: 'https://github.com/qgx1992/dsh-notify'
   }
 ]

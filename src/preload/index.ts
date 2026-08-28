@@ -29,14 +29,16 @@ const api: DesktopApi = {
   backup: {
     list: () => ipcRenderer.invoke('backup:list'),
     create: (name) => ipcRenderer.invoke('backup:create', name),
-    restore: (id) => ipcRenderer.invoke('backup:restore', id),
+    restore: (id, entries) => ipcRenderer.invoke('backup:restore', id, entries),
     delete: (id) => ipcRenderer.invoke('backup:delete', id)
   },
   plugins: {
     catalog: (query) => ipcRenderer.invoke('plugins:catalog', query),
     installed: () => ipcRenderer.invoke('plugins:installed'),
     install: (pkg) => ipcRenderer.invoke('plugins:install', pkg),
-    uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg)
+    uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg),
+    checkUpdate: () => ipcRenderer.invoke('plugins:checkUpdate'),
+    upgrade: (name, latest) => ipcRenderer.invoke('plugins:upgrade', name, latest)
   },
   kernels: {
     installed: () => ipcRenderer.invoke('kernels:installed'),

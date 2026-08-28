@@ -18,6 +18,10 @@ export function BackupTab(): React.JSX.Element {
   const [creating, setCreating] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  /** 正在任选恢复的快照（该行展开勾选面板） */
+  const [picking, setPicking] = useState<BackupInfo | null>(null)
+  /** 任选恢复勾选条目 */
+  const [selected, setSelected] = useState<string[]>([])
 
   const refresh = useCallback(async () => {
     const list = await window.dshDesktop.backup.list()
@@ -45,14 +49,35 @@ export function BackupTab(): React.JSX.Element {
     }
   }
 
-  const restore = async (b: BackupInfo): Promise<void> => {
-    if (!window.confirm(`确定恢复到「${b.name}」？\n\n将把该快照内容合并回 ~/.dsh（同名文件被覆盖）。\n恢复前会自动创建一个保护快照。`)) return
+  /** 任选恢复：打开勾选面板，默认全选（= 恢复全部） */
+  const openPicker = (b: BackupInfo): void => {
+    setSelected([...b.entries])
+    setPicking(b)
+  }
+
+  const toggleEntry = (e: string): void => {
+    setSelected((s) => (s.includes(e) ? s.filter((x) => x !== e) : [...s, e]))
+  }
+
+  const toggleAll = (b: BackupInfo): void => {
+    setSelected((s) => (s.length === b.entries.length ? [] : [...b.entries]))
+  }
+
+  /** 执行恢复：entries 为空数组不合法；传全部条目等价于「恢复全部」，只传部分则任选恢复 */
+  const doRestore = async (b: BackupInfo, entries: string[]): Promise<void> => {
+    if (entries.length === 0) return
+    const label = entries.length === b.entries.length ? '全部项目' : '所选 ' + entries.length + ' 项'
+    if (
+      !window.confirm(`确定恢复到「${b.name}」？\n\n将把${label}合并回 ~/.dsh（同名文件被覆盖）。\n恢复前会自动创建一个保护快照。`)
+    )
+      return
     setBusyId(b.id)
     setMessage(null)
     try {
-      const r = await window.dshDesktop.backup.restore(b.id)
+      const r = await window.dshDesktop.backup.restore(b.id, entries)
       setMessage(r.ok ? { type: 'ok', text: '恢复完成。建议重启 DSH 服务以生效。' } : { type: 'err', text: r.error ?? '恢复失败' })
       // R-27: 恢复会额外生成保护快照，刷新列表展示
+      if (r.ok) setPicking(null)
       await refresh()
     } finally {
       setBusyId(null)
@@ -113,41 +138,96 @@ export function BackupTab(): React.JSX.Element {
         {backups.length === 0 && <div className="mt-3 text-[13px] text-slate-500">暂无快照</div>}
         <div className="mt-3 space-y-2">
           {backups.map((b) => (
-            <div
-              key={b.id}
-              className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[13px] font-medium text-slate-200">{b.name}</span>
-                  <span
-                    className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] ${
-                      b.kind === 'manual'
-                        ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
-                        : 'border-slate-600/50 bg-slate-700/20 text-slate-400'
-                    }`}
-                  >
-                    {b.kind === 'manual' ? '手动' : '自动'}
-                  </span>
+            <div key={b.id}>
+              <div className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[13px] font-medium text-slate-200">{b.name}</span>
+                    <span
+                      className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] ${
+                        b.kind === 'manual'
+                          ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
+                          : 'border-slate-600/50 bg-slate-700/20 text-slate-400'
+                      }`}
+                    >
+                      {b.kind === 'manual' ? '手动' : '自动'}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                    {fmtTime(b.createdAt)} · {fmtSize(b.size)} · {b.entryCount} 个文件
+                    {b.trigger ? ` · 触发：${b.trigger}` : ''}
+                  </div>
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                  {fmtTime(b.createdAt)} · {fmtSize(b.size)} · {b.entryCount} 个文件
-                  {b.trigger ? ` · 触发：${b.trigger}` : ''}
-                </div>
+                <button
+                  onClick={() => void doRestore(b, b.entries)}
+                  disabled={busyId === b.id}
+                  className="shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[12px] text-amber-300 hover:bg-amber-400/30 disabled:opacity-50"
+                >
+                  {busyId === b.id ? '恢复中…' : '恢复'}
+                </button>
+                <button
+                  onClick={() => openPicker(b)}
+                  disabled={busyId === b.id}
+                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+                  title="选择要恢复的项目（如只恢复插件）"
+                >
+                  任选恢复
+                </button>
+                <button
+                  onClick={() => void remove(b)}
+                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300"
+                >
+                  删除
+                </button>
               </div>
-              <button
-                onClick={() => void restore(b)}
-                disabled={busyId === b.id}
-                className="shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[12px] text-amber-300 hover:bg-amber-400/30 disabled:opacity-50"
-              >
-                {busyId === b.id ? '恢复中…' : '恢复'}
-              </button>
-              <button
-                onClick={() => void remove(b)}
-                className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300"
-              >
-                删除
-              </button>
+
+              {picking?.id === b.id && (
+                <div className="mt-2 rounded-lg border border-amber-400/30 bg-[#0d111a] p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[12px] text-slate-400">
+                      勾选要恢复的项目（默认全选 = 恢复全部，如只勾选插件可单独恢复插件）
+                    </div>
+                    <button
+                      onClick={() => toggleAll(b)}
+                      className="shrink-0 text-[11px] text-amber-300 hover:underline"
+                    >
+                      全选 / 全不选
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {b.entries.map((e) => (
+                      <label
+                        key={e}
+                        className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[12px] text-slate-300 hover:border-amber-400/40"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(e)}
+                          onChange={() => toggleEntry(e)}
+                          className="accent-amber-400"
+                        />
+                        {e}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      onClick={() => void doRestore(b, selected)}
+                      disabled={selected.length === 0 || busyId === b.id}
+                      className="shrink-0 rounded-md bg-amber-400/90 px-3 py-1.5 text-[12px] font-medium text-slate-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                    >
+                      {busyId === b.id ? '恢复中…' : '恢复所选（' + selected.length + '）'}
+                    </button>
+                    <button
+                      onClick={() => setPicking(null)}
+                      className="shrink-0 rounded-md bg-slate-800 px-3 py-1.5 text-[12px] text-slate-400 hover:bg-slate-700"
+                    >
+                      取消
+                    </button>
+                    <span className="text-[10px] text-slate-500">恢复前会自动创建保护快照</span>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>

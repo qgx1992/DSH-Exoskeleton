@@ -9,6 +9,7 @@ import path from 'node:path'
 import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
+import { notificationHub } from './notification-hub'
 
 const TITLEBAR_HEIGHT = 36
 const DEFAULT_WIDTH = 1200
@@ -133,6 +134,16 @@ export class WindowManager {
 
     this.loadRenderer()
 
+    // 通知点击回执 → 唤起窗口（webview 通道；会话激活由页面内插件 ctx.sessions.open 完成）
+    notificationHub.setOnClick(() => this.show())
+
+    // 窗口激活探针 → 通知 auto 路由（焦点感知）：DSH 窗口是前台焦点且 webview 可见才用
+    // 页面内 toast；失焦/最小化/隐藏/管理面板打开（webview 被隐藏）→ 原生通知，防漏看
+    notificationHub.setWindowActive(() => {
+      const w = this.win
+      return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible
+    })
+
     // 状态变化时通知 renderer（仪表盘/标题栏状态点）
     dshManager.on('statusChange', (state) => {
       this.win?.webContents.send('dsh:statusChange', state)
@@ -163,10 +174,38 @@ export class WindowManager {
         sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
-        spellcheck: false
+        spellcheck: false,
+        // 设计 §5：DSH 视图专用预加载桥（window.__dshExo 白名单，与主壳 preload 分开）
+        preload: path.join(__dirname, '../preload/dsh-view.js')
       }
     })
     this.win.contentView.addChildView(this.view)
+    // 通知事件中枢 webview 通道（R-26：投递回执；投递前 hub 已剥离 actions）
+    notificationHub.setWebview({
+      deliver: (ev) => {
+        const v = this.view
+        if (!v || v.webContents.isDestroyed()) return false
+        try {
+          v.webContents.send('dsh-notify:event', ev)
+          return true
+        } catch {
+          return false
+        }
+      }
+    })
+    // 页面 → 壳（作用域限定该 view，不污染 ipcMain 全局通道；R-27）
+    this.view.webContents.on('ipc-message', (_event, channel, ...args) => {
+      if (channel !== 'dsh-exo') return
+      notificationHub.handleViewMessage(String(args[0]), args[1])
+    })
+    // 每次加载/重载开始时复位握手，等页面 __dshExo.ready() 重新握手。
+    // 修复（实测日志证据）：原来用 did-finish-load 复位——插件 ready() 常在 load 之后才执行，
+    // 会被 did-finish-load 覆盖成 false，导致 webview 长期离线、通知全降级原生。
+    // 改用 did-start-loading：加载一开始就复位，页面 JS（含插件握手）在之后执行，
+    // 顺序必然「先复位、后握手」，webview 在线状态稳定。
+    this.view.webContents.on('did-start-loading', () => {
+      notificationHub.markWebviewReady(false)
+    })
     this.view.webContents.setWindowOpenHandler(({ url: u }) => {
       void shell.openExternal(u)
       return { action: 'deny' }
@@ -182,6 +221,8 @@ export class WindowManager {
 
   detachDshView(): void {
     if (this.view && this.win) {
+      // 通知中枢 webview 通道下线（服务重启重挂载后自动重新注册）
+      notificationHub.setWebview(null)
       this.win.contentView.removeChildView(this.view)
       this.view.webContents.close()
       this.view = null

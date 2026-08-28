@@ -17,8 +17,13 @@ const DEFAULTS: AppConfig = {
   minimizeToTray: true,
   autoStartService: true,
   notifyServiceEvents: true,
-  notifySessionDone: true,
+  notifySessionDone: 'per-turn',
+  notifyChannel: 'auto',
+  // 聚合窗口默认 5s（P1 review 修正）：过大会让单轮通知延迟整个窗口；
+  // 聚合模式语义上「首轮必须缓冲到窗口结束才 flush」，单轮通知最长延迟一个窗口
+  notifyAggregateWindowMs: 5000,
   onboardingDone: false,
+  defaultPluginsProvisioned: false,
   kernelMode: 'managed',
   defaultKernelVersion: null,
   windowBounds: null,
@@ -58,13 +63,18 @@ class ConfigStore {
     }
   }
 
-  /** 兼容老配置：补全 profile 列表，修复无效 activeProfileId（阶段 C） */
+  /** 兼容老配置：补全 profile 列表，修复无效 activeProfileId（阶段 C）；迁移通知粒度枚举 */
   private normalize(cfg: AppConfig): AppConfig {
     if (!Array.isArray(cfg.profiles) || cfg.profiles.length === 0) {
       cfg.profiles = [{ id: 'default', name: '默认档案', kernelVersion: null, createdAt: Date.now() }]
     }
     if (!cfg.profiles.some((p) => p.id === cfg.activeProfileId)) {
       cfg.activeProfileId = cfg.profiles[0].id
+    }
+    // 通知粒度迁移（设计 §3.3）：旧 boolean（true→'per-turn'、false→'off'），写入一律存新枚举
+    const raw = cfg as unknown as { notifySessionDone: boolean | 'off' | 'per-turn' | 'aggregate' }
+    if (typeof raw.notifySessionDone === 'boolean') {
+      raw.notifySessionDone = raw.notifySessionDone ? 'per-turn' : 'off'
     }
     return cfg
   }
