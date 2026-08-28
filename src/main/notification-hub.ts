@@ -51,8 +51,8 @@ class NotificationHub {
   private onClick: ((sessionId?: string) => void) | null = null
   /** ✓ notify:install 处理回调（P2 review 修正：webview 通道的「更新就绪」点击 → 触发安装） */
   private onInstall: (() => void) | null = null
-  /** ✓ 窗口可见性探针（window-manager 注册）：auto 路由用它决定 webview / native */
-  private windowVisible: (() => boolean) | null = null
+  /** ✓ 窗口激活探针（window-manager 注册）：auto 路由决定 webview / native（前台焦点→webview，否则原生） */
+  private windowActive: (() => boolean) | null = null
   /** ✓ 聚合桶表：key = session.uuid */
   private aggregate = new Map<string, AggregateBucket>()
 
@@ -79,17 +79,21 @@ class NotificationHub {
     this.onInstall = fn
   }
 
-  /** 注册窗口可见性探针（window-manager；auto 路由：可见→webview，隐藏→原生，防止最小化时漏看） */
-  setWindowVisible(fn: (() => boolean) | null): void {
-    this.windowVisible = fn
+  /**
+   * 注册窗口激活探针（window-manager；焦点感知路由）：
+   * auto 决策 = DSH 窗口是前台焦点（用户正在看）→ webview 页面内 toast；
+   *             失焦/最小化/隐藏/被其他窗口盖住 → 原生通知（防漏看）。
+   */
+  setWindowActive(fn: (() => boolean) | null): void {
+    this.windowActive = fn
   }
 
-  /** 窗口是否对用户可见（未注册探针时按可见处理，保证向后兼容） */
-  private windowVisibleNow(): boolean {
+  /** 窗口是否为前台焦点（未注册探针时按激活处理，保证向后兼容） */
+  private windowActiveNow(): boolean {
     try {
-      return this.windowVisible?.() ?? true
+      return this.windowActive?.() ?? true
     } catch (err) {
-      logger.warn('notification window visible probe failed, assume visible', err)
+      logger.warn('notification window active probe failed, assume active', err)
       return true
     }
   }
@@ -213,11 +217,12 @@ class NotificationHub {
   /** 路由到实际通道并记录投递回执（R-26） */
   private deliver(ev: NotificationEvent): void {
     const preference = configStore.get().notifyChannel
-    // auto 决策（设计 §5.2 + 现场修复）：webview 在线 **且窗口可见** 才用页面内 toast；
-    // 窗口隐藏/最小化时页面内 toast 不可见，必须走原生通知（否则用户会漏看）
+    // auto 决策（设计 §5.2 + 现场修复，焦点感知）：webview 在线 **且窗口是前台焦点** 才用
+    // 页面内 toast；失焦（最小化/隐藏/被其他窗口盖住）时用户看不到页面内 toast，
+    // 必须走原生通知（否则会漏看）
     const useWebview =
       preference === 'webview' ||
-      (preference === 'auto' && this.webviewOnline() && this.windowVisibleNow())
+      (preference === 'auto' && this.webviewOnline() && this.windowActiveNow())
 
     if (useWebview) {
       if (!this.webviewOnline()) {
@@ -300,12 +305,12 @@ class NotificationHub {
   }
 
   /** 测试/自检用：当前通道状态 */
-  status(): { webviewOnline: boolean; windowVisible: boolean; channel: 'webview' | 'native' } {
+  status(): { webviewOnline: boolean; windowActive: boolean; channel: 'webview' | 'native' } {
     const preference = configStore.get().notifyChannel
     const online = this.webviewOnline()
-    const visible = this.windowVisibleNow()
-    const channel = preference === 'webview' || (preference === 'auto' && online && visible) ? 'webview' : 'native'
-    return { webviewOnline: online, windowVisible: visible, channel }
+    const active = this.windowActiveNow()
+    const channel = preference === 'webview' || (preference === 'auto' && online && active) ? 'webview' : 'native'
+    return { webviewOnline: online, windowActive: active, channel }
   }
 }
 

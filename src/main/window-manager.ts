@@ -137,10 +137,11 @@ export class WindowManager {
     // 通知点击回执 → 唤起窗口（webview 通道；会话激活由页面内插件 ctx.sessions.open 完成）
     notificationHub.setOnClick(() => this.show())
 
-    // 窗口可见性探针 → 通知 auto 路由（可见→webview，隐藏/最小化→原生，防止最小化时漏看）
-    notificationHub.setWindowVisible(() => {
+    // 窗口激活探针 → 通知 auto 路由（焦点感知）：DSH 窗口是前台焦点且 webview 可见才用
+    // 页面内 toast；失焦/最小化/隐藏/管理面板打开（webview 被隐藏）→ 原生通知，防漏看
+    notificationHub.setWindowActive(() => {
       const w = this.win
-      return !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized()
+      return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible
     })
 
     // 状态变化时通知 renderer（仪表盘/标题栏状态点）

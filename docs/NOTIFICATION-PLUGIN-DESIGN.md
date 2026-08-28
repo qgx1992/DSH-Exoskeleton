@@ -203,13 +203,14 @@ window.__dshExo = {
 
 ```
 webview 在线 = view 已 attach（服务 running） && 收到过页面 __dshExo.ready() 握手
-auto 决策    = webview 在线 && 窗口可见（非隐藏/最小化） && notifyChannel=auto → webview
+auto 决策    = webview 在线 && DSH 窗口是前台焦点 && notifyChannel=auto → webview
               否则 → native（→ 托盘降级链）
 ```
 
-- **窗口可见性（现场修复）**：页面内 toast 只在窗口可见时可被看到；窗口隐藏/最小化到托盘时
-  `auto` 必须走 native 原生通知，否则用户会漏看。窗口可见性由 window-manager 注册探针
-  （`notificationHub.setWindowVisible`），hub 不 import window-manager（保持解耦）；
+- **窗口激活（焦点感知，现场修复）**：页面内 toast 只在 DSH 窗口是前台焦点（用户正看着）
+  时使用；失焦（最小化/隐藏/被其他窗口盖住/管理面板打开）时用户看不到页面内 toast，
+  `auto` 必须走 native 原生通知，否则会漏看。探针由 window-manager 注册
+  （`notificationHub.setWindowActive`：`isFocused() && !adminPanelVisible`），hub 不 import window-manager（保持解耦）；
 - 未握手不投递：避免「事件先于页面就绪被丢」的漏报；握手丢失会触发 native 兜底；
 - 双击通道防重复：`auto` 下 webview 与 native 互斥；若用户手动 `native`+`webview` 并存（后续扩展），按事件 `id` 去重。
 
@@ -303,7 +304,8 @@ auto 决策    = webview 在线 && 窗口可见（非隐藏/最小化） && noti
 - **现场修复（点击不跳转，日志证据）**：
   1. webview 握手被 `did-finish-load` 覆盖 → 长期离线 → 通知全降级原生。改为 `did-start-loading` 复位（加载开始即复位，页面 JS 与插件握手在其后执行，顺序稳定）；
   2. 原生通知点击优先转发 webview 插件 `sessions.open(id)` 激活（`hub.requestActivate` + 插件 `session-activate` 控制事件，不渲染 toast），webview 离线才回退 DOM hack；
-  3. `auto` 路由加入**窗口可见性**：窗口隐藏/最小化时页面内 toast 不可见，必须走原生通知（`hub.setWindowVisible` 探针，防漏看）；
+  3. `auto` 路由加入**窗口激活（焦点感知）**：DSH 窗口非前台焦点（失焦/最小化/隐藏/被盖住）
+     时页面内 toast 不可见，必须走原生通知（`hub.setWindowActive` 探针，防漏看）；
 - 剩余待办：§11 的 1/3 需在真实 `dsh web` 环境实测（程序化激活、dev/portable toast 行为）。
 
 每阶段：`npm run typecheck` + `npm test` + 实测验证 → `npm version patch` → 中文 changelog（遵守 AGENT.md §0）。
