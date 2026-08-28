@@ -13,6 +13,7 @@ import { createTray, destroyTray, rebuildMenu } from './tray'
 import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { notificationHub } from './notification-hub'
+import { provisionDefaultPlugins } from './plugins'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
@@ -84,6 +85,8 @@ async function bootstrap(): Promise<void> {
   dshManager.on('statusChange', (state) => {
     if (state.status === 'running' && state.port) {
       windowManager.attachDshView(`http://127.0.0.1:${state.port}`)
+      // 内置默认插件预置（幂等，仅首次执行；不阻塞 UI）
+      void provisionDefaultPlugins()
     } else if (state.status === 'error' || state.status === 'stopped') {
       windowManager.detachDshView()
     }

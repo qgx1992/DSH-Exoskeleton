@@ -23,6 +23,7 @@ const DEFAULTS: AppConfig = {
   // 聚合模式语义上「首轮必须缓冲到窗口结束才 flush」，单轮通知最长延迟一个窗口
   notifyAggregateWindowMs: 5000,
   onboardingDone: false,
+  defaultPluginsProvisioned: false,
   kernelMode: 'managed',
   defaultKernelVersion: null,
   windowBounds: null,

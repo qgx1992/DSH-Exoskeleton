@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.6.4",
+  "version": "0.7.3",
   "description": "DeepSeek Harness 桌面客户端 — 轻量、纯净、功能完整的 DSH 桌面外壳（壳核分离）",
   "main": "out/main/index.js",
   "author": "DSH Exoskeleton",
@@ -15,6 +15,7 @@
     "dist": "npm run build && electron-builder",
     "dist:dir": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win",
+    "release:notes": "node scripts/release-notes.mjs",
     "gen:icon": "node scripts/build-blackgold.mjs && node scripts/build-whale-component.mjs && electron scripts/render-icons.cjs"
   },
   "devDependencies": {

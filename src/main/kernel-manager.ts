@@ -13,6 +13,7 @@ import { spawn, execFile } from 'node:child_process'
 import { logger } from './logger'
 import { configStore } from './config'
 import { runtimeManager } from './runtime-manager'
+import { compareVersions } from '../shared/version'
 import type { KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
@@ -548,54 +549,6 @@ function dirSizeSync(dir: string): number {
 /** pnpm10 忽略 build scripts 提示（exit 1 但依赖已安装成功） */
 function isIgnoredBuilds(r: { code: number | null; stdout: string; stderr: string }): boolean {
   return /ERR_PNPM_IGNORED_BUILDS|IGNORED_BUILDS/i.test(r.stderr + ' ' + r.stdout)
-}
-
-/** 简单 semver 比较：返回 a>b ? 1 : a<b ? -1 : 0（prerelease 视为低于同 base 稳定版） */
-function compareVersions(a: string, b: string): number {
-  const parse = (v: string): { base: number[]; pre: string } => {
-    const parts = v.split('-')
-    return {
-      base: (parts[0] ?? '0').split('.').map((n) => parseInt(n, 10) || 0),
-      pre: parts.slice(1).join('-')
-    }
-  }
-  const pa = parse(a)
-  const pb = parse(b)
-  const len = Math.max(pa.base.length, pb.base.length)
-  for (let i = 0; i < len; i++) {
-    const x = pa.base[i] ?? 0
-    const y = pb.base[i] ?? 0
-    if (x !== y) return x > y ? 1 : -1
-  }
-  if (pa.pre === pb.pre) return 0
-  if (!pa.pre) return 1 // 稳定版 > prerelease
-  if (!pb.pre) return -1
-  // R-22: prerelease 逐段比较（数字段数值比较、标识符字典序、数字 < 标识符、段多 > 段少）
-  // 修复原字符串比较导致 rc.10 < rc.2 的错误判定
-  const paParts = pa.pre.split('.')
-  const pbParts = pb.pre.split('.')
-  const n = Math.max(paParts.length, pbParts.length)
-  for (let i = 0; i < n; i++) {
-    const x = i < paParts.length ? paParts[i] : undefined
-    const y = i < pbParts.length ? pbParts[i] : undefined
-    if (x === y) continue
-    if (x === undefined) return -1
-    if (y === undefined) return 1
-    const xNum = /^\d+$/.test(x)
-    const yNum = /^\d+$/.test(y)
-    if (xNum && yNum) {
-      const xn = parseInt(x, 10)
-      const yn = parseInt(y, 10)
-      if (xn !== yn) return xn > yn ? 1 : -1
-    } else if (xNum) {
-      return -1 // 数字标识符 < 字母标识符
-    } else if (yNum) {
-      return 1
-    } else if (x !== y) {
-      return x < y ? -1 : 1
-    }
-  }
-  return 0
 }
 
 export const kernelManager = new KernelManager()

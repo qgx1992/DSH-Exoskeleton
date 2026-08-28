@@ -290,6 +290,22 @@ if (!gotTheLock) {
 - 内置 pnpm，离线可用[reference:61]
 - 每次安装/卸载前自动备份[reference:62]
 
+#### 4.3.3.1 推荐插件与默认启用预置
+
+**推荐插件集**（`src/shared/recommended-plugins.ts` 的 `RECOMMENDED_PLUGINS`）：
+- 管理面板「插件」页的「推荐插件」区展示，支持单个/批量一键安装（复用 §4.3.3 安装链路，装完自动注册 bundles）；
+- 条目字段：`installTarget`（传给 `dsh plugin --profile web add`）、`name`（用于「已安装」判断，匹配 profile 依赖 key）、`description`、`source`（npm/github）、`url`（主页）、`defaultEnabled`（可选：内置默认启用标记）。
+
+**默认启用预置**（`src/main/plugins.ts` 的 `provisionDefaultPlugins`）：
+- 在 DSH 服务首次就绪（statusChange → running，web profile 已由内核初始化）后触发，幂等：检查 profile 的 dependencies 与 `dsh.profile.bundles`，缺则自动 `dsh plugin add`（装完自动注册 bundles = 默认启用，仅需一次重启加载）；
+- 只执行一次：成功后写 `config.defaultPluginsProvisioned = true`；失败不落标记，下次服务就绪自动重试；预置完成后用户手动卸载也不会被强制补装，尊重用户选择；
+- 默认启用清单 = `RECOMMENDED_PLUGINS.filter(p => p.defaultEnabled)`。
+
+**已知问题：pnpm 供应链策略阻塞插件安装/卸载**
+- 若 profile 的 `pnpm-workspace.yaml` 启用了 `minimumReleaseAge` 策略（并配 `minimumReleaseAgeExclude` 白名单），任何 `dsh plugin add/remove` 都会先做 lockfile 供应链校验；
+- 某依赖版本发布不足策略期限（默认 24h）且不在白名单时，操作报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION` 直接失败——表现为"面板里安装/卸载点了没反应"（包括 dshmarket 的装/卸）；
+- 处理：把对应版本加入 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`（如 `- dsh-cost-meter@1.6.7`）后重试，或等待超过策略期限；与策略无关的临时停用可走 profile 补丁（`cordis.patch.yml` 加 `- id: <entryId>` + `disabled: true`）。
+
 #### 4.3.4 备份与回滚
 
 **功能**：手动存档 + 自动快照，支持版本回退[reference:63]。
