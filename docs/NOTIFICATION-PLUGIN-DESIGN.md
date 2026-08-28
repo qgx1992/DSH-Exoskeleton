@@ -297,6 +297,9 @@ auto 决策    = webview 在线 && notifyChannel=auto → webview
 - P0–P4 主体已实现并测试通过（typecheck / build / `npm test`（含 config 迁移、notify:install、dsh-view preload 集成测试）/ 插件 smoke）；
 - Review 修正已合入：P1 聚合默认窗口 5s、P2 `notify:install` 通道、P3 native 回执真实化（`notify()` 返回 boolean）、P4 移除 `app:getVersion` invoke；
 - 插件 `plugins/dsh-notify` **默认本地分发**（不推 GitHub / 不 `npm publish`，安装走 `link:`）；
+- **现场修复（点击不跳转，日志证据）**：
+  1. webview 握手被 `did-finish-load` 覆盖 → 长期离线 → 通知全降级原生。改为 `did-start-loading` 复位（加载开始即复位，页面 JS 与插件握手在其后执行，顺序稳定）；
+  2. 原生通知点击优先转发 webview 插件 `sessions.open(id)` 激活（`hub.requestActivate` + 插件 `session-activate` 控制事件，不渲染 toast），webview 离线才回退 DOM hack；
 - 剩余待办：§11 的 1/3 需在真实 `dsh web` 环境实测（程序化激活、dev/portable toast 行为）。
 
 每阶段：`npm run typecheck` + `npm test` + 实测验证 → `npm version patch` → 中文 changelog（遵守 AGENT.md §0）。
@@ -305,8 +308,8 @@ auto 决策    = webview 在线 && notifyChannel=auto → webview
 
 ## 11. 待验证清单（动手前先取证）
 
-1. `dsh-client-runtime` 的 `sessions` store 是否暴露**程序化选中/打开会话**的 API（决定 §6.3 首选路径是否可行）；
+1. ~~`dsh-client-runtime` 的 `sessions` store 是否暴露**程序化选中/打开会话**的 API~~ —— **已确认**（`lib/types/client/contract/sessions.d.ts`：`ISessions.open(id)` = 把会话选中为 current，`must exist in the list`）；
 2. dsh web 页面是否容忍注入 `__dshExo` 全局（命名冲突 / CSP 检查）；
 3. Windows 下 dev / portable 版 toast 实际行为（记录证据，验证 AUMID 修复效果）；
-4. `WebContentsView` + `sandbox:true` + preload + `contextBridge` 的兼容性小样验证；
-5. 聚合窗口的合理默认值（20s 需实测多轮会话观感）。
+4. `WebContentsView` + `sandbox:true` + preload + `contextBridge` 的兼容性小样验证（已通过 `test-dsh-view` 集成测试）；
+5. 聚合窗口的合理默认值（5s 需实测多轮会话观感）。

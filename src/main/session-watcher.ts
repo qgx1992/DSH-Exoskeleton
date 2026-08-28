@@ -217,11 +217,15 @@ export function wireSessionWatcher(): void {
         sessionTitle: title,
         firstUserText
       },
-      // 原生通道点击：唤起窗口 + 定位会话（DOM hack 兜底；webview 通道由插件 ctx.sessions.open 激活）
+      // 通知点击（原生通道 actions）：唤起窗口 + 定位会话。
+      // 修复「点击通知偶尔不跳转」：优先转发 webview 插件用 sessions.open 程序化激活
+      // （可靠、会话 ID 精确）；webview 离线才回退 executeJavaScript DOM hack。
       actions: {
         onClick: () => {
           windowManager.show()
-          windowManager.activateSessionInWebUi(title, firstUserText, ev.uuid)
+          if (!notificationHub.requestActivate(ev.uuid)) {
+            windowManager.activateSessionInWebUi(title, firstUserText, ev.uuid)
+          }
         }
       }
     })

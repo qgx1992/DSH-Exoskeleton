@@ -132,6 +132,20 @@ app.whenReady().then(async () => {
     await configStore.set({ notifyChannel: 'native' })
     assert(notificationHub.status().channel === 'native', 'native 强制 → channel native')
 
+    console.log('8) requestActivate：通知点击 → 转发 webview 插件激活（修复「偶尔不跳转」）')
+    // webview 在线 → 返回 true 且投递 session-activate 控制事件（不渲染 toast 的载荷语义）
+    received.length = 0
+    notificationHub.markWebviewReady(true)
+    await configStore.set({ notifyChannel: 'auto' })
+    const okAct = notificationHub.requestActivate('session-uuid-1')
+    assert(okAct === true, 'webview 在线：requestActivate 返回 true')
+    assert(received.length === 1 && received[0].kind === 'session-activate' && received[0].session.uuid === 'session-uuid-1', '投递 session-activate 事件且带 sessionId', received)
+    // webview 离线 → 返回 false（调用方回退 DOM hack），且不投递原生空通知
+    notificationHub.markWebviewReady(false)
+    const okOff = notificationHub.requestActivate('session-uuid-2')
+    assert(okOff === false, 'webview 离线：requestActivate 返回 false（回退 DOM hack）')
+    assert(received.length === 1, 'webview 离线：不再多投递任何事件', received.length)
+
     notificationHub.setWebview(null)
   } catch (e) {
     console.error('TEST CRASH:', e)

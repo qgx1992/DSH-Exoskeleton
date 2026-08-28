@@ -191,8 +191,12 @@ export class WindowManager {
       if (channel !== 'dsh-exo') return
       notificationHub.handleViewMessage(String(args[0]), args[1])
     })
-    // 每次加载/重载后复位握手，等页面 __dshExo.ready() 重新握手（防事件先于页面就绪被丢）
-    this.view.webContents.on('did-finish-load', () => {
+    // 每次加载/重载开始时复位握手，等页面 __dshExo.ready() 重新握手。
+    // 修复（实测日志证据）：原来用 did-finish-load 复位——插件 ready() 常在 load 之后才执行，
+    // 会被 did-finish-load 覆盖成 false，导致 webview 长期离线、通知全降级原生。
+    // 改用 did-start-loading：加载一开始就复位，页面 JS（含插件握手）在之后执行，
+    // 顺序必然「先复位、后握手」，webview 在线状态稳定。
+    this.view.webContents.on('did-start-loading', () => {
       notificationHub.markWebviewReady(false)
     })
     this.view.webContents.setWindowOpenHandler(({ url: u }) => {

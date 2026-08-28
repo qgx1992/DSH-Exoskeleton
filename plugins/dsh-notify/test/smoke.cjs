@@ -239,6 +239,14 @@ console.log('3) 壳桥模式（window.__dshExo）')
   handlers.forEach((fn) => fn(ev2))
   assert('壳桥：同事件 id 去重', toastNodes().length === beforeCount, `before=${beforeCount} after=${toastNodes().length}`)
 
+  // 控制类事件 session-activate（原生通知点击后壳转发的可靠激活）：只激活、不渲染 toast
+  const evAct = { id: 'ev-act', kind: 'session-activate', title: '', body: '', ts: Date.now(), session: { uuid: 'abc' } }
+  const beforeAct = toastNodes().length
+  const beforeOpened = sessionsService.opened.length
+  handlers.forEach((fn) => fn(evAct))
+  assert('壳桥：session-activate 不渲染 toast', toastNodes().length === beforeAct, `before=${beforeAct} after=${toastNodes().length}`)
+  assert('壳桥：session-activate 程序化激活 open() 被调用（session-abc）', sessionsService.opened.slice(beforeOpened).some((id) => id === 'session-abc'), JSON.stringify(sessionsService.opened))
+
   // 桥通道与 sessions 降级互斥：有桥时不应走降级
   // （桥模式下无任何 fallback toast 用 fb: 前缀；此处 session store 为空，天然无降级 toast）
   windowObj.__dshExo = undefined

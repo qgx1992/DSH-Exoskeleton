@@ -75,6 +75,7 @@ export type NotificationEventKind =
   | 'service-error' // 服务异常
   | 'service-restarting' // 崩溃自动重启
   | 'update-ready' // 更新下载完成待安装
+  | 'session-activate' // 控制类事件（非用户通知）：通知点击后的会话激活请求（webview 插件激活，不渲染 toast）
 
 /** 通知事件（检测层产出的事实；显示是策略——由 notification-hub 选 Provider、插件渲染） */
 export interface NotificationEvent {

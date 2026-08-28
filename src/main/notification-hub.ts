@@ -83,6 +83,23 @@ class NotificationHub {
   }
 
   /**
+   * 通知点击后的会话激活请求（修复「点击通知偶尔不跳转」）：原生通知点击时，
+   * 优先转发给 webview 插件用官方 `sessions.open(id)` 程序化激活（可靠，替代 DOM hack）。
+   * @returns 是否已交给 webview（false = webview 离线，调用方应回退 executeJavaScript DOM hack）
+   */
+  requestActivate(sessionId: string | undefined): boolean {
+    if (!sessionId || !this.webviewOnline()) return false
+    return this.execWebview({
+      id: randomUUID(),
+      kind: 'session-activate',
+      title: '',
+      body: '',
+      ts: Date.now(),
+      session: { uuid: sessionId }
+    } as NotificationEvent)
+  }
+
+  /**
    * 入口：检测层产出的唯一消费点。按配置路由到 Provider / 聚合 / 跳过。
    */
   dispatch(ev: NotificationEvent): void {

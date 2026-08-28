@@ -466,6 +466,13 @@ window.__ModuleLoader__.load({
 
 		function handleBridgeEvent(ctx, t, ev) {
 			if (!ev || typeof ev.id !== "string" || !ev.id) return;
+			// 控制类事件：会话激活请求（原生通知点击后壳转发的可靠激活路径，修复「偶尔不跳转」）。
+			// 只激活、不渲染 toast。
+			if (ev.kind === "session-activate") {
+				var rawSid = ev.session && (ev.session.sessionId || ev.session.uuid);
+				if (rawSid) activateSession(ctx, normalizeSessionId(rawSid));
+				return;
+			}
 			var meta = KIND_META[ev.kind] || FALLBACK_KIND_META;
 			var rawSession = ev.session && (ev.session.sessionId || ev.session.uuid);
 			var sessionId = rawSession ? normalizeSessionId(rawSession) : undefined;
