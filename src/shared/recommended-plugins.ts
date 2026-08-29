@@ -71,13 +71,11 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     url: 'https://github.com/baihejiangnan/dsh-session-context-menu'
   },
   {
-    // 内置默认启用：新装（首次服务就绪）自动安装到 web profile 并注册进 dsh.profile.bundles（= 默认启用）
     installTarget: 'github:qgx1992/dsh-ui-tools',
     name: 'dsh-ui-tools',
     description: 'UI 工具集：输入框「模型选择」双按钮（供应商+模型两级联动）+ 侧边栏工作区折叠/展开',
     source: 'github',
-    url: 'https://github.com/qgx1992/dsh-ui-tools',
-    defaultEnabled: true
+    url: 'https://github.com/qgx1992/dsh-ui-tools'
   },
   {
     installTarget: 'github:qgx1992/dsh-notify',

@@ -8,6 +8,7 @@ import type {
   KernelUpdateInfo,
   RuntimeInfo
 } from '../../../shared/types'
+import { DEFAULT_KERNEL_VERSION } from '../../../shared/kernel-defaults'
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -417,7 +418,12 @@ export function KernelsTab(): React.JSX.Element {
             {available.length === 0 && <option value="">（无法获取版本列表，检查网络）</option>}
             {available.map((v) => (
               <option key={v.version} value={v.version}>
-                v{v.version}{installed.some((i) => i.version === v.version) ? '（已安装）' : ''}
+                v{v.version}
+                {installed.some((i) => i.version === v.version)
+                  ? '（已安装）'
+                  : v.version === DEFAULT_KERNEL_VERSION
+                    ? '（推荐）'
+                    : ''}
               </option>
             ))}
           </select>

@@ -55,6 +55,12 @@ export interface AppConfig {
   onboardingDone: boolean
   /** 内置默认插件是否已完成首装预置（true 后不再自动补装，尊重用户手动卸载） */
   defaultPluginsProvisioned: boolean
+  /**
+   * 首启默认内核预置是否已完成（阶段 D）：全新安装首次启动自动安装
+   * DEFAULT_KERNEL_VERSION 并设为默认；true 后不再预置。老配置迁移时
+   * 字段缺失视为 true（不打扰升级用户）；显式 false（预置未成功）保留重试
+   */
+  defaultKernelProvisioned: boolean
   /** 内核使用模式：managed=托管内核优先，system=始终使用系统 dsh */
   kernelMode: 'managed' | 'system'
   /** 托管内核默认版本 */

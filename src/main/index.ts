@@ -17,6 +17,7 @@ import { provisionDefaultPlugins } from './plugins'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
+import { provisionDefaultKernel } from './kernel-provision'
 import { sessionWatcher, wireSessionWatcher } from './session-watcher'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
@@ -159,6 +160,10 @@ async function bootstrap(): Promise<void> {
   if (cfg.autoStartService !== false) {
     void dshManager.start()
   }
+
+  // 阶段 D：首启默认内核预置（全新安装自动装 DEFAULT_KERNEL_VERSION 并切换；
+  // 不阻塞首屏，安装期间服务可先用系统 dsh 兜底，完成后自动重启换内核）
+  void provisionDefaultKernel()
 
   if (isHiddenLaunch) {
     windowManager.hide()

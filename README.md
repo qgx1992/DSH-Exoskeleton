@@ -21,7 +21,7 @@
 | 备份与回滚 | 手动存档 + 自动快照（插件安装/卸载、恢复前）+ 一键回退，快照存于 userData\backups |
 | 插件管理 | GitHub topic dsh-plugin + npm 双来源目录，一键安装/卸载（复用 dsh plugin），冲突预检 + 操作前自动备份 |
 | 自动更新 | NSIS 安装版 electron-updater 静默下载 → 通知 → 一键重启安装；便携版引导手动下载 |
-| 内核管理（阶段 A/B/C） | DSH 多版本共存：安装/默认路由/卸载 + 内置 Node 运行时（零门槛）+ 内核更新检测与一键升级 + 多 Profile 内核绑定 + 磁盘配额 |
+| 内核管理（阶段 A/B/C/D） | DSH 多版本共存：安装/默认路由/卸载 + 内置 Node 运行时（零门槛）+ 首启默认内核预置 + 内核更新检测与一键升级 + 多 Profile 内核绑定 + 磁盘配额 |
 | 数据复用 | DSH_HOME 环境变量优先，否则 `%USERPROFILE%\.dsh` |
 | 安全隔离 | 仅监听 `127.0.0.1`、渲染进程沙箱、`contextIsolation`、禁用 Node 集成 |
 
@@ -111,6 +111,7 @@ dist/win-unpacked/                            # 免安装绿色版文件夹
 | `dshHome` | DSH Home 覆盖 | 空（官方规则） |
 | `activeProfileId` | 激活的配置档案 | `default` |
 | `kernelsQuotaMB` | 内核仓库磁盘配额（MB，0=不限） | `1024` |
+| `defaultKernelVersion` | 默认托管内核版本（首启预置自动写入） | `null` |
 | `autoStartService` | 启动时自动运行服务 | `true` |
 | `minimizeToTray` | 关闭窗口隐藏到托盘 | `true` |
 
@@ -124,12 +125,13 @@ dist/win-unpacked/                            # 免安装绿色版文件夹
 - [x] Phase 2 — 体验完善：API Key 首次启动向导 / 数据复用 / 安全隔离 / 日志查看 / 原生通知 / 开机自启
 - [x] Phase 3 大部分：自动更新（electron-updater 静默下载+一键重启）/ 仪表盘（状态/设置/内核/插件/备份/日志/更新）/
        插件管理器（双来源目录+冲突预检+自动备份）/ 备份与回滚 / 三种分发形态
-- [x] 内核管理阶段 A/B/C：托管安装/默认路由/卸载；内置 Node 运行时（真零门槛）；内核更新检测 + 一键升级；
-      多 Profile 与内核版本绑定（档案面板）；磁盘配额与卸载引用保护
+- [x] 内核管理阶段 A/B/C/D：托管安装/默认路由/卸载；内置 Node 运行时（真零门槛）；首启默认内核预置（全新装自动就绪）；
+      内核更新检测 + 一键升级；多 Profile 与内核版本绑定（档案面板）；磁盘配额与卸载引用保护
 - [ ] Phase 4：跨平台 / 社区生态
 
-## 内核管理（阶段 B/C 已落地）
+## 内核管理（阶段 B/C/D 已落地）
 
+- **首启默认内核预置（阶段 D）**：全新安装首次启动自动安装默认内核（当前 `0.1.2-alpha.1`，见 `src/shared/kernel-defaults.ts`）并设为默认——无 Node 的机器会先自动下载内置运行时再装内核；老用户升级自动跳过，失败下次启动重试
 - **内置 Node 运行时**：内核面板一键下载（~30MB，nodejs.org，可用 `DSH_NODE_DIST` 换 npmmirror 镜像），之后无需系统 Node（真零门槛）
 - 安装走 npm registry（可切 npmmirror 镜像加速国内网络，见 `docs/KERNEL-MANAGER-DESIGN.md`）
 - 依赖树较大（单内核 ~50MB+），首次安装耗时受网络影响；内核仓库有磁盘配额保护（`kernelsQuotaMB`，默认 1GB）

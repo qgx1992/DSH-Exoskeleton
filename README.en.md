@@ -21,7 +21,7 @@ Following the **shell-kernel separation** principle — **no changes to the DSH 
 | Backup & rollback | Manual archive + automatic snapshots (before plugin install/uninstall, before restore) + one-click rollback; snapshots stored in `userData\backups` |
 | Plugin management | GitHub topic `dsh-plugin` + npm dual-source catalogs, one-click install/uninstall (reuses `dsh plugin`), conflict pre-check + automatic backup before operations |
 | Auto-update | NSIS installers use electron-updater silent download → notify → one-click restart & install; the portable build guides a manual download |
-| Kernel management (Phase A/B/C) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota |
+| Kernel management (Phase A/B/C/D) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + first-launch default kernel provisioning + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota |
 | Data reuse | `DSH_HOME` environment variable takes priority, otherwise `%USERPROFILE%\.dsh` |
 | Security isolation | Listens only on `127.0.0.1`, renderer sandbox, `contextIsolation`, Node integration disabled |
 
@@ -112,6 +112,7 @@ Stored in `%APPDATA%\DSH-Exoskeleton\config.json`:
 | `dshHome` | DSH Home override | empty (official rules) |
 | `activeProfileId` | Active configuration profile | `default` |
 | `kernelsQuotaMB` | Kernel store disk quota (MB, 0 = unlimited) | `1024` |
+| `defaultKernelVersion` | Default managed kernel version (written by first-launch provisioning) | `null` |
 | `autoStartService` | Auto-start service at launch | `true` |
 | `minimizeToTray` | Close window hides to tray | `true` |
 
@@ -125,12 +126,13 @@ Stored in `%APPDATA%\DSH-Exoskeleton\config.json`:
 - [x] Phase 2 — Experience polish: API Key first-run wizard / data reuse / security isolation / log viewer / native notifications / launch at startup
 - [x] Phase 3 (mostly): auto-update (electron-updater silent download + one-click restart) / dashboard (status / settings / kernel / plugins / backups / logs / updates) /
       plugin manager (dual-source catalogs + conflict pre-check + auto backup) / backup & rollback / three distribution forms
-- [x] Kernel management Phase A/B/C: managed install / default routing / uninstall; built-in Node runtime (truly zero barrier); kernel update detection + one-click upgrade;
-      multi-Profile kernel binding (profile panel); disk quota & uninstall reference protection
+- [x] Kernel management Phase A/B/C/D: managed install / default routing / uninstall; built-in Node runtime (truly zero barrier); first-launch default kernel provisioning (auto-ready on fresh installs);
+      kernel update detection + one-click upgrade; multi-Profile kernel binding (profile panel); disk quota & uninstall reference protection
 - [ ] Phase 4: cross-platform / community ecosystem
 
-## Kernel Management (Phase B/C shipped)
+## Kernel Management (Phase B/C/D shipped)
 
+- **First-launch default kernel provisioning (Phase D)**: on a fresh install, the default kernel (currently `0.1.2-alpha.1`, see `src/shared/kernel-defaults.ts`) is installed automatically on first launch and set as the default — machines without Node download the built-in runtime first; upgrading users are skipped automatically, and failures retry on the next launch.
 - **Built-in Node runtime**: one-click download from the kernel panel (~30MB, nodejs.org; switchable to the npmmirror mirror via `DSH_NODE_DIST`). No system Node needed afterwards (truly zero barrier).
 - Install goes through the npm registry (switchable to the npmmirror mirror to accelerate domestic networks, see `docs/KERNEL-MANAGER-DESIGN.md`).
 - The dependency tree is large (a single kernel is ~50MB+), so the first install time depends on the network; the kernel store has disk quota protection (`kernelsQuotaMB`, default 1GB).

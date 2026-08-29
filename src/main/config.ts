@@ -23,6 +23,8 @@ const DEFAULTS: AppConfig = {
   notifyAggregateWindowMs: 5000,
   onboardingDone: false,
   defaultPluginsProvisioned: false,
+  // 阶段 D：首启默认内核预置标记（false = 待预置；老配置迁移见 load()）
+  defaultKernelProvisioned: false,
   kernelMode: 'managed',
   defaultKernelVersion: null,
   windowBounds: null,
@@ -35,7 +37,8 @@ const DEFAULTS: AppConfig = {
 
 const ENCRYPTED_PREFIX = 'enc:'
 
-class ConfigStore {
+/** 导出类便于独立测试（迁移/默认值语义）；运行期请使用下方单例 */
+export class ConfigStore {
   private file = ''
   private cache: AppConfig | null = null
   /** R-16: 落盘防抖定时器（高频更新如窗口几何时合并写盘） */
@@ -50,6 +53,12 @@ class ConfigStore {
     try {
       if (fs.existsSync(this.file)) {
         const raw = JSON.parse(fs.readFileSync(this.file, 'utf-8'))
+        // 阶段 D 迁移：老配置（升级前版本）没有 defaultKernelProvisioned 字段 → 视为
+        // 已完成（绝不打扰已有用户）；只有首次创建的配置才保持 false 触发首启预置。
+        // 显式 false（预置未成功待重试）不在迁移范围，原样保留。
+        if (raw && typeof raw === 'object' && raw.defaultKernelProvisioned === undefined) {
+          raw.defaultKernelProvisioned = true
+        }
         this.cache = this.normalize({ ...DEFAULTS, ...raw })
       } else {
         this.cache = this.normalize({ ...DEFAULTS })

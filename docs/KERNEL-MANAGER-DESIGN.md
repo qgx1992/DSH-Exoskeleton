@@ -1,6 +1,6 @@
 # DSH 内核版本管理 · 多内核共存方案（设计文档）
 
-> 状态：阶段 A/B/C 已实现（v0.6.0） · 对应目标：文档 §1.2「零门槛：下载安装即用，无需预装 Node.js / dsh」
+> 状态：阶段 A/B/C/D 已实现（阶段 D v0.8.0） · 对应目标：文档 §1.2「零门槛：下载安装即用，无需预装 Node.js / dsh」
 > 模式参考：nvm / pyenv / volta 的「多版本共存 + 默认版本切换」
 
 ---
@@ -254,13 +254,48 @@ profiles/
 | **A · 托管内核基础** | KernelManager + npm 下载/校验/安装到 kernels/、内核面板 UI、defaultVersion 路由、构建用系统 node | 卸载系统 dsh 后应用仍能启动 dsh web（零门槛达成） | ✅ v0.3.0 |
 | **B · 运行时与升级** | 内置 Node 运行时自动下载/自检（runtime-manager.ts）；内核新版本检测 + 一键升级/切换（dist-tags latest/rc）；进度推送 | 全新机器（无 Node/npm/dsh）安装应用即可用，纯 GUI 完成内核升级 | ✅ v0.6.0 |
 | **C · 生态联动** | profile-version 绑定（profiles.ts + 档案面板）、多内核 A/B、卸载引用保护、磁盘配额（kernelsQuotaMB） | 不同 Profile 稳定运行不同内核版本 | ✅ v0.6.0 |
+| **D · 首启默认内核预置** | kernel-provision.ts：全新安装首次启动自动安装 `DEFAULT_KERNEL_VERSION`（src/shared/kernel-defaults.ts）并设为默认；无 Node 先自动下载内置运行时；失败下次启动重试 | 全新安装（无历史 config）首次启动后自动装好默认内核并生效；老用户升级零打扰 | ✅ v0.8.0 |
 
 ---
 
-## 13. 验收（对文档 §1.2 目标）
+## 13. 阶段 D · 首启默认内核预置（v0.8.0）
+
+**触发链**：主进程 bootstrap（`index.ts`）fire-and-forget 调用 `provisionDefaultKernel()`，不阻塞首屏；
+安装进度经既有 `kernels:progress` / `runtime:progress` 通道推送到内核面板。
+
+**守卫条件（`needsDefaultKernelProvision` 纯函数，任一命中即跳过）**：
+
+- `config.defaultKernelProvisioned === true`（已完成，一次性）
+- `kernelMode !== 'managed'`（用户显式选择系统 dsh）
+- `defaultKernelVersion` 已设 / 任一 Profile 绑定了内核版本（用户已表达偏好）
+- 已安装任何托管内核（用户已上手内核管理）
+
+**config 迁移语义（`config.ts` load）**：
+
+| 场景 | `defaultKernelProvisioned` | 行为 |
+| :--- | :--- | :--- |
+| 首次创建 config（全新安装） | `false` | 首启自动预置默认内核 |
+| 老配置缺该字段（升级用户） | 迁移为 `true` | 绝不预置，零打扰 |
+| 显式 `false`（上次预置失败） | 保留 `false` | 下次启动自动重试 |
+
+**安装成功后的收尾**：重读 config 再决定——用户在安装期间手动设过默认/绑定档案则尊重用户不覆盖；
+否则设 `defaultKernelVersion = DEFAULT_KERNEL_VERSION` 并落 `defaultKernelProvisioned = true`。
+服务运行/启动中 → `restart()` 换内核；此前启动失败（全新机器无系统 dsh）→ 直接 `start()` 拉起。
+
+**零门槛依赖链**：内置运行时与系统 Node 均缺失时，先 `runtimeManager.download()`（sha256 校验 + 自检）
+再装内核；运行时/内核任一下载失败 → 不落标记，下次启动整体重试，期间服务回退系统 dsh。
+
+**发布前置**：壳发版前 `@deepseek-ai/dsh@DEFAULT_KERNEL_VERSION`（含全部 `@deepseek-ai/*` 子包）
+必须已发布到 npm registry（官方源与 npmmirror 镜像），否则预置每次启动失败重试、静默回退系统 dsh。
+**发布顺序：先内核、后壳。**
+
+---
+
+## 14. 验收（对文档 §1.2 目标）
 
 - [x] 全新 Win10/11（仅装应用）→ 首次启动引导下载内置 Node 运行时 + 托管内核 → 打开 DSH Web UI（阶段 B 落地）
 - [x] 已有 dsh 用户（本机已有 ~/.dsh 与系统 dsh）→ 无缝接管，数据零迁移
 - [x] 安装 0.1.1-rc.2 与 0.2.1 并存，切换后服务重启即用对应版本
 - [x] 升级失败/新版本异常 → 一键回退旧内核（多版本共存即回滚通道）
 - [x] 不同 Profile 绑定不同内核版本，激活切换即换内核（阶段 C）
+- [x] 全新安装 → 首启自动安装默认内核（`DEFAULT_KERNEL_VERSION`）并设为默认，无需手动进内核面板；老用户升级 config 迁移跳过，零打扰（阶段 D）

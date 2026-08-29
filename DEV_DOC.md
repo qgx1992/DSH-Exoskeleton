@@ -299,7 +299,7 @@ if (!gotTheLock) {
 **默认启用预置**（`src/main/plugins.ts` 的 `provisionDefaultPlugins`）：
 - 在 DSH 服务首次就绪（statusChange → running，web profile 已由内核初始化）后触发，幂等：检查 profile 的 dependencies 与 `dsh.profile.bundles`，缺则自动 `dsh plugin add`（装完自动注册 bundles = 默认启用，仅需一次重启加载）；
 - 只执行一次：成功后写 `config.defaultPluginsProvisioned = true`；失败不落标记，下次服务就绪自动重试；预置完成后用户手动卸载也不会被强制补装，尊重用户选择；
-- 默认启用清单 = `RECOMMENDED_PLUGINS.filter(p => p.defaultEnabled)`。
+- 默认启用清单 = `RECOMMENDED_PLUGINS.filter(p => p.defaultEnabled)`；当前清单为空（`dsh-ui-tools` 曾默认启用，v0.8.0 起改为普通推荐条目，用户按需手动安装）。
 
 **已知问题：pnpm 供应链策略阻塞插件安装/卸载**
 - 若 profile 的 `pnpm-workspace.yaml` 启用了 `minimumReleaseAge` 策略（并配 `minimumReleaseAgeExclude` 白名单），任何 `dsh plugin add/remove` 都会先做 lockfile 供应链校验；
@@ -356,15 +356,16 @@ if (!gotTheLock) {
 
 **里程碑**：功能完整的 DSH 桌面客户端，可与主流方案媲美。
 
-### 内核管理（阶段 A/B/C，已落地）
+### 内核管理（阶段 A/B/C/D，已落地）
 
 | 阶段 | 内容 | 落地 |
 | :--- | :--- | :--- |
 | A | KernelManager：npm 下载/校验/安装到 userData/kernels/、默认路由、卸载 | v0.3.0 |
 | B | 内置 Node 运行时（runtime-manager.ts：一键下载/解压/自检，resolveNode 优先）；内核更新检测（dist-tags latest/rc）+ 一键升级；进度推送 | v0.6.0 |
 | C | 多 Profile 档案（profiles.ts + 档案面板）：档案绑定内核版本、切换即换内核；卸载引用保护；磁盘配额（kernelsQuotaMB） | v0.6.0 |
+| D | 首启默认内核预置（kernel-provision.ts）：全新安装首次启动自动安装 `DEFAULT_KERNEL_VERSION`（src/shared/kernel-defaults.ts，当前 0.1.2-alpha.1）并设为默认；无 Node 先自动下载内置运行时；老配置迁移跳过、失败下次重试 | v0.8.0 |
 
-**验收**：全新机器仅装应用 → 下载内置 Node 运行时 + 托管内核 → 打开 DSH Web UI；不同档案稳定运行不同内核版本。
+**验收**：全新机器仅装应用 → 下载内置 Node 运行时 + 托管内核 → 打开 DSH Web UI；不同档案稳定运行不同内核版本；全新安装首启自动装好默认内核（老用户升级零打扰）。
 
 ### Phase 4 — 生态建设（持续）
 
