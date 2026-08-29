@@ -9,6 +9,12 @@ import type {
   RuntimeInfo
 } from '../../../shared/types'
 import { DEFAULT_KERNEL_VERSION } from '../../../shared/kernel-defaults'
+import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
+import { Select } from '../ui/Field'
+import { Card, Notice } from '../ui/Card'
+import { EmptyState } from '../ui/EmptyState'
+import { IconBox } from '../ui/icons'
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return bytes + ' B'
@@ -208,37 +214,33 @@ export function KernelsTab(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-6">
       {/* 模式与说明 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <div className="flex items-center justify-between">
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">DSH 内核（多版本共存）</h2>
-            <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-              托管内核存放于 <code className="rounded bg-slate-800 px-1 py-px font-mono text-[11px] text-amber-300">kernels/</code>，各版本隔离、
-              可并存切换。启动时默认使用「托管内核」；未安装任何托管内核时自动回退系统 dsh。
+            <h2 className="text-lg font-semibold text-ink">DSH 内核（多版本共存）</h2>
+            <p className="mt-1 max-w-xl text-xs leading-relaxed text-ink-3">
+              托管内核存放于 <code className="rounded bg-surface-2 px-1 py-px font-mono text-2xs text-accent">kernels/</code>
+              ，各版本隔离、可并存切换。启动时默认使用「托管内核」；未安装任何托管内核时自动回退系统 dsh。
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-[12px] text-slate-400">模式</span>
-            <button
+            <span className="text-xs text-ink-2">模式</span>
+            <Button
+              variant={cfg?.kernelMode === 'managed' ? 'primary' : 'secondary'}
               onClick={() => void setMode(cfg?.kernelMode === 'managed' ? 'system' : 'managed')}
-              className={`rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors ${
-                cfg?.kernelMode === 'managed'
-                  ? 'bg-amber-400/90 text-slate-950 hover:bg-amber-300'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
             >
               {cfg?.kernelMode === 'managed' ? '托管内核优先' : '始终用系统 dsh'}
-            </button>
+            </Button>
           </div>
         </div>
-      </section>
+      </Card>
 
       {/* 阶段 B：内置 Node 运行时 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <div className="flex items-center justify-between">
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">Node 运行时（内置）</h3>
-            <p className="mt-1 text-[12px] text-slate-500">
+            <h3 className="text-xs font-semibold tracking-wider text-ink-2">Node 运行时（内置）</h3>
+            <p className="mt-1 max-w-xl text-xs text-ink-3">
               托管内核的原生模块（node-pty/sharp）需按 Node ABI 编译，不能使用 Electron 内置 Node。
               下载后全新机器无需安装 Node.js 即可运行（真零门槛）。
             </p>
@@ -246,140 +248,128 @@ export function KernelsTab(): React.JSX.Element {
           {runtime && (
             <div className="flex shrink-0 items-center gap-2">
               {runtime.installed ? (
-                <button
-                  onClick={() => void removeRuntime()}
-                  disabled={rtBusy}
-                  className="rounded-lg bg-slate-800 px-3 py-1.5 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
-                >
+                <Button variant="danger" size="sm" loading={rtBusy} disabled={rtBusy} onClick={() => void removeRuntime()}>
                   {rtBusy ? '操作中…' : '删除'}
-                </button>
+                </Button>
               ) : (
-                <button
-                  onClick={() => void downloadRuntime()}
-                  disabled={rtBusy}
-                  className="rounded-lg bg-amber-400 px-3 py-1.5 text-[12px] font-medium text-slate-950 hover:bg-amber-300 disabled:opacity-50"
-                >
+                <Button variant="primary" size="sm" loading={rtBusy} disabled={rtBusy} onClick={() => void downloadRuntime()}>
                   {rtBusy ? '下载中…' : '下载内置 Node 运行时'}
-                </button>
+                </Button>
               )}
             </div>
           )}
         </div>
-        <div className="mt-3 space-y-1 text-[12px] text-slate-400">
-          <div className="flex justify-between border-b border-slate-800/60 py-1">
+        <div className="mt-3 space-y-1 text-xs text-ink-2">
+          <div className="flex justify-between border-b border-rule/60 py-1">
             <span>内置 Node</span>
-            <span className="font-mono text-slate-200">
-              {runtime?.installed ? (runtime.version ?? '已安装') : '未安装'}
-            </span>
+            <span className="font-mono text-ink">{runtime?.installed ? (runtime.version ?? '已安装') : '未安装'}</span>
           </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1">
+          <div className="flex justify-between border-b border-rule/60 py-1">
             <span>系统 Node（探测）</span>
-            <span className="font-mono text-slate-300">{runtime?.systemNode ? runtime.systemNode : '未找到'}</span>
+            <span className="font-mono text-ink">{runtime?.systemNode ? runtime.systemNode : '未找到'}</span>
           </div>
         </div>
         {rtProgress && (
           <div className="mt-3">
-            <div className="mb-1 flex justify-between text-[12px] text-slate-400">
+            <div className="mb-1 flex justify-between text-xs text-ink-2">
               <span>{rtProgress.message}</span>
               <span className="font-mono">{rtProgress.percent.toFixed(0)}%</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-emerald-300 to-emerald-500 transition-all"
-                style={{ width: Math.min(100, rtProgress.percent) + '%' }}
+                className="progress-fill rounded-full bg-success"
+                style={{ transform: `scaleX(${Math.min(100, rtProgress.percent) / 100})` }}
               />
             </div>
           </div>
         )}
-      </section>
+      </Card>
 
       {/* 阶段 B：内核更新横幅 */}
       {update?.available && update.latest && (
-        <section className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-[13px] text-amber-200">
+        <section className="rounded-card border border-warning/30 bg-warning/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm text-warning">
               <span className="font-semibold">内核新版本可用：v{update.latest}</span>
-              <span className="ml-2 text-[12px] text-amber-300/80">当前 v{update.current ?? '系统 dsh'}</span>
+              <span className="ml-2 text-xs text-warning/80">当前 v{update.current ?? '系统 dsh'}</span>
               {update.rc && update.rc !== update.latest && (
-                <span className="ml-2 rounded bg-slate-800/60 px-1.5 py-px font-mono text-[10px] text-slate-400">rc: v{update.rc}</span>
+                <span className="ml-2 rounded bg-surface-2/60 px-1.5 py-px font-mono text-2xs text-ink-3">rc: v{update.rc}</span>
               )}
             </div>
-            <button
-              onClick={() => void upgrade()}
-              disabled={installing !== null}
-              className="shrink-0 rounded-lg bg-amber-400 px-4 py-1.5 text-[13px] font-medium text-slate-950 hover:bg-amber-300 disabled:opacity-50"
-            >
+            <Button variant="primary" loading={installing !== null} disabled={installing !== null} onClick={() => void upgrade()}>
               {installing !== null ? '升级中…' : '一键升级'}
-            </button>
+            </Button>
           </div>
         </section>
       )}
 
       {/* 已安装版本 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">已安装（{installed.length}）</h3>
+      <Card>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-2">已安装（{installed.length}）</h3>
         {installed.length === 0 ? (
-          <div className="mt-3 text-[13px] text-slate-500">
-            尚未安装托管内核。{cfg?.kernelMode === 'managed' ? '当前使用系统 dsh。' : '模式为「始终用系统 dsh」。'}
-          </div>
+          <EmptyState
+            className="px-0 py-6"
+            icon={<IconBox size={30} />}
+            title="尚未安装托管内核"
+            hint={cfg?.kernelMode === 'managed' ? '当前使用系统 dsh，可在下方安装托管版本。' : '模式为「始终用系统 dsh」。'}
+          />
         ) : (
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 space-y-1.5">
             {installed.map((k) => (
-              <div key={k.version} className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2">
+              <div key={k.version} className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-[13px] font-medium text-slate-100">v{k.version}</span>
-                    {activeVersion === k.version && (
-                      <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-px text-[10px] text-amber-300">● 当前默认</span>
-                    )}
-                    {k.status === 'error' && (
-                      <span className="rounded-full border border-red-500/40 bg-red-500/10 px-1.5 py-px text-[10px] text-red-300">安装异常</span>
-                    )}
+                    <span className="font-mono text-sm font-medium text-ink">v{k.version}</span>
+                    {activeVersion === k.version && <Badge tone="cyan">● 当前默认</Badge>}
+                    {k.status === 'error' && <Badge tone="red">安装异常</Badge>}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
+                  <div className="mt-0.5 font-mono text-2xs text-ink-3">
                     {fmtSize(k.size)} · {k.installedAt ? new Date(k.installedAt).toLocaleString() : '-'}
                   </div>
                 </div>
                 {activeVersion !== k.version && k.status !== 'error' && (
-                  <button
-                    onClick={() => void setDefault(k.version)}
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    loading={busyVersion === k.version}
                     disabled={busyVersion === k.version}
-                    className="shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[12px] text-amber-300 hover:bg-amber-400/30 disabled:opacity-50"
+                    onClick={() => void setDefault(k.version)}
                   >
                     {busyVersion === k.version ? '切换中…' : '设为默认'}
-                  </button>
+                  </Button>
                 )}
-                <button
-                  onClick={() => void uninstall(k)}
+                <Button
+                  variant="danger"
+                  size="sm"
                   disabled={busyVersion === k.version || activeVersion === k.version}
-                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => void uninstall(k)}
                 >
                   卸载
-                </button>
+                </Button>
               </div>
             ))}
           </div>
         )}
-      </section>
+      </Card>
 
       {/* 阶段 C：存储配额 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">存储配额</h3>
-        <div className="mt-3 grid grid-cols-2 gap-3 text-[12px] text-slate-400 md:grid-cols-4">
-          <div className="rounded-lg bg-slate-900/50 px-3 py-2">
-            <div className="text-[11px] text-slate-500">内核占用</div>
-            <div className="mt-0.5 font-mono text-slate-200">{(quota?.usedMB ?? 0).toFixed(1)} MB</div>
+      <Card>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-2">存储配额</h3>
+        <div className="mt-3 grid grid-cols-2 gap-2.5 text-xs text-ink-2 md:grid-cols-4">
+          <div className="rounded-control bg-canvas/50 px-3 py-2">
+            <div className="text-2xs text-ink-3">内核占用</div>
+            <div className="mt-0.5 font-mono text-ink">{(quota?.usedMB ?? 0).toFixed(1)} MB</div>
           </div>
-          <div className="rounded-lg bg-slate-900/50 px-3 py-2">
-            <div className="text-[11px] text-slate-500">Node 运行时</div>
-            <div className="mt-0.5 font-mono text-slate-200">{(quota?.runtimeMB ?? 0).toFixed(1)} MB</div>
+          <div className="rounded-control bg-canvas/50 px-3 py-2">
+            <div className="text-2xs text-ink-3">Node 运行时</div>
+            <div className="mt-0.5 font-mono text-ink">{(quota?.runtimeMB ?? 0).toFixed(1)} MB</div>
           </div>
-          <div className="rounded-lg bg-slate-900/50 px-3 py-2">
-            <div className="text-[11px] text-slate-500">磁盘剩余</div>
-            <div className="mt-0.5 font-mono text-slate-200">{(quota?.diskFreeMB ?? 0).toFixed(0)} MB</div>
+          <div className="rounded-control bg-canvas/50 px-3 py-2">
+            <div className="text-2xs text-ink-3">磁盘剩余</div>
+            <div className="mt-0.5 font-mono text-ink">{(quota?.diskFreeMB ?? 0).toFixed(0)} MB</div>
           </div>
-          <div className="rounded-lg bg-slate-900/50 px-3 py-2">
-            <div className="text-[11px] text-slate-500">配额上限</div>
+          <div className="rounded-control bg-canvas/50 px-3 py-2">
+            <div className="text-2xs text-ink-3">配额上限</div>
             <div className="mt-0.5 flex items-center gap-1">
               <input
                 type="number"
@@ -387,33 +377,31 @@ export function KernelsTab(): React.JSX.Element {
                 value={quotaInput || String(cfg?.kernelsQuotaMB ?? 1024)}
                 onChange={(e) => setQuotaInput(e.target.value)}
                 onBlur={() => void saveQuota()}
-                className="w-20 rounded border border-slate-700 bg-slate-900 px-1.5 py-0.5 font-mono text-slate-200 outline-none focus:border-cyan-500"
+                className="w-20 rounded border border-rule bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink outline-none transition-colors hover:border-rule-strong focus:border-accent/60"
               />
               <span>MB（0 = 不限）</span>
             </div>
           </div>
         </div>
         {quota && quota.quotaMB > 0 && (
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
             <div
-              className={`h-full rounded-full transition-all ${
-                (quota.usedMB / quota.quotaMB) > 0.9 ? 'bg-red-400' : 'bg-cyan-400'
-              }`}
-              style={{ width: Math.min(100, (quota.usedMB / quota.quotaMB) * 100) + '%' }}
+              className={`progress-fill rounded-full ${(quota.usedMB / quota.quotaMB) > 0.9 ? 'bg-danger' : 'bg-info'}`}
+              style={{ transform: `scaleX(${Math.min(100, (quota.usedMB / quota.quotaMB) * 100) / 100})` }}
             />
           </div>
         )}
-      </section>
+      </Card>
 
       {/* 安装新版本 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">安装新版本</h3>
+      <Card>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-2">安装新版本</h3>
         <div className="mt-3 flex gap-2">
-          <select
+          <Select
             value={selected}
             onChange={(e) => setSelected(e.target.value)}
             disabled={installing !== null || available.length === 0}
-            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-[13px] text-slate-100 outline-none focus:border-amber-400 disabled:opacity-50"
+            className="flex-1 font-mono"
           >
             {available.length === 0 && <option value="">（无法获取版本列表，检查网络）</option>}
             {available.map((v) => (
@@ -426,57 +414,47 @@ export function KernelsTab(): React.JSX.Element {
                     : ''}
               </option>
             ))}
-          </select>
-          <button
-            onClick={() => void install()}
+          </Select>
+          <Button
+            variant="primary"
+            loading={installing !== null}
             disabled={!selected || installing !== null || available.length === 0}
-            className="shrink-0 rounded-lg bg-amber-400 px-4 py-1.5 text-[13px] font-medium text-slate-950 hover:bg-amber-300 disabled:opacity-50"
+            onClick={() => void install()}
           >
             {installing !== null ? '安装中…' : '安装'}
-          </button>
+          </Button>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <span className="text-[12px] text-slate-500">安装源</span>
-          <select
-            value={registry}
-            onChange={(e) => void saveRegistry(e.target.value)}
-            disabled={installing !== null}
-            className="w-72 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 font-mono text-[12px] text-slate-100 outline-none focus:border-amber-400 disabled:opacity-50"
-          >
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-ink-3">安装源</span>
+          <Select value={registry} onChange={(e) => void saveRegistry(e.target.value)} disabled={installing !== null} className="w-72 font-mono text-xs">
             <option value="">官方 npmjs（默认）</option>
             <option value="https://registry.npmmirror.com">npmmirror（国内加速）</option>
-          </select>
-          <span className="text-[11px] text-slate-600">保存后后续安装/升级均使用该源</span>
+          </Select>
+          <span className="text-2xs text-ink-3">保存后后续安装/升级均使用该源</span>
         </div>
 
         {progress && (
           <div className="mt-4">
-            <div className="mb-1 flex justify-between text-[12px] text-slate-400">
+            <div className="mb-1 flex justify-between text-xs text-ink-2">
               <span>安装 v{progress.version}</span>
               <span className="font-mono">{progress.percent.toFixed(0)}%</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+            <div className="h-1.5 overflow-hidden rounded-full bg-surface-2">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-amber-300 to-amber-500 transition-all"
-                style={{ width: Math.min(100, progress.percent) + '%' }}
+                className="progress-fill rounded-full bg-accent"
+                style={{ transform: `scaleX(${Math.min(100, progress.percent) / 100})` }}
               />
             </div>
-            <div className="mt-1 text-[11px] text-slate-500">{progress.message}</div>
+            <div className="mt-1 text-2xs text-ink-3">{progress.message}</div>
           </div>
         )}
 
         {message && (
-          <div
-            className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
-              message.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {message.text}
+          <div className="mt-3">
+            <Notice tone={message.type}>{message.text}</Notice>
           </div>
         )}
-      </section>
+      </Card>
     </div>
   )
 }

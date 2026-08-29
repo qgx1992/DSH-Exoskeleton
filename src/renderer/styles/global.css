@@ -1,23 +1,96 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell) ·
+ * theme: custom 黑金仪表台 (canvas 0.148/258 · accent gold 0.8/87) ·
+ * design-system: DESIGN.md · designed-as-app */
 @import 'tailwindcss';
 
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-  overflow: hidden;
+@theme {
+  /* 表面三层 + 分隔线 */
+  --color-canvas: oklch(0.148 0.018 258);
+  --color-surface: oklch(0.185 0.02 258);
+  --color-surface-2: oklch(0.225 0.024 258);
+  --color-rule: oklch(0.275 0.026 258);
+  --color-rule-strong: oklch(0.34 0.028 258);
+
+  /* 文字三级（ink-2 小字对 canvas ≥5:1） */
+  --color-ink: oklch(0.9 0.01 250);
+  --color-ink-2: oklch(0.74 0.018 252);
+  --color-ink-3: oklch(0.56 0.022 255);
+
+  /* 金色 accent（呼应鲸鱼黑金品牌）；accent-ink = 金底上的文字 */
+  --color-accent: oklch(0.8 0.125 87);
+  --color-accent-hover: oklch(0.85 0.105 90);
+  --color-accent-ink: oklch(0.2 0.04 85);
+
+  /* 语义色：cyan=信息/链接 · emerald=健康/成功 · amber=待办 · red=危险 */
+  --color-info: oklch(0.78 0.1 215);
+  --color-success: oklch(0.77 0.14 162);
+  --color-warning: oklch(0.79 0.13 75);
+  --color-danger: oklch(0.67 0.185 25);
+  --color-focus-ring: oklch(0.85 0.09 92);
+
+  --font-sans:
+    'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+
+  /* 字号刻度：11 / 12 / 13 / 14 / 17（text-xs 沿用默认 12px） */
+  --text-2xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-lg: 1.0625rem;
+
+  --radius-control: 6px;
+  --radius-card: 12px;
+  --radius-chip: 999px;
+
+  --ease-hallmark: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-body {
-  font-family:
-    'Segoe UI',
-    'Microsoft YaHei',
-    system-ui,
-    -apple-system,
-    sans-serif;
-  background: #0b0f17;
-  color: #e5e7eb;
-  user-select: none;
+:root {
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    user-select: none;
+  }
+
+  /* 键盘焦点环：全局可见、永不参与动画 */
+  :focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  }
+
+  /* 细滚动条 */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-rule);
+    border-radius: 4px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-rule-strong);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* 自绘标题栏拖拽区 */
@@ -28,18 +101,46 @@ body {
   -webkit-app-region: no-drag;
 }
 
-/* 细滚动条 */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* 日志 / 错误信息 / 代码片段等允许选中复制 */
+.selectable,
+.selectable * {
+  user-select: text;
+  cursor: auto;
 }
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 4px;
+
+/* 面板入场：180ms 淡入 + 4px 上浮 */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
-::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+.panel-enter {
+  animation: panel-in 180ms var(--ease-hallmark) both;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
+
+/* 进度条填充：scaleX 合成层动画（宽度恒 100%，由 transform 控制比例） */
+.progress-fill {
+  width: 100%;
+  transform-origin: left;
+  transition: transform 240ms var(--ease-hallmark);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-enter {
+    animation: none;
+  }
+  .progress-fill {
+    transition-duration: 1ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

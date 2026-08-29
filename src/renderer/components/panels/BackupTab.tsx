@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { BackupInfo } from '../../../shared/types'
+import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
+import { Card, Notice } from '../ui/Card'
+import { EmptyState } from '../ui/EmptyState'
+import { IconShield } from '../ui/icons'
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -93,10 +98,10 @@ export function BackupTab(): React.JSX.Element {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h2 className="text-lg font-semibold text-slate-100">备份与回滚</h2>
-        <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
-          对 <code className="rounded bg-slate-800 px-1 py-px font-mono text-[11px] text-amber-300">~/.dsh</code>{' '}
+      <Card>
+        <h2 className="text-lg font-semibold text-ink">备份与回滚</h2>
+        <p className="mt-1 text-xs leading-relaxed text-ink-3">
+          对 <code className="rounded bg-surface-2 px-1 py-px font-mono text-2xs text-accent">~/.dsh</code>{' '}
           中的配置、会话、凭据、插件、技能等创建快照（自动排除 node_modules）。插件安装/卸载与恢复操作前会自动生成保护快照；也可手动创建存档。
         </p>
 
@@ -109,87 +114,76 @@ export function BackupTab(): React.JSX.Element {
               if (e.key === 'Enter') void create()
             }}
             placeholder="存档名称（可选，默认 manual）"
-            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-amber-400"
+            className="min-w-0 flex-1 rounded-control border border-rule bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60 focus:ring-[3px] focus:ring-accent/15"
           />
-          <button
-            onClick={() => void create()}
-            disabled={creating}
-            className="shrink-0 rounded-lg bg-amber-400 px-4 py-1.5 text-[13px] font-medium text-slate-950 transition-colors hover:bg-amber-300 disabled:opacity-50"
-          >
+          <Button variant="primary" loading={creating} disabled={creating} onClick={() => void create()}>
             {creating ? '创建中…' : '创建存档'}
-          </button>
+          </Button>
         </div>
 
         {message && (
-          <div
-            className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
-              message.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {message.text}
+          <div className="mt-3">
+            <Notice tone={message.type}>{message.text}</Notice>
           </div>
         )}
-      </section>
+      </Card>
 
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">快照列表</h3>
-        {backups.length === 0 && <div className="mt-3 text-[13px] text-slate-500">暂无快照</div>}
-        <div className="mt-3 space-y-2">
+      <Card>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-2">快照列表</h3>
+        {backups.length === 0 && (
+          <EmptyState
+            className="px-0 py-6"
+            icon={<IconShield size={30} />}
+            title="暂无快照"
+            hint="手动创建存档，或进行插件安装等会自动生成保护快照的操作"
+          />
+        )}
+        <div className="mt-3 space-y-1.5">
           {backups.map((b) => (
             <div key={b.id}>
-              <div className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2">
+              <div className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium text-slate-200">{b.name}</span>
-                    <span
-                      className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] ${
-                        b.kind === 'manual'
-                          ? 'border-amber-400/40 bg-amber-400/10 text-amber-300'
-                          : 'border-slate-600/50 bg-slate-700/20 text-slate-400'
-                      }`}
-                    >
-                      {b.kind === 'manual' ? '手动' : '自动'}
-                    </span>
+                    <span className="truncate text-sm font-medium text-ink">{b.name}</span>
+                    <Badge tone={b.kind === 'manual' ? 'amber' : 'gray'}>{b.kind === 'manual' ? '手动' : '自动'}</Badge>
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-slate-500">
+                  <div className="mt-0.5 truncate font-mono text-2xs text-ink-3">
                     {fmtTime(b.createdAt)} · {fmtSize(b.size)} · {b.entryCount} 个文件
                     {b.trigger ? ` · 触发：${b.trigger}` : ''}
                   </div>
                 </div>
-                <button
-                  onClick={() => void doRestore(b, b.entries)}
+                <Button
+                  variant="accent"
+                  size="sm"
+                  loading={busyId === b.id}
                   disabled={busyId === b.id}
-                  className="shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[12px] text-amber-300 hover:bg-amber-400/30 disabled:opacity-50"
+                  onClick={() => void doRestore(b, b.entries)}
                 >
                   {busyId === b.id ? '恢复中…' : '恢复'}
-                </button>
-                <button
-                  onClick={() => openPicker(b)}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={busyId === b.id}
-                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+                  onClick={() => openPicker(b)}
                   title="选择要恢复的项目（如只恢复插件）"
                 >
                   任选恢复
-                </button>
-                <button
-                  onClick={() => void remove(b)}
-                  className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300"
-                >
+                </Button>
+                <Button variant="danger" size="sm" onClick={() => void remove(b)}>
                   删除
-                </button>
+                </Button>
               </div>
 
               {picking?.id === b.id && (
-                <div className="mt-2 rounded-lg border border-amber-400/30 bg-[#0d111a] p-3">
+                <div className="mt-2 rounded-control border border-accent/30 bg-surface p-3">
                   <div className="flex items-center justify-between">
-                    <div className="text-[12px] text-slate-400">
+                    <div className="text-xs text-ink-2">
                       勾选要恢复的项目（默认全选 = 恢复全部，如只勾选插件可单独恢复插件）
                     </div>
                     <button
                       onClick={() => toggleAll(b)}
-                      className="shrink-0 text-[11px] text-amber-300 hover:underline"
+                      className="shrink-0 text-2xs text-accent underline-offset-2 hover:underline"
                     >
                       全选 / 全不选
                     </button>
@@ -198,40 +192,39 @@ export function BackupTab(): React.JSX.Element {
                     {b.entries.map((e) => (
                       <label
                         key={e}
-                        className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-[12px] text-slate-300 hover:border-amber-400/40"
+                        className="flex cursor-pointer items-center gap-1.5 rounded-control border border-rule bg-canvas/60 px-2 py-1 text-xs text-ink-2 transition-colors hover:border-accent/40"
                       >
                         <input
                           type="checkbox"
                           checked={selected.includes(e)}
                           onChange={() => toggleEntry(e)}
-                          className="accent-amber-400"
+                          className="accent-accent"
                         />
                         {e}
                       </label>
                     ))}
                   </div>
                   <div className="mt-3 flex items-center gap-2">
-                    <button
-                      onClick={() => void doRestore(b, selected)}
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      loading={busyId === b.id}
                       disabled={selected.length === 0 || busyId === b.id}
-                      className="shrink-0 rounded-md bg-amber-400/90 px-3 py-1.5 text-[12px] font-medium text-slate-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+                      onClick={() => void doRestore(b, selected)}
                     >
                       {busyId === b.id ? '恢复中…' : '恢复所选（' + selected.length + '）'}
-                    </button>
-                    <button
-                      onClick={() => setPicking(null)}
-                      className="shrink-0 rounded-md bg-slate-800 px-3 py-1.5 text-[12px] text-slate-400 hover:bg-slate-700"
-                    >
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => setPicking(null)}>
                       取消
-                    </button>
-                    <span className="text-[10px] text-slate-500">恢复前会自动创建保护快照</span>
+                    </Button>
+                    <span className="text-2xs text-ink-3">恢复前会自动创建保护快照</span>
                   </div>
                 </div>
               )}
             </div>
           ))}
         </div>
-      </section>
+      </Card>
     </div>
   )
 }

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { SessionInfo } from '../../../shared/types'
+import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
+import { Card, Notice } from '../ui/Card'
+import { EmptyState } from '../ui/EmptyState'
+import { IconSearch } from '../ui/icons'
 
 interface Props {
   /** 关闭管理面板，回到 DSH Web UI（打开会话后自动切回） */
@@ -94,102 +99,99 @@ export function SessionsTab({ onOpenWebUI }: Props): React.JSX.Element {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
+    <div className="mx-auto max-w-4xl space-y-4">
+      <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">会话</h2>
-            <p className="mt-1 text-[12px] text-slate-500">
-              本地会话数据（~/.dsh/sessions）· {sessions.length} 个 · 点击可在 DSH Web UI 中打开
+            <h2 className="text-lg font-semibold text-ink">会话</h2>
+            <p className="mt-1 text-xs text-ink-3">
+              本地会话数据（~/.dsh/sessions）· {sessions.length} 个 · 点击「打开」在 DSH Web UI 中查看
             </p>
           </div>
           <div className="flex gap-2">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="搜索标题 / 项目 / 内容…"
-              className="w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-cyan-500"
-            />
-            <button
-              onClick={() => void refresh()}
-              disabled={loading}
-              className="shrink-0 rounded-lg bg-slate-800 px-3 py-1.5 text-[12px] text-slate-300 hover:bg-slate-700 disabled:opacity-50"
-            >
+            <div className="relative">
+              <IconSearch size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="搜索标题 / 项目 / 内容…"
+                className="w-64 rounded-control border border-rule bg-surface-2 py-1.5 pl-7 pr-2.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60"
+              />
+            </div>
+            <Button variant="secondary" loading={loading} disabled={loading} onClick={() => void refresh()}>
               {loading ? '刷新中…' : '刷新'}
-            </button>
+            </Button>
           </div>
         </div>
 
         {message && (
-          <div
-            className={`mt-4 rounded-lg border px-3 py-2 text-[12px] ${
-              message.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {message.text}
+          <div className="mt-4">
+            <Notice tone={message.type}>{message.text}</Notice>
           </div>
         )}
 
-        <div className="mt-4 space-y-2">
+        <div className="mt-4 space-y-1.5">
           {!loading && filtered.length === 0 && (
-            <div className="text-[13px] text-slate-500">
-              {sessions.length === 0 ? '暂无会话' : '没有匹配的会话'}
-            </div>
+            <EmptyState
+              title={sessions.length === 0 ? '暂无会话' : '没有匹配的会话'}
+              hint={
+                sessions.length === 0
+                  ? '会话数据保存在 ~/.dsh/sessions，启动服务并对话后出现在这里'
+                  : '换个关键词试试'
+              }
+              action={sessions.length === 0 ? { label: '刷新列表', onClick: () => void refresh() } : undefined}
+            />
           )}
           {filtered.map((s) => (
-            <div key={s.uuid} className="flex items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2.5">
+            <div
+              key={s.uuid}
+              className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2.5"
+            >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-[13px] font-medium text-slate-200" title={s.title}>{s.title}</span>
-                  {s.project && (
-                    <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[10px] text-slate-400">{s.project}</span>
-                  )}
+                  <span className="truncate text-sm font-medium text-ink" title={s.title}>
+                    {s.title}
+                  </span>
+                  {s.project && <Badge tone="gray">{s.project}</Badge>}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-slate-500" title={s.firstUserText}>
+                <div className="mt-0.5 truncate text-xs text-ink-3" title={s.firstUserText}>
                   {s.firstUserText || s.uuid}
                 </div>
-                <div className="mt-0.5 text-[10px] text-slate-600">
+                <div className="mt-0.5 font-mono text-2xs text-ink-3">
                   {fmtTime(s.modifiedAt)} · {fmtSize(s.size)} · {s.uuid.slice(0, 8)}
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-                <button
-                  onClick={() => void open(s)}
+                <Button
+                  variant="accent"
+                  size="sm"
+                  loading={busyUuid === s.uuid}
                   disabled={busyUuid === s.uuid}
-                  className="rounded-md bg-cyan-500/20 px-2.5 py-1 text-[12px] text-cyan-300 hover:bg-cyan-500/30 disabled:opacity-50"
+                  onClick={() => void open(s)}
                 >
                   {busyUuid === s.uuid ? '处理中…' : '打开'}
-                </button>
-                <button
-                  onClick={() => void show(s)}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={busyUuid === s.uuid}
-                  className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+                  onClick={() => void show(s)}
                   title="在资源管理器中显示"
                 >
                   定位
-                </button>
-                <button
-                  onClick={() => void doExport(s)}
-                  disabled={busyUuid === s.uuid}
-                  className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-300 hover:bg-slate-700 disabled:opacity-50"
-                >
+                </Button>
+                <Button variant="ghost" size="sm" disabled={busyUuid === s.uuid} onClick={() => void doExport(s)}>
                   导出
-                </button>
-                <button
-                  onClick={() => void remove(s)}
-                  disabled={busyUuid === s.uuid}
-                  className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
-                >
+                </Button>
+                <Button variant="danger" size="sm" disabled={busyUuid === s.uuid} onClick={() => void remove(s)}>
                   删除
-                </button>
+                </Button>
               </div>
             </div>
           ))}
         </div>
-      </section>
+      </Card>
     </div>
   )
 }

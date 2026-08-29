@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { DSHState } from '../../../shared/types'
+import { Button } from '../ui/Button'
+import { Card } from '../ui/Card'
+import { StatusDot } from '../ui/StatusDot'
 
 interface Props {
   state: DSHState | null
@@ -8,11 +11,11 @@ interface Props {
   onRestart: () => void
 }
 
-const STATUS_LABEL: Record<string, { text: string; color: string; badge: string }> = {
-  running: { text: '运行中', color: 'text-cyan-300', badge: 'bg-cyan-500/15 border-cyan-500/30' },
-  starting: { text: '启动中', color: 'text-slate-300', badge: 'bg-slate-500/15 border-slate-500/30' },
-  stopped: { text: '已停止', color: 'text-slate-400', badge: 'bg-slate-700/20 border-slate-600/40' },
-  error: { text: '异常', color: 'text-red-400', badge: 'bg-red-500/15 border-red-500/30' }
+const STATUS_META: Record<string, { text: string; badge: string }> = {
+  running: { text: '运行中', badge: 'border-success/30 bg-success/10 text-success' },
+  starting: { text: '启动中', badge: 'border-info/30 bg-info/10 text-info' },
+  stopped: { text: '已停止', badge: 'border-rule bg-surface-2 text-ink-2' },
+  error: { text: '异常', badge: 'border-danger/30 bg-danger/10 text-danger' }
 }
 
 function fmtUptime(ms: number | null): string {
@@ -26,7 +29,7 @@ function fmtUptime(ms: number | null): string {
 
 export function StatusTab({ state, onStart, onStop, onRestart }: Props): React.JSX.Element {
   const [dshHome, setDshHome] = useState<string | null>(null)
-  const status = state ? (STATUS_LABEL[state.status] ?? STATUS_LABEL.stopped) : STATUS_LABEL.starting
+  const status = state ? (STATUS_META[state.status] ?? STATUS_META.stopped) : STATUS_META.starting
 
   useEffect(() => {
     void window.dshDesktop.app.getDshHome().then(setDshHome)
@@ -36,98 +39,75 @@ export function StatusTab({ state, onStart, onStop, onRestart }: Props): React.J
   const starting = state?.status === 'starting'
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-4">
       {/* 服务状态卡片 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <div className="flex items-center justify-between">
+      <Card>
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">DSH 服务</h2>
-            <p className="mt-1 text-[12px] text-slate-500">DeepSeek Harness Web 服务（dsh web）</p>
+            <h2 className="text-lg font-semibold text-ink">DSH 服务</h2>
+            <p className="mt-1 text-xs text-ink-3">DeepSeek Harness Web 服务（dsh web）</p>
           </div>
-          <span className={`rounded-full border px-3 py-1 text-[12px] font-medium ${status.badge} ${status.color}`}>
+          <span className={`inline-flex items-center gap-2 rounded-chip border px-2.5 py-0.5 text-xs font-medium ${status.badge}`}>
+            <StatusDot status={state?.status ?? 'starting'} />
             {status.text}
           </span>
         </div>
 
-        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 text-[13px]">
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">监听地址</dt>
-            <dd className="font-mono text-slate-200">{state?.port ? `127.0.0.1:${state.port}` : '-'}</dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">Web UI 地址</dt>
-            <dd className="max-w-[60%] truncate font-mono text-slate-200" title={state?.webUrl ?? ''}>
-              {state?.webUrl ?? (state?.port ? `http://127.0.0.1:${state.port}` : '-')}
-            </dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">DSH 内核版本</dt>
-            <dd className="font-mono text-slate-200">{state?.version ?? '查询中…'}</dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">进程 PID</dt>
-            <dd className="font-mono text-slate-200">{state?.pid ?? '-'}</dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">运行时长</dt>
-            <dd className="font-mono text-slate-200">{fmtUptime(state?.startedAt ?? null)}</dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">崩溃重启次数</dt>
-            <dd className="font-mono text-slate-200">{state?.restartCount ?? 0}</dd>
-          </div>
-          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
-            <dt className="text-slate-500">数据目录（DSH Home）</dt>
-            <dd className="max-w-[60%] truncate font-mono text-slate-200" title={dshHome ?? ''}>
-              {dshHome ?? '-'}
-            </dd>
-          </div>
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-1 text-sm md:grid-cols-2">
+          {(
+            [
+              ['监听地址', state?.port ? `127.0.0.1:${state.port}` : '-'],
+              ['Web UI 地址', state?.webUrl ?? (state?.port ? `http://127.0.0.1:${state.port}` : '-')],
+              ['DSH 内核版本', state?.version ?? '查询中…'],
+              ['进程 PID', String(state?.pid ?? '-')],
+              ['运行时长', fmtUptime(state?.startedAt ?? null)],
+              ['崩溃重启次数', String(state?.restartCount ?? 0)],
+              ['数据目录（DSH Home）', dshHome ?? '-']
+            ] as [string, string][]
+          ).map(([k, v]) => (
+            <div key={k} className="flex items-center justify-between gap-3 border-b border-rule/60 py-1.5">
+              <dt className="shrink-0 text-xs text-ink-3">{k}</dt>
+              <dd className="truncate font-mono text-xs text-ink" title={v}>
+                {v}
+              </dd>
+            </div>
+          ))}
         </dl>
 
         {state?.lastError && (
-          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
+          <div className="mt-4 rounded-control border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger selectable">
             {state.lastError}
           </div>
         )}
 
-        <div className="mt-5 flex gap-2">
+        <div className="mt-4 flex gap-2">
           {!running ? (
-            <button
-              onClick={onStart}
-              disabled={starting}
-              className="rounded-lg bg-cyan-500 px-4 py-1.5 text-[13px] font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:opacity-50"
-            >
+            <Button variant="primary" loading={starting} disabled={starting} onClick={onStart}>
               {starting ? '启动中…' : '启动服务'}
-            </button>
+            </Button>
           ) : (
             <>
-              <button
-                onClick={onStop}
-                className="rounded-lg bg-red-500/20 px-4 py-1.5 text-[13px] font-medium text-red-300 transition-colors hover:bg-red-500/30"
-              >
+              <Button variant="danger" onClick={onStop}>
                 停止服务
-              </button>
-              <button
-                onClick={onRestart}
-                className="rounded-lg bg-slate-800 px-4 py-1.5 text-[13px] font-medium text-slate-200 transition-colors hover:bg-slate-700"
-              >
+              </Button>
+              <Button variant="secondary" onClick={onRestart}>
                 重启服务
-              </button>
+              </Button>
             </>
           )}
         </div>
-      </section>
+      </Card>
 
-      {/* 说明卡片 */}
-      <section className="rounded-xl border border-slate-800/70 bg-[#0d111a] p-6 text-[13px] leading-relaxed text-slate-400">
-        <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-slate-500">使用提示</h3>
-        <ul className="list-inside list-disc space-y-1.5">
+      {/* 使用提示 */}
+      <Card>
+        <h3 className="text-xs font-semibold tracking-wider text-ink-2">使用提示</h3>
+        <ul className="mt-2 list-inside list-disc space-y-1.5 text-sm leading-relaxed text-ink-2">
           <li>服务运行后，主区域自动显示 DSH Web UI。</li>
           <li>关闭窗口 = 隐藏到系统托盘，应用常驻后台。</li>
           <li>右键系统托盘图标可快速启动 / 停止服务、设置开机自启。</li>
           <li>数据默认复用 ~/.dsh 目录，已有配置零迁移。</li>
         </ul>
-      </section>
+      </Card>
     </div>
   )
 }

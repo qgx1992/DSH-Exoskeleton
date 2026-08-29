@@ -11,6 +11,10 @@ import type {
   RuntimeInfo,
   SessionInfo
 } from '../../../shared/types'
+import { Button } from '../ui/Button'
+import { Badge, type BadgeTone } from '../ui/Badge'
+import { StatusDot } from '../ui/StatusDot'
+import { Card, Notice } from '../ui/Card'
 
 interface Props {
   state: DSHState | null
@@ -39,11 +43,6 @@ function fmtRelative(ms: number): string {
   return new Date(ms).toLocaleDateString()
 }
 
-function fmtTime(ms: number): string {
-  const d = new Date(ms)
-  return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`
-}
-
 export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
   const [kernels, setKernels] = useState<KernelInfo[]>([])
@@ -54,7 +53,6 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
-  const [appVersion, setAppVersion] = useState('')
   const [copied, setCopied] = useState(false)
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -68,8 +66,7 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
       window.dshDesktop.backup.list(),
       window.dshDesktop.logs.list(300),
       window.dshDesktop.sessions.list(6),
-      window.dshDesktop.runtime.status(),
-      window.dshDesktop.app.getVersion()
+      window.dshDesktop.runtime.status()
     ])
     const val = <T,>(i: number): T | null => (results[i]?.status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<T>).value : null)
     setCfg(val<AppConfig>(0))
@@ -81,7 +78,6 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
     setLogs(val<LogEntry[]>(6) ?? [])
     setSessions(val<SessionInfo[]>(7) ?? [])
     setRuntime(val<RuntimeInfo>(8))
-    setAppVersion(val<string>(9) ?? '')
   }, [])
 
   useEffect(() => {
@@ -92,7 +88,6 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
   const starting = state?.status === 'starting'
   const updatablePlugins = plugins.filter((p) => p.update?.available).length
   const errorLogs = logs.filter((l) => l.level === 'error').length
-  const warnLogs = logs.filter((l) => l.level === 'warn').length
   const webUrl = state?.webUrl ?? (state?.port ? `http://127.0.0.1:${state.port}` : null)
 
   const copyUrl = async (): Promise<void> => {
@@ -107,78 +102,82 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
     if (r.ok) onOpenWebUI()
   }
 
+  const statusLabel = running ? '服务运行中' : starting ? '服务启动中' : state?.status === 'error' ? '服务异常' : '服务已停止'
+  const heroMeta = running
+    ? `DSH v${state?.version ?? '-'} · Web UI 就绪`
+    : starting
+      ? '正在拉起 dsh web…'
+      : state?.status === 'error'
+        ? '查看下方错误信息'
+        : '启动后主区域将显示 DSH Web UI'
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      {/* 服务状态 + 快捷操作 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-100">总览</h2>
-            <p className="mt-1 text-[12px] text-slate-500">
-              {running
-                ? `DSH 服务运行中 · 127.0.0.1:${state?.port ?? '-'}`
-                : starting
-                  ? 'DSH 服务启动中…'
-                  : state?.status === 'error'
-                    ? 'DSH 服务异常'
-                    : 'DSH 服务已停止'}
-            </p>
+    <div className="mx-auto max-w-5xl space-y-4">
+      {/* 主状态卡：服务状态 + 快捷操作（每屏唯一 primary） */}
+      <Card className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              {running ? (
+                <span
+                  className="inline-block size-3 shrink-0 rounded-full bg-success"
+                  style={{
+                    boxShadow:
+                      '0 0 0 5px color-mix(in oklab, var(--color-success) 14%, transparent), 0 0 22px 2px color-mix(in oklab, var(--color-success) 22%, transparent)'
+                  }}
+                />
+              ) : (
+                <StatusDot status={state?.status ?? 'starting'} />
+              )}
+              <h2 className="text-lg font-semibold tracking-tight text-ink">{statusLabel}</h2>
+            </div>
+            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+              {webUrl && (
+                <span className="rounded bg-info/10 px-1.5 py-0.5 font-mono text-2xs text-info" title={webUrl}>
+                  {webUrl}
+                </span>
+              )}
+              {webUrl && (
+                <Button variant={copied ? 'success' : 'ghost'} size="sm" onClick={() => void copyUrl()}>
+                  {copied ? '✓ 已复制' : '复制地址'}
+                </Button>
+              )}
+              <span className="text-xs text-ink-3">{heroMeta}</span>
+            </div>
+            {state?.lastError && (
+              <div className="mt-3 max-w-xl">
+                <Notice tone="err">{state.lastError}</Notice>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {!running ? (
-              <button
-                onClick={onStart}
-                disabled={starting}
-                className="rounded-lg bg-cyan-500 px-4 py-1.5 text-[13px] font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:opacity-50"
-              >
+              <Button variant="primary" loading={starting} disabled={starting} onClick={onStart}>
                 {starting ? '启动中…' : '启动服务'}
-              </button>
+              </Button>
             ) : (
               <>
-                <button
-                  onClick={onStop}
-                  className="rounded-lg bg-red-500/20 px-3 py-1.5 text-[13px] font-medium text-red-300 transition-colors hover:bg-red-500/30"
-                >
+                <Button variant="danger" onClick={onStop}>
                   停止
-                </button>
-                <button
-                  onClick={onRestart}
-                  className="rounded-lg bg-slate-800 px-3 py-1.5 text-[13px] font-medium text-slate-200 transition-colors hover:bg-slate-700"
-                >
+                </Button>
+                <Button variant="secondary" onClick={onRestart}>
                   重启
-                </button>
+                </Button>
               </>
             )}
-            <button
-              onClick={onOpenWebUI}
-              disabled={!running}
-              className="rounded-lg bg-cyan-500 px-4 py-1.5 text-[13px] font-medium text-slate-950 transition-colors hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
-            >
+            <Button variant="primary" disabled={!running} onClick={onOpenWebUI}>
               打开 Web UI
-            </button>
-            {webUrl && (
-              <button
-                onClick={() => void copyUrl()}
-                className="rounded-lg bg-slate-800 px-3 py-1.5 text-[12px] text-slate-300 transition-colors hover:bg-slate-700"
-                title={webUrl}
-              >
-                {copied ? '✓ 已复制' : '复制地址'}
-              </button>
-            )}
+            </Button>
           </div>
         </div>
-        {state?.lastError && (
-          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12px] text-red-300">
-            {state.lastError}
-          </div>
-        )}
-      </section>
+      </Card>
 
-      {/* 汇总卡片 */}
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryCard
+      {/* 汇总卡片 2×3 */}
+      <section className="grid grid-cols-2 gap-2.5 md:grid-cols-3">
+        <StatCard
           label="DSH 内核"
-          value={kernels.length > 0 ? `${kernels.length} 个` : '未安装'}
+          value={kernels.length > 0 ? String(kernels.length) : '未安装'}
+          unit={kernels.length > 0 ? '个' : undefined}
           sub={cfg?.defaultKernelVersion ? `默认 v${cfg.defaultKernelVersion}` : '使用系统 dsh'}
           badge={
             kernelUpdate?.available && kernelUpdate.latest
@@ -186,123 +185,117 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
               : undefined
           }
         />
-        <SummaryCard
+        <StatCard
           label="已装插件"
-          value={`${plugins.length} 个`}
+          value={String(plugins.length)}
+          unit="个"
           sub={updatablePlugins > 0 ? `${updatablePlugins} 个可升级` : '全部最新'}
-          badge={
-            updatablePlugins > 0
-              ? { text: `${updatablePlugins} 可升级`, tone: 'amber' }
-              : undefined
-          }
+          badge={updatablePlugins > 0 ? { text: `${updatablePlugins} 可升级`, tone: 'amber' } : undefined}
         />
-        <SummaryCard
+        <StatCard
           label="备份快照"
-          value={`${backups.length} 个`}
+          value={String(backups.length)}
+          unit="个"
           sub={backups.length > 0 ? `最近 ${fmtRelative(backups[0].createdAt)}` : '暂无快照'}
         />
-        <SummaryCard
+        <StatCard
           label="会话"
-          value={`${sessions.length} 个`}
+          value={String(sessions.length)}
+          unit="个"
           sub={sessions.length > 0 ? `最近 ${fmtRelative(sessions[0].modifiedAt)}` : '暂无会话'}
         />
-        <SummaryCard
-          label="日志"
-          value={`${errorLogs + warnLogs} 条告警`}
+        <StatCard
+          label="日志告警"
+          value={String(logs.filter((l) => l.level === 'warn' || l.level === 'error').length)}
+          unit="条"
           sub={errorLogs > 0 ? `${errorLogs} 条错误` : '最近无错误'}
           badge={errorLogs > 0 ? { text: '有错误', tone: 'red' } : undefined}
         />
-        <SummaryCard
+        <StatCard
           label="磁盘占用"
-          value={quota ? `${quota.usedMB.toFixed(0)} MB` : '…'}
+          value={quota ? quota.usedMB.toFixed(0) : '…'}
+          unit={quota ? 'MB' : undefined}
           sub={quota ? `剩余 ${quota.diskFreeMB.toFixed(0)} MB` : '查询中…'}
-          badge={quota && quota.quotaMB > 0 && quota.usedMB / quota.quotaMB > 0.9 ? { text: '配额紧张', tone: 'red' } : undefined}
+          badge={
+            quota && quota.quotaMB > 0 && quota.usedMB / quota.quotaMB > 0.9 ? { text: '配额紧张', tone: 'red' } : undefined
+          }
         />
-        <SummaryCard
+        <StatCard
           label="Node 运行时"
           value={runtime?.installed ? runtime.version ?? '已安装' : '未安装'}
           sub={runtime?.installed ? '内置（见「内核」页）' : '使用系统 Node'}
         />
-        <SummaryCard
+        <StatCard
           label="配置档案"
           value={cfg?.activeProfileId ?? 'default'}
-          sub={cfg?.profiles?.length ? `${cfg.profiles.length} 个档案` : ''}
+          sub={cfg?.profiles?.length ? `${cfg.profiles.length} 个档案` : undefined}
         />
       </section>
 
       {/* 最近会话 */}
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <div className="flex items-center justify-between">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-slate-500">最近会话</h3>
-          <span className="text-[11px] text-slate-600">点击在 Web UI 中打开</span>
+      <Card>
+        <div className="mb-2.5 flex items-center justify-between gap-3">
+          <h3 className="text-xs font-semibold tracking-wider text-ink-2">最近会话</h3>
+          <span className="text-2xs text-ink-3">点击在 Web UI 中打开</span>
         </div>
         {sessions.length === 0 ? (
-          <div className="mt-3 text-[13px] text-slate-500">暂无会话（会话数据保存在 ~/.dsh/sessions）</div>
+          <div className="text-sm text-ink-3">暂无会话（会话数据保存在 ~/.dsh/sessions）</div>
         ) : (
-          <div className="mt-3 space-y-2">
+          <div className="space-y-1.5">
             {sessions.map((s) => (
               <button
                 key={s.uuid}
                 onClick={() => void openSession(s)}
-                className="flex w-full items-center gap-3 rounded-lg border border-slate-800/70 bg-slate-900/50 px-3 py-2 text-left transition-colors hover:border-cyan-500/40 hover:bg-slate-900"
+                className="flex w-full items-center gap-3 rounded-control border border-transparent bg-canvas/50 px-3 py-2 text-left transition-colors duration-150 hover:border-accent/25 hover:bg-surface-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium text-slate-200">{s.title}</span>
-                    {s.project && (
-                      <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[10px] text-slate-400">{s.project}</span>
-                    )}
+                    <span className="truncate text-sm font-medium text-ink" title={s.title}>
+                      {s.title}
+                    </span>
+                    {s.project && <Badge tone="gray">{s.project}</Badge>}
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-slate-500">{s.firstUserText || s.uuid}</div>
+                  <div className="mt-0.5 truncate text-xs text-ink-3" title={s.firstUserText}>
+                    {s.firstUserText || s.uuid}
+                  </div>
                 </div>
-                <div className="shrink-0 text-right">
-                  <div className="text-[11px] text-slate-400">{fmtRelative(s.modifiedAt)}</div>
-                  <div className="text-[10px] text-slate-600">{fmtSize(s.size)}</div>
+                <div className="shrink-0 text-right font-mono">
+                  <div className="text-2xs text-ink-2">{fmtRelative(s.modifiedAt)}</div>
+                  <div className="text-2xs text-ink-3">{fmtSize(s.size)}</div>
                 </div>
               </button>
             ))}
           </div>
         )}
-      </section>
-
-      {/* 快速入口说明 */}
-      <section className="rounded-xl border border-slate-800/70 bg-[#0d111a] p-6 text-[13px] leading-relaxed text-slate-400">
-        <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-slate-500">
-          管理面板 · DSH-Exoskeleton v{appVersion || '-'}
-        </h3>
-        <ul className="list-inside list-disc space-y-1.5">
-          <li>「会话」页可搜索、导出、删除本地会话。</li>
-          <li>「内核 / 插件 / 备份 / 日志 / 更新」按需管理运行时与数据。</li>
-          <li>最近修改时间：{backups.length > 0 ? fmtTime(backups[0].createdAt) : '-'} 有备份记录。</li>
-        </ul>
-      </section>
+      </Card>
     </div>
   )
 }
 
-function SummaryCard({
+function StatCard({
   label,
   value,
+  unit,
   sub,
   badge
 }: {
   label: string
   value: string
+  unit?: string
   sub?: string
-  badge?: { text: string; tone: 'amber' | 'red' }
+  badge?: { text: string; tone: BadgeTone }
 }): React.JSX.Element {
-  const tone =
-    badge?.tone === 'red'
-      ? 'border-red-500/40 bg-red-500/10 text-red-300'
-      : 'border-amber-400/40 bg-amber-400/10 text-amber-300'
   return (
-    <div className="rounded-xl border border-slate-800 bg-[#0d111a] p-4">
+    <div className="rounded-card border border-rule bg-surface p-3.5">
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] text-slate-500">{label}</div>
-        {badge && <span className={`shrink-0 rounded-full border px-1.5 py-px text-[10px] ${tone}`}>{badge.text}</span>}
+        <span className="text-xs text-ink-2">{label}</span>
+        {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
       </div>
-      <div className="mt-1 truncate text-[16px] font-semibold text-slate-100">{value}</div>
-      {sub && <div className="mt-0.5 truncate text-[11px] text-slate-500">{sub}</div>}
+      <div className="mt-0.5 truncate font-mono text-lg font-semibold tracking-tight text-ink">
+        {value}
+        {unit && <span className="ml-1 text-xs font-normal text-ink-3">{unit}</span>}
+      </div>
+      {sub && <div className="mt-px truncate text-xs text-ink-3">{sub}</div>}
     </div>
   )
 }

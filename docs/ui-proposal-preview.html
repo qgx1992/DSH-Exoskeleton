@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH-Exoskeleton · UI 方案预览</title>
+<style>
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell) · theme: custom 黑金仪表台 · anchor hue: 87 (gold) */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 */
+:root {
+  --color-canvas:      oklch(0.148 0.018 258);
+  --color-surface:     oklch(0.185 0.020 258);
+  --color-surface-2:   oklch(0.225 0.024 258);
+  --color-rule:        oklch(0.275 0.026 258);
+  --color-rule-strong: oklch(0.340 0.028 258);
+  --color-ink:         oklch(0.900 0.010 250);
+  --color-ink-2:       oklch(0.740 0.018 252);
+  --color-ink-3:       oklch(0.560 0.022 255);
+  --color-accent:      oklch(0.800 0.125 87);
+  --color-accent-hover:oklch(0.850 0.105 90);
+  --color-accent-ink:  oklch(0.200 0.040 85);
+  --color-info:        oklch(0.780 0.100 215);
+  --color-success:     oklch(0.770 0.140 162);
+  --color-warning:     oklch(0.790 0.130 75);
+  --color-danger:      oklch(0.670 0.185 25);
+  --color-focus:       oklch(0.850 0.090 92);
+
+  --font-body: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 140ms; --dur-base: 200ms;
+
+  --radius-control: 6px;
+  --radius-card: 12px;
+  --radius-chip: 999px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--color-canvas); }
+body {
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 28px 32px 56px;
+  overflow-x: clip;
+}
+.mono { font-family: var(--font-mono); }
+
+/* 全局焦点环 —— 任何可交互元素键盘聚焦时立即可见，永不参与动画 */
+button:focus-visible, input:focus-visible, a:focus-visible, [role="switch"]:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.wrap { max-width: 1180px; margin: 0 auto; }
+
+/* ── 方案说明条 ─────────────────────────────── */
+.proposal-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.proposal-head h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.01em; }
+.proposal-head .tag {
+  font-size: 11px; color: var(--color-ink-2);
+  border: 1px solid var(--color-rule); border-radius: var(--radius-chip);
+  padding: 1px 10px;
+}
+.proposal-head .note { font-size: 11px; color: var(--color-ink-3); margin-left: auto; }
+
+/* ── 应用壳 ─────────────────────────────── */
+.frame {
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--color-canvas);
+  box-shadow: 0 1px 0 oklch(1 0 0 / 3%) inset;
+}
+.titlebar {
+  height: 36px; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--color-rule);
+  background: var(--color-surface);
+  padding-left: 12px;
+}
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand .name { font-size: 13px; font-weight: 600; letter-spacing: 0.01em; }
+.chip {
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--color-surface-2); color: var(--color-ink-2);
+  border-radius: 4px; padding: 1px 6px;
+}
+.tb-status { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-ink-2); margin-left: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.running { background: var(--color-success); box-shadow: 0 0 0 4px oklch(0.77 0.14 162 / 12%); }
+.dot.starting { background: var(--color-info); box-shadow: 0 0 0 4px oklch(0.78 0.1 215 / 12%); }
+.dot.stopped { background: oklch(0.55 0.02 255); }
+.dot.error { background: var(--color-danger); box-shadow: 0 0 0 4px oklch(0.67 0.185 25 / 15%); }
+.url-chip {
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-info);
+  background: oklch(0.78 0.1 215 / 8%); border-radius: 4px; padding: 1px 6px;
+}
+.tb-spacer { flex: 1; }
+.win-controls { display: flex; height: 36px; }
+.win-btn {
+  width: 44px; display: grid; place-items: center;
+  background: none; border: 0; color: var(--color-ink-2); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.win-btn:hover { background: var(--color-surface-2); color: var(--color-ink); border-radius: 4px; }
+.win-btn.close:hover { background: oklch(0.62 0.21 25 / 85%); color: oklch(0.98 0 0); }
+
+.shell { display: flex; min-height: 560px; }
+.sidebar {
+  width: 188px; flex: none; border-right: 1px solid var(--color-rule);
+  background: var(--color-surface); padding: 10px 8px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.side-label {
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--color-ink-3); padding: 4px 10px 8px;
+}
+.nav-item {
+  position: relative; display: flex; align-items: center; gap: 9px;
+  width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-radius: var(--radius-control);
+  padding: 6px 10px; font-size: 13px; font-family: inherit;
+  color: var(--color-ink-2);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.nav-item:hover { background: oklch(1 0 0 / 3%); color: var(--color-ink); }
+.nav-item.active { background: var(--color-surface-2); color: var(--color-accent); }
+.nav-item.active::before {
+  content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px;
+  border-radius: 2px; background: var(--color-accent);
+}
+.nav-item svg { flex: none; opacity: 0.9; }
+.side-foot { margin-top: auto; padding: 8px 10px 2px; font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-3); }
+
+.content { flex: 1; min-width: 0; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 主状态卡 */
+.hero {
+  border: 1px solid var(--color-rule); border-radius: var(--radius-card);
+  background: var(--color-surface); padding: 18px 20px;
+}
+.hero-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.hero-status { display: flex; align-items: center; gap: 12px; }
+.hero-status .big-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 0 5px oklch(0.77 0.14 162 / 14%), 0 0 22px 2px oklch(0.77 0.14 162 / 22%); }
+.hero-status h2 { font-size: 17px; font-weight: 600; letter-spacing: 0.01em; }
+.hero-sub { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.hero-sub .meta { font-size: 12px; color: var(--color-ink-2); }
+.hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 按钮 */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-size: 13px; font-weight: 500; line-height: 1;
+  border: 1px solid transparent; border-radius: var(--radius-control);
+  padding: 7px 14px; cursor: pointer; white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--color-accent); color: var(--color-accent-ink); }
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-secondary { background: var(--color-surface-2); border-color: var(--color-rule); color: var(--color-ink); }
+.btn-secondary:hover { border-color: var(--color-rule-strong); }
+.btn-ghost { background: transparent; color: var(--color-ink-2); }
+.btn-ghost:hover { background: oklch(1 0 0 / 4%); color: var(--color-ink); }
+.btn-danger { background: transparent; color: var(--color-danger); }
+.btn-danger:hover { background: oklch(0.67 0.185 25 / 10%); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn[disabled] { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn.is-focus { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.btn.ok { background: transparent; color: var(--color-success); }
+.btn.ok:hover { background: oklch(0.77 0.14 162 / 10%); }
+
+/* 统计卡 */
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.stat {
+  border: 1px solid var(--color-rule); border-radius: var(--radius-card);
+  background: var(--color-surface); padding: 12px 14px;
+}
+.stat .label { font-size: 12px; color: var(--color-ink-2); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.stat .value { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin-top: 3px; letter-spacing: -0.01em; }
+.stat .sub { font-size: 12px; color: var(--color-ink-3); margin-top: 1px; }
+.stat .value small { font-size: 12px; font-weight: 400; color: var(--color-ink-3); margin-left: 2px; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 10px; font-family: var(--font-mono);
+  border-radius: var(--radius-chip); padding: 1px 8px; white-space: nowrap;
+}
+.badge.amber { background: oklch(0.79 0.13 75 / 12%); color: var(--color-warning); border: 1px solid oklch(0.79 0.13 75 / 30%); }
+.badge.red { background: oklch(0.67 0.185 25 / 12%); color: var(--color-danger); border: 1px solid oklch(0.67 0.185 25 / 30%); }
+.badge.green { background: oklch(0.77 0.14 162 / 12%); color: var(--color-success); border: 1px solid oklch(0.77 0.14 162 / 30%); }
+.badge.gray { background: var(--color-surface-2); color: var(--color-ink-2); border: 1px solid var(--color-rule); }
+
+/* 会话列表 */
+.card { border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-surface); padding: 14px 16px; }
+.card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.card-head h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--color-ink-2); }
+.card-head .hint { font-size: 11px; color: var(--color-ink-3); }
+.session-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  background: none; border: 1px solid transparent; border-radius: 8px;
+  padding: 8px 10px; cursor: pointer; font-family: inherit;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.session-row:hover, .session-row.is-hover { background: var(--color-surface-2); border-color: oklch(0.8 0.125 87 / 22%); }
+.session-row .t { font-size: 13px; font-weight: 500; }
+.session-row .d { font-size: 12px; color: var(--color-ink-3); margin-top: 1px; }
+.session-row .when { margin-left: auto; text-align: right; flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-2); }
+.session-row .when .sz { font-size: 10px; color: var(--color-ink-3); }
+
+/* ── 规范区块 ─────────────────────────────── */
+.spec { margin-top: 40px; }
+.spec > h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+.spec > p.desc { font-size: 12px; color: var(--color-ink-3); margin-bottom: 14px; }
+.demo-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; }
+.demo-cell { border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-surface); padding: 14px 16px; }
+.demo-cell h4 { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: var(--color-ink-2); margin-bottom: 10px; }
+.state-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+.state-cap { font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-3); width: 64px; flex: none; }
+.vr { flex: 1 1 340px; }
+
+/* Toggle */
+.toggle {
+  position: relative; width: 36px; height: 20px; border-radius: var(--radius-chip);
+  border: 1px solid var(--color-rule-strong); background: var(--color-surface-2);
+  cursor: pointer; transition: background var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: var(--color-ink-2);
+  transition: transform var(--dur-base) var(--ease-out), background var(--dur-base) var(--ease-out);
+}
+.toggle.on { background: var(--color-accent); border-color: var(--color-accent); }
+.toggle.on::after { transform: translateX(16px); background: var(--color-accent-ink); }
+.toggle[disabled] { opacity: 0.4; cursor: not-allowed; }
+.toggle.is-focus { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+
+/* 输入 */
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 250px; }
+.field label { font-size: 12px; color: var(--color-ink-2); }
+.input {
+  font-family: var(--font-mono); font-size: 13px; color: var(--color-ink);
+  background: var(--color-surface-2); border: 1px solid var(--color-rule);
+  border-radius: var(--radius-control); padding: 7px 10px; outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.input:hover { border-color: var(--color-rule-strong); }
+.input:focus { border-color: oklch(0.8 0.125 87 / 60%); box-shadow: 0 0 0 3px oklch(0.8 0.125 87 / 14%); }
+.input.err { border-color: oklch(0.67 0.185 25 / 60%); box-shadow: 0 0 0 3px oklch(0.67 0.185 25 / 12%); }
+.field .msg { font-size: 11px; color: var(--color-danger); }
+.field .msg.ok { color: var(--color-success); }
+
+/* 空状态 */
+.empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 30px; }
+.empty svg { opacity: 0.45; margin-bottom: 10px; }
+.empty .et { font-size: 13px; font-weight: 500; }
+.empty .eh { font-size: 12px; color: var(--color-ink-3); margin-top: 3px; }
+.empty .btn { margin-top: 12px; }
+
+/* 日志 */
+.logbox { border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-surface); overflow: hidden; flex: 1 1 460px; }
+.log-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--color-rule); }
+.log-chip {
+  font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+  border: 1px solid var(--color-rule); background: none; color: var(--color-ink-2);
+  border-radius: var(--radius-chip); padding: 2px 10px;
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.log-chip:hover { border-color: var(--color-rule-strong); color: var(--color-ink); }
+.log-chip.on { background: oklch(0.8 0.125 87 / 12%); border-color: oklch(0.8 0.125 87 / 35%); color: var(--color-accent); }
+.log-search { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-2); background: var(--color-surface-2); border: 1px solid var(--color-rule); border-radius: var(--radius-control); padding: 3px 8px; width: 150px; outline: none; }
+.log-body { padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7; user-select: text; cursor: text; }
+.log-body .ts { color: var(--color-ink-3); }
+.lv-info { color: var(--color-ink-2); }
+.lv-warn { color: var(--color-warning); }
+.lv-error { color: var(--color-danger); }
+.log-note { font-size: 11px; color: var(--color-ink-3); padding: 6px 12px 10px; border-top: 1px solid var(--color-rule); }
+
+/* 色板 */
+.swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 10px; }
+.swatch { border: 1px solid var(--color-rule); border-radius: 10px; overflow: hidden; background: var(--color-surface); }
+.swatch .c { height: 44px; border-bottom: 1px solid var(--color-rule); }
+.swatch .m { padding: 7px 9px; }
+.swatch .m .n { font-family: var(--font-mono); font-size: 11px; color: var(--color-ink); }
+.swatch .m .v { font-family: var(--font-mono); font-size: 9px; color: var(--color-ink-3); margin-top: 1px; }
+
+footer.foot { margin-top: 36px; font-size: 11px; color: var(--color-ink-3); line-height: 1.8; }
+footer.foot code { font-family: var(--font-mono); color: var(--color-ink-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 1ms !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="proposal-head">
+    <h1>DSH-Exoskeleton · UI 方案「黑金仪表台」</h1>
+    <span class="tag">modern-minimal</span>
+    <span class="tag">金色 accent · 呼应鲸鱼品牌</span>
+    <span class="note">示例数据仅用于演示布局</span>
+  </div>
+
+  <!-- ══════════ 应用壳预览 ══════════ -->
+  <div class="frame">
+    <div class="titlebar">
+      <div class="brand">
+        <svg width="16" height="16" viewBox="0 0 50 50" fill="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="wg" x1="0" y1="0" x2="0.2" y2="1">
+              <stop offset="0%" stop-color="#F7E08B"/><stop offset="52%" stop-color="#D4AF37"/><stop offset="100%" stop-color="#8C6114"/>
+            </linearGradient>
+          </defs>
+          <path fill="url(#wg)" d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7198 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z"/>
+        </svg>
+        <span class="name">DSH-Exoskeleton</span>
+        <span class="chip">v0.8.0</span>
+      </div>
+      <div class="tb-status">
+        <span class="dot running"></span>
+        <span style="color: var(--color-ink)">服务运行中</span>
+        <span class="url-chip">127.0.0.1:3210</span>
+        <span class="mono" style="font-size:11px; color: var(--color-ink-3)">dsh v0.8.2</span>
+      </div>
+      <div class="tb-spacer"></div>
+      <div class="win-controls">
+        <button class="win-btn" title="设置"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <button class="win-btn" title="最小化"><svg width="10" height="10" viewBox="0 0 10 10"><line x1="0" y1="5" x2="10" y2="5" stroke="currentColor" stroke-width="1.2"/></svg></button>
+        <button class="win-btn" title="最大化"><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" stroke-width="1.2"/></svg></button>
+        <button class="win-btn close" title="关闭（隐藏到托盘）"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor" stroke-width="1.2"/></svg></button>
+      </div>
+    </div>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="side-label">DSH-Exoskeleton</div>
+        <button class="nav-item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>总览</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 12 7 12 10 4 14 20 17 12 21 12"/></svg>状态</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>会话</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>设置</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>内核</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>档案</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>插件</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>备份</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>日志</button>
+        <button class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>更新</button>
+        <div class="side-foot">v0.8.0 · shell</div>
+      </aside>
+
+      <main class="content">
+        <!-- 主状态卡 -->
+        <section class="hero">
+          <div class="hero-top">
+            <div>
+              <div class="hero-status">
+                <span class="big-dot"></span>
+                <h2>服务运行中</h2>
+              </div>
+              <div class="hero-sub">
+                <span class="url-chip">http://127.0.0.1:3210</span>
+                <button class="btn btn-ghost btn-sm">复制地址</button>
+                <span class="meta">DSH v0.8.2 · Web UI 就绪</span>
+              </div>
+            </div>
+            <div class="hero-actions">
+              <button class="btn btn-danger">停止</button>
+              <button class="btn btn-secondary">重启</button>
+              <button class="btn btn-primary">打开 Web UI</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 统计卡 -->
+        <section class="stats">
+          <div class="stat">
+            <div class="label">DSH 内核</div>
+            <div class="value">2<small>个</small></div>
+            <div class="sub">默认 v0.8.2</div>
+          </div>
+          <div class="stat">
+            <div class="label">已装插件 <span class="badge amber">2 可升级</span></div>
+            <div class="value">12<small>个</small></div>
+            <div class="sub">2 个有新版本</div>
+          </div>
+          <div class="stat">
+            <div class="label">备份快照</div>
+            <div class="value">5<small>个</small></div>
+            <div class="sub">最近 2 小时前</div>
+          </div>
+          <div class="stat">
+            <div class="label">会话</div>
+            <div class="value">128<small>个</small></div>
+            <div class="sub">最近 5 分钟前</div>
+          </div>
+          <div class="stat">
+            <div class="label">日志告警</div>
+            <div class="value">0<small>条</small></div>
+            <div class="sub">最近无错误</div>
+          </div>
+          <div class="stat">
+            <div class="label">磁盘占用 <span class="badge amber">配额 82%</span></div>
+            <div class="value">412<small>MB</small></div>
+            <div class="sub">剩余 1.9 GB</div>
+          </div>
+        </section>
+
+        <!-- 最近会话 -->
+        <section class="card">
+          <div class="card-head">
+            <h3>最近会话</h3>
+            <span class="hint">点击在 Web UI 中打开</span>
+          </div>
+          <button class="session-row">
+            <div style="min-width:0">
+              <div class="t">重构 DSH 内核管理器的启动流程</div>
+              <div class="d">把 kernel-provision 拆成两阶段，避免阻塞窗口创建…</div>
+            </div>
+            <div class="when">5 分钟前<br><span class="sz">2.1 MB</span></div>
+          </button>
+          <button class="session-row is-hover">
+            <div style="min-width:0">
+              <div class="t">排查 zstd 解压偶发失败</div>
+              <div class="d">session-jsonl 在截断文件上抛出 Unexpected end…</div>
+            </div>
+            <div class="when">2 小时前<br><span class="sz">640 KB</span></div>
+          </button>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ══════════ 组件规范 ══════════ -->
+  <section class="spec">
+    <h2>按钮 · 四变体 × 全状态</h2>
+    <p class="desc">单一 Button 组件，统一高度/圆角/过渡；hover 提亮、active 下沉 1px、focus 金色描边环、disabled 40% 透明、loading 内联转圈、success 用于「已复制」类瞬时反馈。</p>
+    <div class="demo-grid">
+      <div class="demo-cell vr">
+        <h4>PRIMARY · 金色主操作（每屏 ≤1 个）</h4>
+        <div class="state-row"><span class="state-cap">default</span><button class="btn btn-primary">打开 Web UI</button></div>
+        <div class="state-row"><span class="state-cap">hover</span><button class="btn btn-primary" style="background: var(--color-accent-hover)">打开 Web UI</button></div>
+        <div class="state-row"><span class="state-cap">focus</span><button class="btn btn-primary is-focus">打开 Web UI</button></div>
+        <div class="state-row"><span class="state-cap">disabled</span><button class="btn btn-primary" disabled>打开 Web UI</button></div>
+        <div class="state-row"><span class="state-cap">loading</span><button class="btn btn-primary" style="opacity:.75"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="animation: spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>启动中…</button></div>
+      </div>
+      <div class="demo-cell vr">
+        <h4>SECONDARY / GHOST / DANGER / OK</h4>
+        <div class="state-row"><button class="btn btn-secondary">重启</button><button class="btn btn-ghost">复制地址</button><button class="btn btn-danger">停止</button><button class="btn ok">✓ 已复制</button></div>
+        <div class="state-row"><span class="state-cap" style="width:auto">hover</span><button class="btn btn-secondary" style="border-color: var(--color-rule-strong)">重启</button><button class="btn btn-ghost" style="background: oklch(1 0 0 / 4%); color: var(--color-ink)">复制地址</button><button class="btn btn-danger" style="background: oklch(0.67 0.185 25 / 10%)">停止</button></div>
+        <div class="state-row"><span class="state-cap" style="width:auto">focus</span><button class="btn btn-secondary is-focus">重启</button><button class="btn btn-ghost is-focus">复制地址</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>表单控件 · 开关与输入</h2>
+    <p class="desc">开关用 transform 位移（合成层动画 160ms），不再动 left；输入框 hover 提边、focus 金色描边 + 3px 柔光、error 红色同构；数字/密钥类一律等宽字体。</p>
+    <div class="demo-grid">
+      <div class="demo-cell vr">
+        <h4>TOGGLE</h4>
+        <div class="state-row"><span class="state-cap">off</span><button class="toggle" role="switch" aria-checked="false" aria-label="演示开关"></button></div>
+        <div class="state-row"><span class="state-cap">on</span><button class="toggle on" role="switch" aria-checked="true" aria-label="演示开关"></button></div>
+        <div class="state-row"><span class="state-cap">focus</span><button class="toggle on is-focus" role="switch" aria-checked="true" aria-label="演示开关"></button></div>
+        <div class="state-row"><span class="state-cap">disabled</span><button class="toggle" disabled role="switch" aria-label="演示开关"></button></div>
+      </div>
+      <div class="demo-cell vr">
+        <h4>INPUT</h4>
+        <div class="state-row"><div class="field"><label>API Key</label><input class="input" value="sk-1a2b3c4d5e6f" readonly></div></div>
+        <div class="state-row"><div class="field"><label>聚合窗口（毫秒）</label><input class="input" style="border-color: oklch(0.8 0.125 87 / 60%); box-shadow: 0 0 0 3px oklch(0.8 0.125 87 / 14%)" value="5000"><span class="msg ok" style="color: var(--color-ink-3)">focus 态：金描边 + 柔光</span></div></div>
+        <div class="state-row"><div class="field"><label>聚合窗口（毫秒）</label><input class="input err" value="abc"><span class="msg">请输入 500–60000 之间的数字</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>徽章 · 状态点 · 空状态</h2>
+    <p class="desc">语义色重新分工：emerald=健康/成功，cyan=信息/链接，amber=待办，red=危险；「运行中」静态呼吸光点，仅「启动中」用 ping。空状态统一组件：图标 + 一句话 + 引导动作。</p>
+    <div class="demo-grid">
+      <div class="demo-cell vr">
+        <h4>BADGE</h4>
+        <div class="state-row"><span class="badge green">✓ 已配置</span><span class="badge amber">2 可升级</span><span class="badge red">有错误</span><span class="badge gray">未配置</span></div>
+        <h4 style="margin-top:14px">STATUS DOT</h4>
+        <div class="state-row">
+          <span class="dot running"></span><span style="font-size:12px;color:var(--color-ink-2)">运行中</span>
+          <span class="dot starting" style="margin-left:8px"></span><span style="font-size:12px;color:var(--color-ink-2)">启动中</span>
+          <span class="dot stopped" style="margin-left:8px"></span><span style="font-size:12px;color:var(--color-ink-2)">已停止</span>
+          <span class="dot error" style="margin-left:8px"></span><span style="font-size:12px;color:var(--color-ink-2)">异常</span>
+        </div>
+      </div>
+      <div class="demo-cell vr">
+        <h4>EMPTY STATE</h4>
+        <div class="empty" style="padding:12px 20px">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="9" y1="9" x2="15" y2="9"/></svg>
+          <div class="et">暂无会话</div>
+          <div class="eh">会话数据保存在 ~/.dsh/sessions，启动服务并对话后出现在这里</div>
+          <button class="btn btn-secondary btn-sm">打开会话目录</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>日志视图</h2>
+    <p class="desc">级别过滤 chips + 搜索；日志区恢复文字可选（user-select: text）；新日志吸底、用户上滚即暂停；级别配色沿用语义色。</p>
+    <div class="demo-grid">
+      <div class="logbox">
+        <div class="log-toolbar">
+          <button class="log-chip on">全部</button>
+          <button class="log-chip">INFO</button>
+          <button class="log-chip">WARN</button>
+          <button class="log-chip">ERROR</button>
+          <input class="log-search" placeholder="搜索日志…" readonly>
+        </div>
+        <div class="log-body">
+          <div><span class="ts">[14:02:11]</span> <span class="lv-info">[INFO] kernel v0.8.2 started on 127.0.0.1:3210</span></div>
+          <div><span class="ts">[14:02:12]</span> <span class="lv-info">[INFO] plugins loaded: 12 (2 updates available)</span></div>
+          <div><span class="ts">[14:03:47]</span> <span class="lv-warn">[WARN] session file truncated, recovered 2 messages</span></div>
+          <div><span class="ts">[14:04:02]</span> <span class="lv-error">[ERROR] backup failed: disk quota exceeded (412 MB / 500 MB)</span></div>
+        </div>
+        <div class="log-note">日志文本可选中复制 · 新日志自动吸底 · 向上滚动时暂停跟随</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>色板 · 全部经由 token</h2>
+    <p class="desc">三层表面 + 双级文字 + 单一金色 accent；金色每屏占比 ≤5%，仅用于主操作/激活导航/焦点环/品牌。任何页面禁止再出现内联 hex。</p>
+    <div class="swatches">
+      <div class="swatch"><div class="c" style="background: oklch(0.148 0.018 258)"></div><div class="m"><div class="n">canvas</div><div class="v">0.148 0.018 258</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.185 0.02 258)"></div><div class="m"><div class="n">surface</div><div class="v">0.185 0.020 258</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.225 0.024 258)"></div><div class="m"><div class="n">surface-2</div><div class="v">0.225 0.024 258</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.275 0.026 258)"></div><div class="m"><div class="n">rule</div><div class="v">0.275 0.026 258</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.9 0.01 250)"></div><div class="m"><div class="n">ink</div><div class="v">0.900 0.010 250</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.74 0.018 252)"></div><div class="m"><div class="n">ink-2</div><div class="v">0.740 0.018 252</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.56 0.022 255)"></div><div class="m"><div class="n">ink-3</div><div class="v">0.560 0.022 255</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.8 0.125 87)"></div><div class="m"><div class="n">accent</div><div class="v">0.800 0.125 87</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.85 0.105 90)"></div><div class="m"><div class="n">accent-hover</div><div class="v">0.850 0.105 90</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.78 0.1 215)"></div><div class="m"><div class="n">info</div><div class="v">0.780 0.100 215</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.77 0.14 162)"></div><div class="m"><div class="n">success</div><div class="v">0.770 0.140 162</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.79 0.13 75)"></div><div class="m"><div class="n">warning</div><div class="v">0.790 0.130 75</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.67 0.185 25)"></div><div class="m"><div class="n">danger</div><div class="v">0.670 0.185 25</div></div></div>
+      <div class="swatch"><div class="c" style="background: oklch(0.85 0.09 92)"></div><div class="m"><div class="n">focus</div><div class="v">0.850 0.090 92</div></div></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div>对比度：ink-2 小字 ≥5:1 ✓ · ink-3 仅用于 ≥12px 非关键文本 · accent 上文字用 accent-ink（≈10:1）✓</div>
+    <div>动效：tab 切换 180ms 淡入+4px 上浮（<code>prefers-reduced-motion</code> 下降级为纯透明度 ≤150ms）· 开关/焦点环不参与弹性动画 · 进度条改 scaleX</div>
+    <div>字体：Segoe UI Variable / 微软雅黑（正文）· Cascadia Code / Consolas（数据、端口、版本、日志、密钥）—— 全部系统内置，零加载</div>
+  </footer>
+</div>
+<style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+</body>
+</html>

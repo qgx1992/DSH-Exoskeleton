@@ -65,7 +65,7 @@ export default function App(): React.JSX.Element {
   const running = dshState?.status === 'running'
 
   return (
-    <div className="flex h-screen flex-col bg-[#0b0f17]">
+    <div className="flex h-screen flex-col bg-canvas">
       <TitleBar
         status={dshState?.status ?? 'starting'}
         port={dshState?.port ?? null}
@@ -87,7 +87,7 @@ export default function App(): React.JSX.Element {
             onOpenWebUI={handleOpenWebUI}
           />
         ) : (
-          <div className="h-full w-full bg-[#0b0f17]" />
+          <div className="h-full w-full bg-canvas" />
         )}
       </div>
 

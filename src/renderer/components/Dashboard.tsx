@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { DSHState } from '../../shared/types'
 import { OverviewTab } from './panels/OverviewTab'
 import { StatusTab } from './panels/StatusTab'
@@ -10,6 +10,18 @@ import { PluginsTab } from './panels/PluginsTab'
 import { KernelsTab } from './panels/KernelsTab'
 import { ProfilesTab } from './panels/ProfilesTab'
 import { SessionsTab } from './panels/SessionsTab'
+import {
+  IconActivity,
+  IconShield,
+  IconLayers,
+  IconList,
+  IconMessage,
+  IconOverview,
+  IconZap,
+  IconRefresh,
+  IconSettings,
+  IconBox
+} from './ui/icons'
 
 type Tab = 'overview' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
 
@@ -22,59 +34,48 @@ interface Props {
   onOpenWebUI: () => void
 }
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'overview', label: '总览', icon: '◈' },
-  { id: 'status', label: '状态', icon: '●' },
-  { id: 'sessions', label: '会话', icon: '▤' },
-  { id: 'settings', label: '设置', icon: '⚙' },
-  { id: 'kernels', label: '内核', icon: '⬡' },
-  { id: 'profiles', label: '档案', icon: '▥' },
-  { id: 'plugins', label: '插件', icon: '◆' },
-  { id: 'backup', label: '备份', icon: '▣' },
-  { id: 'logs', label: '日志', icon: '☰' },
-  { id: 'update', label: '更新', icon: '↻' }
+const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
+  { id: 'overview', label: '总览', icon: <IconOverview size={15} /> },
+  { id: 'status', label: '状态', icon: <IconActivity size={15} /> },
+  { id: 'sessions', label: '会话', icon: <IconMessage size={15} /> },
+  { id: 'settings', label: '设置', icon: <IconSettings size={15} /> },
+  { id: 'kernels', label: '内核', icon: <IconBox size={15} /> },
+  { id: 'profiles', label: '档案', icon: <IconLayers size={15} /> },
+  { id: 'plugins', label: '插件', icon: <IconZap size={15} /> },
+  { id: 'backup', label: '备份', icon: <IconShield size={15} /> },
+  { id: 'logs', label: '日志', icon: <IconList size={15} /> },
+  { id: 'update', label: '更新', icon: <IconRefresh size={15} /> }
 ]
 
 export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('overview')
 
   return (
-    <div className="flex h-full bg-[#0b0f17]">
+    <div className="flex h-full bg-canvas">
       {/* 左侧导航 */}
-      <nav className="flex w-40 shrink-0 flex-col gap-1 border-r border-slate-800/80 bg-[#0d111a] p-2">
-        <div className="px-2 pb-2 pt-1 text-[11px] font-medium uppercase tracking-wider text-slate-500">
-          DSH-Exoskeleton
-        </div>
+      <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-rule bg-surface p-2">
+        <div className="px-2.5 pb-2 pt-1 text-2xs uppercase tracking-[0.14em] text-ink-3">DSH-Exoskeleton</div>
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] transition-colors ${
-              tab === t.id
-                ? 'bg-cyan-500/10 text-cyan-300'
-                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            className={`relative flex items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm transition-colors duration-150 ease-hallmark ${
+              tab === t.id ? 'bg-surface-2 text-accent' : 'text-ink-2 hover:bg-white/5 hover:text-ink'
             }`}
           >
-            <span className="w-4 text-center text-[11px]">{t.icon}</span>
+            {tab === t.id && <span className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-full bg-accent" />}
+            <span className="flex w-4 justify-center opacity-90">{t.icon}</span>
             {t.label}
           </button>
         ))}
         <div className="flex-1" />
-        <div className="px-2 pb-1 text-[10px] leading-relaxed text-slate-600">
-          服务运行后主区域将显示 DSH Web UI
-        </div>
+        <div className="px-2.5 pb-1 text-2xs leading-relaxed text-ink-3">服务运行后主区域将显示 DSH Web UI</div>
       </nav>
 
-      {/* 内容区 */}
-      <main className="min-w-0 flex-1 overflow-y-auto p-6">
+      {/* 内容区（key 触发 180ms 入场动画） */}
+      <main key={tab} className="panel-enter min-w-0 flex-1 overflow-y-auto p-5">
         {tab === 'overview' && (
-          <OverviewTab
-            state={state}
-            onStart={onStart}
-            onStop={onStop}
-            onRestart={onRestart}
-            onOpenWebUI={onOpenWebUI}
-          />
+          <OverviewTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} onOpenWebUI={onOpenWebUI} />
         )}
         {tab === 'status' && <StatusTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} />}
         {tab === 'sessions' && <SessionsTab onOpenWebUI={onOpenWebUI} />}

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { AppConfig, DshProfile, KernelInfo } from '../../../shared/types'
+import { Button } from '../ui/Button'
+import { Badge } from '../ui/Badge'
+import { Select } from '../ui/Field'
+import { Card, Notice } from '../ui/Card'
 
 export function ProfilesTab(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
@@ -68,68 +72,64 @@ export function ProfilesTab(): React.JSX.Element {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <section className="rounded-xl border border-slate-800 bg-[#0d111a] p-6">
-        <h2 className="text-lg font-semibold text-slate-100">配置档案（Profile）</h2>
-        <p className="mt-1 text-[12px] leading-relaxed text-slate-500">
+    <div className="mx-auto max-w-2xl space-y-4">
+      <Card>
+        <h2 className="text-lg font-semibold text-ink">配置档案（Profile）</h2>
+        <p className="mt-1 text-xs leading-relaxed text-ink-3">
           每个档案可绑定不同 DSH 内核版本——切换档案即切换内核（服务自动重启），
           适合不同项目用不同 DSH 版本做 A/B 验证。档案只保存配置，~/.dsh 数据始终共用。
         </p>
 
-        <div className="mt-5 space-y-2">
+        <div className="mt-4 space-y-2">
           {profiles.map((p) => {
             const active = p.id === cfg?.activeProfileId
             return (
               <div
                 key={p.id}
-                className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 ${
-                  active ? 'border-amber-400/40 bg-amber-400/5' : 'border-slate-800/70 bg-slate-900/50'
+                className={`flex items-center gap-3 rounded-control border px-3 py-2.5 ${
+                  active ? 'border-accent/40 bg-accent/5' : 'border-rule/60 bg-canvas/50'
                 }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[13px] font-medium text-slate-100">{p.name}</span>
-                    {active && (
-                      <span className="rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-px text-[10px] text-amber-300">● 当前激活</span>
-                    )}
-                    {p.id === 'default' && (
-                      <span className="rounded-full bg-slate-800 px-1.5 py-px text-[10px] text-slate-400">默认</span>
-                    )}
+                    <span className="truncate text-sm font-medium text-ink">{p.name}</span>
+                    {active && <Badge tone="cyan">● 当前激活</Badge>}
+                    {p.id === 'default' && <Badge tone="gray">默认</Badge>}
                   </div>
-                  <div className="mt-0.5 text-[11px] text-slate-500">
-                    绑定内核：<span className="font-mono text-slate-300">{p.kernelVersion ? 'v' + p.kernelVersion : '跟随全局默认'}</span>
+                  <div className="mt-0.5 text-2xs text-ink-3">
+                    绑定内核：<span className="font-mono text-ink-2">{p.kernelVersion ? 'v' + p.kernelVersion : '跟随全局默认'}</span>
                   </div>
                 </div>
 
-                <select
+                <Select
                   value={p.kernelVersion ?? ''}
                   onChange={(e) => void setKernel(p, e.target.value)}
                   disabled={busy === p.id + ':k'}
-                  className="w-40 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 font-mono text-[12px] text-slate-100 outline-none focus:border-cyan-500 disabled:opacity-50"
+                  className="w-40 font-mono text-xs"
                 >
                   <option value="">（跟随默认）</option>
                   {kernels.map((k) => (
-                    <option key={k.version} value={k.version}>v{k.version}</option>
+                    <option key={k.version} value={k.version}>
+                      v{k.version}
+                    </option>
                   ))}
-                </select>
+                </Select>
 
                 {!active && (
-                  <button
-                    onClick={() => void activate(p.id)}
+                  <Button
+                    variant="accent"
+                    size="sm"
+                    loading={busy === p.id}
                     disabled={busy === p.id}
-                    className="shrink-0 rounded-md bg-amber-400/20 px-2.5 py-1 text-[12px] text-amber-300 hover:bg-amber-400/30 disabled:opacity-50"
+                    onClick={() => void activate(p.id)}
                   >
                     {busy === p.id ? '切换中…' : '激活'}
-                  </button>
+                  </Button>
                 )}
                 {p.id !== 'default' && (
-                  <button
-                    onClick={() => void remove(p)}
-                    disabled={busy === p.id}
-                    className="shrink-0 rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-50"
-                  >
+                  <Button variant="danger" size="sm" disabled={busy === p.id} onClick={() => void remove(p)}>
                     删除
-                  </button>
+                  </Button>
                 )}
               </div>
             )
@@ -145,29 +145,24 @@ export function ProfilesTab(): React.JSX.Element {
               if (e.key === 'Enter') void create()
             }}
             placeholder="新档案名称，例如：实验项目A"
-            className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-[13px] text-slate-100 outline-none focus:border-amber-400"
+            className="min-w-0 flex-1 rounded-control border border-rule bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60 focus:ring-[3px] focus:ring-accent/15"
           />
-          <button
-            onClick={() => void create()}
+          <Button
+            variant="primary"
+            loading={busy === '__create__'}
             disabled={busy === '__create__' || !newName.trim()}
-            className="shrink-0 rounded-lg bg-amber-400 px-4 py-1.5 text-[13px] font-medium text-slate-950 hover:bg-amber-300 disabled:opacity-50"
+            onClick={() => void create()}
           >
             {busy === '__create__' ? '创建中…' : '新建档案'}
-          </button>
+          </Button>
         </div>
 
         {message && (
-          <div
-            className={`mt-3 rounded-lg border px-3 py-2 text-[12px] ${
-              message.type === 'ok'
-                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : 'border-red-500/30 bg-red-500/10 text-red-300'
-            }`}
-          >
-            {message.text}
+          <div className="mt-3">
+            <Notice tone={message.type}>{message.text}</Notice>
           </div>
         )}
-      </section>
+      </Card>
     </div>
   )
 }

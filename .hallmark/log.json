@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-08-29",
+    "scope": "app",
+    "macrostructure": "Workbench",
+    "theme": "custom 黑金仪表台",
+    "theme_axes": "dark-canvas / system-display / gold-accent",
+    "enrichment": "none",
+    "brief": "DSH-Exoskeleton 全量 UI 改版：金色 accent token 化 + ui/ 原语组件 + 壳与 10 面板统一（DESIGN.md 锁定）"
+  }
+]
