@@ -420,7 +420,6 @@ const api = {
 | 配置项 | 用途 | 默认值 | 来源 |
 | :--- | :--- | :--- | :--- |
 | `port` | 固定 Web 服务端口 | 自动选择空闲端口 | kevenxz[reference:79] |
-| `workspace` | Agent 工作区目录 | `%USERPROFILE%\DSHWorkspace` | kevenxz[reference:80] |
 | `autoLaunch` | 开机自启 | `false` | SnowCrescenter[reference:81] |
 | `apiKey` | DeepSeek API Key | 空 | SnowCrescenter[reference:82] |
 

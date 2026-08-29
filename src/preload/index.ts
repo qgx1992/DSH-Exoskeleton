@@ -103,9 +103,7 @@ const api: DesktopApi = {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getDshHome: () => ipcRenderer.invoke('app:getDshHome'),
     openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
-    copyText: (text) => ipcRenderer.invoke('app:copyText', text),
-    pickWorkspace: () => ipcRenderer.invoke('app:pickWorkspace'),
-    openPath: (path) => ipcRenderer.invoke('app:openPath', path)
+    copyText: (text) => ipcRenderer.invoke('app:copyText', text)
   }
 }
 

@@ -29,8 +29,6 @@ export interface DSHState {
 export interface AppConfig {
   /** 固定 Web 服务端口；0 = 自动选择空闲端口 */
   port: number
-  /** Agent 工作区目录（预留） */
-  workspace: string
   /** 开机自启 */
   autoLaunch: boolean
   /** DeepSeek API Key（仅本地保存，P1 加密） */
@@ -413,9 +411,5 @@ export interface DesktopApi {
     openExternal: (url: string) => Promise<void>
     /** 复制文本到系统剪贴板（面板复制 Web UI 地址等） */
     copyText: (text: string) => Promise<void>
-    /** 选择 Agent 工作区目录（预留配置项落地）；返回所选路径或 null */
-    pickWorkspace: () => Promise<string | null>
-    /** 在系统资源管理器中打开目录 */
-    openPath: (path: string) => Promise<void>
   }
 }

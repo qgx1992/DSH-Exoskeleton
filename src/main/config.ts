@@ -10,7 +10,6 @@ import type { AppConfig } from '../shared/types'
 
 const DEFAULTS: AppConfig = {
   port: 0,
-  workspace: '',
   autoLaunch: false,
   apiKey: '',
   dshHome: '',

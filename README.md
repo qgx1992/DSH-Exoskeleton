@@ -106,7 +106,6 @@ dist/win-unpacked/                            # 免安装绿色版文件夹
 | 配置 | 用途 | 默认 |
 | :--- | :--- | :--- |
 | `port` | Web 服务端口 | `0`（自动分配） |
-| `workspace` | Agent 工作区（预留） | 空 |
 | `autoLaunch` | 开机自启 | `false` |
 | `apiKey` | DeepSeek API Key（系统级加密，P1 引导） | 空 |
 | `dshHome` | DSH Home 覆盖 | 空（官方规则） |

@@ -75,15 +75,6 @@ export function SettingsTab(): React.JSX.Element {
     setNotifyMsg(r.ok ? { type: 'ok', text: '✓ 测试通知已发送（系统通知）' } : { type: 'err', text: '发送失败（系统可能不支持通知）' })
   }
 
-  const pickWorkspace = async (): Promise<void> => {
-    const picked = await window.dshDesktop.app.pickWorkspace()
-    if (picked) await save({ workspace: picked })
-  }
-
-  const openWorkspace = (): void => {
-    if (cfg?.workspace) void window.dshDesktop.app.openPath(cfg.workspace)
-  }
-
   if (!cfg) {
     return <div className="text-slate-500">加载配置中…</div>
   }
@@ -134,32 +125,6 @@ export function SettingsTab(): React.JSX.Element {
               placeholder="例如 C:\Users\you\.dsh"
               className="w-72 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-[12px] text-slate-100 outline-none focus:border-cyan-500"
             />
-          </div>
-
-          {/* Agent 工作区（预留配置项落地） */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-slate-200">Agent 工作区</div>
-              <div className="mt-0.5 truncate text-[12px] text-slate-500" title={cfg.workspace || ''}>
-                {cfg.workspace ? cfg.workspace : '未设置（会话项目按 cwd 自动识别）'}
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {cfg.workspace && (
-                <button
-                  onClick={openWorkspace}
-                  className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-300 hover:bg-slate-700"
-                >
-                  打开
-                </button>
-              )}
-              <button
-                onClick={() => void pickWorkspace()}
-                className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-300 hover:bg-slate-700"
-              >
-                选择目录
-              </button>
-            </div>
           </div>
 
           {/* 开关项 */}

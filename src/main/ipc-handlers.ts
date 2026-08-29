@@ -2,7 +2,7 @@
  * IPC 通信注册（文档 §6.1）
  * 主进程 ↔ 渲染进程（preload contextBridge 桥接）
  */
-import { ipcMain, app, shell, clipboard, dialog } from 'electron'
+import { ipcMain, app, shell, clipboard } from 'electron'
 import { logger } from './logger'
 import { configStore } from './config'
 import { dshManager } from './dsh-manager'
@@ -193,19 +193,5 @@ export function registerIpcHandlers(): void {
   })
   ipcMain.handle('app:copyText', (_e, text: string) => {
     if (typeof text === 'string') clipboard.writeText(text)
-  })
-  ipcMain.handle('app:pickWorkspace', async () => {
-    const win = windowManager.getWindow()
-    const opts: Electron.OpenDialogOptions = {
-      title: '选择 Agent 工作区目录',
-      properties: ['openDirectory', 'createDirectory']
-    }
-    const { canceled, filePaths } = win
-      ? await dialog.showOpenDialog(win, opts)
-      : await dialog.showOpenDialog(opts)
-    return canceled || filePaths.length === 0 ? null : filePaths[0]
-  })
-  ipcMain.handle('app:openPath', (_e, p: string) => {
-    if (typeof p === 'string' && p) void shell.openPath(p)
   })
 }
