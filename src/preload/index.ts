@@ -85,6 +85,16 @@ const api: DesktopApi = {
     install: () => ipcRenderer.invoke('updater:install'),
     onStatus: (callback) => subscribe('updater:status', callback)
   },
+  sessions: {
+    list: (limit) => ipcRenderer.invoke('sessions:list', limit),
+    open: (uuid) => ipcRenderer.invoke('sessions:open', uuid),
+    remove: (uuid) => ipcRenderer.invoke('sessions:remove', uuid),
+    export: (uuid) => ipcRenderer.invoke('sessions:export', uuid),
+    show: (uuid) => ipcRenderer.invoke('sessions:show', uuid)
+  },
+  notify: {
+    test: () => ipcRenderer.invoke('notify:test')
+  },
   logs: {
     list: (limit) => ipcRenderer.invoke('logs:list', limit),
     openDir: () => ipcRenderer.invoke('logs:openDir')
@@ -92,7 +102,10 @@ const api: DesktopApi = {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getDshHome: () => ipcRenderer.invoke('app:getDshHome'),
-    openExternal: (url) => ipcRenderer.invoke('app:openExternal', url)
+    openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+    copyText: (text) => ipcRenderer.invoke('app:copyText', text),
+    pickWorkspace: () => ipcRenderer.invoke('app:pickWorkspace'),
+    openPath: (path) => ipcRenderer.invoke('app:openPath', path)
   }
 }
 

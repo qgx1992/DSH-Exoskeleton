@@ -18,6 +18,8 @@ import { runtimeManager } from './runtime-manager'
 import type { DSHState } from '../shared/types'
 
 const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
+/** 完整 Web UI 地址（alpha 内核带 ?token=…；必须先用它首次访问才能签发 cookie） */
+const WEB_URL_RE = /dsh web: (https?:\/\/[^\s]+)/i
 const HEALTH_PATHS = ['/health', '/api/health', '/']
 const READY_TIMEOUT_MS = 60_000
 const RESTART_BACKOFF_MS = 3_000
@@ -43,6 +45,8 @@ export class DSHManager extends EventEmitter {
   private stdoutBuffer = ''
   private executable: { command: string; args: string[] } | null = null
   private nodeExe: string | null = null
+  /** H5: 当前进程打印的 Web UI 完整 URL（含认证 token；alpha 内核需携带 token 首次访问以签发 cookie） */
+  private webUrl: string | null = null
   private healthTimer: NodeJS.Timeout | null = null
   /** H2: 进行中的 start()（并发防护：并发调用复用同一实例） */
   private startInFlight: Promise<void> | null = null
@@ -53,6 +57,7 @@ export class DSHManager extends EventEmitter {
     return {
       status: this.status,
       port: this.port,
+      webUrl: this.webUrl,
       version: this.version,
       dshHome: this.dshHome,
       pid: this.pid,
@@ -74,6 +79,11 @@ export class DSHManager extends EventEmitter {
     if (cfg.dshHome) return cfg.dshHome
     if (process.env.DSH_HOME) return process.env.DSH_HOME
     return path.join(os.homedir(), '.dsh')
+  }
+
+  /** 当前进程的 Web UI 完整 URL（含认证 token；老内核为纯端口地址）。进程重启后由新 stdout 刷新 */
+  getWebUrl(): string | null {
+    return this.webUrl
   }
 
   /**
@@ -239,6 +249,8 @@ export class DSHManager extends EventEmitter {
     // H1: 崩溃计数不再在此无条件重置（改为 onExit 按稳定运行时长判定），避免 >=MAX 上限失效
     this.lastError = null
     this.stdoutBuffer = ''
+    // H5: 新进程的认证 URL 尚未打印，先清空（避免复用上一代进程的过期 token）
+    this.webUrl = null
     this.setStatus('starting')
 
     try {
@@ -293,6 +305,9 @@ export class DSHManager extends EventEmitter {
       const t = line.trim()
       if (!t) continue
       logger.debug('[dsh stdout]', t)
+      // H5: 完整 URL（老内核无 token；alpha 内核带 ?token=…）——先于端口解析保存
+      const um = t.match(WEB_URL_RE)
+      if (um) this.webUrl = um[1]
       const m = t.match(PORT_RE)
       if (m) {
         const port = Number(m[1])
@@ -379,6 +394,8 @@ export class DSHManager extends EventEmitter {
     }
     this.pid = null
     this.port = null
+    // H5: 进程已退出，其认证 URL/token 随之失效
+    this.webUrl = null
     this.child = null
     if (this.healthTimer) {
       clearTimeout(this.healthTimer)
@@ -497,6 +514,8 @@ export class DSHManager extends EventEmitter {
     this.executable = null
     this.nodeExe = null
     this.version = null
+    // H5: 停止后旧进程的认证 URL 不再有效，下一次 start 会重新解析新 URL
+    this.webUrl = null
   }
 
   async restart(): Promise<void> {

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { DSHState } from '../../shared/types'
+import { OverviewTab } from './panels/OverviewTab'
 import { StatusTab } from './panels/StatusTab'
 import { SettingsTab } from './panels/SettingsTab'
 import { LogsTab } from './panels/LogsTab'
@@ -8,29 +9,34 @@ import { BackupTab } from './panels/BackupTab'
 import { PluginsTab } from './panels/PluginsTab'
 import { KernelsTab } from './panels/KernelsTab'
 import { ProfilesTab } from './panels/ProfilesTab'
+import { SessionsTab } from './panels/SessionsTab'
 
-type Tab = 'status' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
+type Tab = 'overview' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
 
 interface Props {
   state: DSHState | null
   onStart: () => void
   onStop: () => void
   onRestart: () => void
+  /** 关闭管理面板，回到 DSH Web UI */
+  onOpenWebUI: () => void
 }
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'status', label: '状态', icon: '◈' },
+  { id: 'overview', label: '总览', icon: '◈' },
+  { id: 'status', label: '状态', icon: '●' },
+  { id: 'sessions', label: '会话', icon: '▤' },
   { id: 'settings', label: '设置', icon: '⚙' },
   { id: 'kernels', label: '内核', icon: '⬡' },
-  { id: 'profiles', label: '档案', icon: '▤' },
+  { id: 'profiles', label: '档案', icon: '▥' },
   { id: 'plugins', label: '插件', icon: '◆' },
   { id: 'backup', label: '备份', icon: '▣' },
   { id: 'logs', label: '日志', icon: '☰' },
   { id: 'update', label: '更新', icon: '↻' }
 ]
 
-export function Dashboard({ state, onStart, onStop, onRestart }: Props): React.JSX.Element {
-  const [tab, setTab] = useState<Tab>('status')
+export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
+  const [tab, setTab] = useState<Tab>('overview')
 
   return (
     <div className="flex h-full bg-[#0b0f17]">
@@ -61,7 +67,17 @@ export function Dashboard({ state, onStart, onStop, onRestart }: Props): React.J
 
       {/* 内容区 */}
       <main className="min-w-0 flex-1 overflow-y-auto p-6">
+        {tab === 'overview' && (
+          <OverviewTab
+            state={state}
+            onStart={onStart}
+            onStop={onStop}
+            onRestart={onRestart}
+            onOpenWebUI={onOpenWebUI}
+          />
+        )}
         {tab === 'status' && <StatusTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} />}
+        {tab === 'sessions' && <SessionsTab onOpenWebUI={onOpenWebUI} />}
         {tab === 'settings' && <SettingsTab />}
         {tab === 'kernels' && <KernelsTab />}
         {tab === 'profiles' && <ProfilesTab />}

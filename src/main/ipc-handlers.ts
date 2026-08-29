@@ -2,7 +2,7 @@
  * IPC 通信注册（文档 §6.1）
  * 主进程 ↔ 渲染进程（preload contextBridge 桥接）
  */
-import { ipcMain, app, shell } from 'electron'
+import { ipcMain, app, shell, clipboard, dialog } from 'electron'
 import { logger } from './logger'
 import { configStore } from './config'
 import { dshManager } from './dsh-manager'
@@ -15,6 +15,8 @@ import { listInstalled, listCatalog, installPlugin, uninstallPlugin, checkPlugin
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } from './profiles'
+import { listSessions, openSession, removeSession, exportSession, showSessionInFolder, isSessionId } from './sessions'
+import { notify } from './notify'
 import type { AppConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
@@ -87,6 +89,31 @@ export function registerIpcHandlers(): void {
       await dshManager.restart()
     }
     return r
+  })
+
+  // ---------- 会话管理（P0：总览/会话页）----------
+  ipcMain.handle('sessions:list', (_e, limit?: number) => listSessions(typeof limit === 'number' ? limit : undefined))
+  ipcMain.handle('sessions:open', async (_e, uuid: string) => {
+    if (!isSessionId(uuid)) return { ok: false, error: '非法会话 ID' }
+    return openSession(uuid)
+  })
+  ipcMain.handle('sessions:remove', async (_e, uuid: string) => {
+    if (!isSessionId(uuid)) return { ok: false, error: '非法会话 ID' }
+    return removeSession(uuid)
+  })
+  ipcMain.handle('sessions:export', async (_e, uuid: string) => {
+    if (!isSessionId(uuid)) return { ok: false, error: '非法会话 ID' }
+    return exportSession(uuid)
+  })
+  ipcMain.handle('sessions:show', async (_e, uuid: string) => {
+    if (!isSessionId(uuid)) return { ok: false, error: '非法会话 ID' }
+    return showSessionInFolder(uuid)
+  })
+
+  // ---------- 通知（P0：设置页测试）----------
+  ipcMain.handle('notify:test', () => {
+    const ok = notify('DSH-Exoskeleton 测试通知', '通知设置已生效（系统通知）')
+    return { ok }
   })
 
   // ---------- DSH 管理 ----------
@@ -163,5 +190,22 @@ export function registerIpcHandlers(): void {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
       void shell.openExternal(url)
     }
+  })
+  ipcMain.handle('app:copyText', (_e, text: string) => {
+    if (typeof text === 'string') clipboard.writeText(text)
+  })
+  ipcMain.handle('app:pickWorkspace', async () => {
+    const win = windowManager.getWindow()
+    const opts: Electron.OpenDialogOptions = {
+      title: '选择 Agent 工作区目录',
+      properties: ['openDirectory', 'createDirectory']
+    }
+    const { canceled, filePaths } = win
+      ? await dialog.showOpenDialog(win, opts)
+      : await dialog.showOpenDialog(opts)
+    return canceled || filePaths.length === 0 ? null : filePaths[0]
+  })
+  ipcMain.handle('app:openPath', (_e, p: string) => {
+    if (typeof p === 'string' && p) void shell.openPath(p)
   })
 }

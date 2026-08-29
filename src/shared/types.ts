@@ -9,6 +9,13 @@ export type DSHStatus = 'starting' | 'running' | 'stopped' | 'error'
 export interface DSHState {
   status: DSHStatus
   port: number | null
+  /**
+   * 当前进程打印的 Web UI 完整 URL（含认证 token，如 alpha 内核的
+   * http://127.0.0.1:PORT/?token=…；老内核为纯端口地址）。WebContentsView
+   * 必须用它首次访问以完成 cookie 签发，否则 alpha 内核返回 401
+   * 「dsh web authentication required; reopen the URL printed by dsh web.」
+   */
+  webUrl: string | null
   version: string | null
   dshHome: string | null
   pid: number | null
@@ -227,6 +234,27 @@ export interface BackupInfo {
   entries: string[]
 }
 
+/** 会话摘要（~/.dsh/sessions/<workspace>/session-<uuid>/session.jsonl.zstd） */
+export interface SessionInfo {
+  /** 会话 uuid（目录名去 session- 前缀） */
+  uuid: string
+  /** 工作区目录名（DSH 内部编码形式，如 --C~3A--Users--...） */
+  workspace: string
+  /** 项目显示名（来自 cwd 最后一级，无 cwd 时由工作区名解码兜底） */
+  project: string
+  /** 会话标题（session/title 或首条用户消息截断） */
+  title: string
+  /** 首条用户消息（列表预览用） */
+  firstUserText: string
+  /** 会话数据文件绝对路径 */
+  file: string
+  /** 会话目录绝对路径 */
+  sessionDir: string
+  /** 文件大小（字节） */
+  size: number
+  /** 最近修改时间（ms） */
+  modifiedAt: number
+}
 /** 社区插件目录条目（§4.3.3 插件管理器） */
 export interface PluginCatalogItem {
   /** npm 包名（用于安装） */
@@ -359,6 +387,22 @@ export interface DesktopApi {
     install: () => Promise<void>
     onStatus: (callback: (info: UpdateInfo) => void) => () => void
   }
+  sessions: {
+    /** 列出 ~/.dsh/sessions 下会话摘要（按修改时间倒序） */
+    list: (limit?: number) => Promise<SessionInfo[]>
+    /** 在 DSH Web UI 中打开会话（唤起窗口并定位） */
+    open: (uuid: string) => Promise<SaveResult>
+    /** 删除会话目录（含 session.jsonl.zstd） */
+    remove: (uuid: string) => Promise<SaveResult>
+    /** 导出会话数据文件（用户选择保存位置后复制） */
+    export: (uuid: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+    /** 在系统资源管理器中显示会话数据文件 */
+    show: (uuid: string) => Promise<SaveResult>
+  }
+  notify: {
+    /** 发送一条系统测试通知（验证通知是否可达） */
+    test: () => Promise<{ ok: boolean }>
+  }
   logs: {
     list: (limit?: number) => Promise<LogEntry[]>
     openDir: () => Promise<void>
@@ -367,5 +411,11 @@ export interface DesktopApi {
     getVersion: () => Promise<string>
     getDshHome: () => Promise<string | null>
     openExternal: (url: string) => Promise<void>
+    /** 复制文本到系统剪贴板（面板复制 Web UI 地址等） */
+    copyText: (text: string) => Promise<void>
+    /** 选择 Agent 工作区目录（预留配置项落地）；返回所选路径或 null */
+    pickWorkspace: () => Promise<string | null>
+    /** 在系统资源管理器中打开目录 */
+    openPath: (path: string) => Promise<void>
   }
 }

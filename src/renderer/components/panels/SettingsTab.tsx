@@ -6,6 +6,8 @@ export function SettingsTab(): React.JSX.Element {
   const [saved, setSaved] = useState(false)
   const [portInput, setPortInput] = useState('')
   const [dshHomeInput, setDshHomeInput] = useState('')
+  const [aggInput, setAggInput] = useState('')
+  const [notifyMsg, setNotifyMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   // API Key 管理
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
   const [keyInput, setKeyInput] = useState('')
@@ -17,6 +19,7 @@ export function SettingsTab(): React.JSX.Element {
       setCfg(c)
       setPortInput(String(c.port))
       setDshHomeInput(c.dshHome)
+      setAggInput(String(c.notifyAggregateWindowMs ?? 5000))
     })
     void window.dshDesktop.setup.check().then(setSetupStatus)
   }, [])
@@ -52,6 +55,33 @@ export function SettingsTab(): React.JSX.Element {
     setKeyBusy(false)
     setKeyMsg(r.ok ? { type: 'ok', text: 'API Key 已清除' } : { type: 'err', text: r.error ?? '清除失败' })
     await refreshSetup()
+  }
+
+  const saveAggWindow = async (): Promise<void> => {
+    const n = parseInt(aggInput, 10)
+    if (Number.isNaN(n) || n < 500) {
+      setAggInput(String(cfg?.notifyAggregateWindowMs ?? 5000))
+      return
+    }
+    if (n !== cfg?.notifyAggregateWindowMs) {
+      await save({ notifyAggregateWindowMs: Math.min(60000, n) })
+      setAggInput(String(Math.min(60000, n)))
+    }
+  }
+
+  const testNotify = async (): Promise<void> => {
+    setNotifyMsg(null)
+    const r = await window.dshDesktop.notify.test()
+    setNotifyMsg(r.ok ? { type: 'ok', text: '✓ 测试通知已发送（系统通知）' } : { type: 'err', text: '发送失败（系统可能不支持通知）' })
+  }
+
+  const pickWorkspace = async (): Promise<void> => {
+    const picked = await window.dshDesktop.app.pickWorkspace()
+    if (picked) await save({ workspace: picked })
+  }
+
+  const openWorkspace = (): void => {
+    if (cfg?.workspace) void window.dshDesktop.app.openPath(cfg.workspace)
   }
 
   if (!cfg) {
@@ -106,6 +136,32 @@ export function SettingsTab(): React.JSX.Element {
             />
           </div>
 
+          {/* Agent 工作区（预留配置项落地） */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-slate-200">Agent 工作区</div>
+              <div className="mt-0.5 truncate text-[12px] text-slate-500" title={cfg.workspace || ''}>
+                {cfg.workspace ? cfg.workspace : '未设置（会话项目按 cwd 自动识别）'}
+              </div>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {cfg.workspace && (
+                <button
+                  onClick={openWorkspace}
+                  className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-300 hover:bg-slate-700"
+                >
+                  打开
+                </button>
+              )}
+              <button
+                onClick={() => void pickWorkspace()}
+                className="rounded-md bg-slate-800 px-2.5 py-1 text-[12px] text-slate-300 hover:bg-slate-700"
+              >
+                选择目录
+              </button>
+            </div>
+          </div>
+
           {/* 开关项 */}
           <div className="flex items-center justify-between">
             <div>
@@ -140,6 +196,58 @@ export function SettingsTab(): React.JSX.Element {
               checked={cfg.notifySessionDone !== 'off'}
               onChange={(v) => void save({ notifySessionDone: v ? 'per-turn' : 'off' })}
             />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-slate-200">通知渠道</div>
+              <div className="mt-0.5 text-[12px] text-slate-500">auto = Web UI 可见时页面内提示，失焦/隐藏走系统通知</div>
+            </div>
+            <select
+              value={cfg.notifyChannel}
+              onChange={(e) => void save({ notifyChannel: e.target.value as AppConfig['notifyChannel'] })}
+              className="w-40 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-[12px] text-slate-100 outline-none focus:border-cyan-500"
+            >
+              <option value="auto">自动（推荐）</option>
+              <option value="native">系统通知</option>
+              <option value="webview">Web UI 内提示</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-slate-200">通知聚合窗口（毫秒）</div>
+              <div className="mt-0.5 text-[12px] text-slate-500">「聚合」模式下同一会话多轮合并为一条；默认 5000</div>
+            </div>
+            <input
+              type="number"
+              min={500}
+              max={60000}
+              value={aggInput}
+              onChange={(e) => setAggInput(e.target.value)}
+              onBlur={() => void saveAggWindow()}
+              className="w-28 rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-right font-mono text-slate-100 outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-slate-200">测试通知</div>
+              <div className="mt-0.5 text-[12px] text-slate-500">发送一条系统通知验证设置是否生效</div>
+            </div>
+            <div className="flex items-center gap-2">
+              {notifyMsg && (
+                <span className={`text-[11px] ${notifyMsg.type === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {notifyMsg.text}
+                </span>
+              )}
+              <button
+                onClick={() => void testNotify()}
+                className="rounded-md bg-cyan-500/20 px-3 py-1.5 text-[12px] text-cyan-300 hover:bg-cyan-500/30"
+              >
+                发送测试通知
+              </button>
+            </div>
           </div>
 
           <div className="flex items-center justify-between">

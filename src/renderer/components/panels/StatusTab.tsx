@@ -55,6 +55,12 @@ export function StatusTab({ state, onStart, onStop, onRestart }: Props): React.J
             <dd className="font-mono text-slate-200">{state?.port ? `127.0.0.1:${state.port}` : '-'}</dd>
           </div>
           <div className="flex justify-between border-b border-slate-800/60 py-1.5">
+            <dt className="text-slate-500">Web UI 地址</dt>
+            <dd className="max-w-[60%] truncate font-mono text-slate-200" title={state?.webUrl ?? ''}>
+              {state?.webUrl ?? (state?.port ? `http://127.0.0.1:${state.port}` : '-')}
+            </dd>
+          </div>
+          <div className="flex justify-between border-b border-slate-800/60 py-1.5">
             <dt className="text-slate-500">DSH 内核版本</dt>
             <dd className="font-mono text-slate-200">{state?.version ?? '查询中…'}</dd>
           </div>

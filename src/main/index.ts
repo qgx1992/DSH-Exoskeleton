@@ -84,7 +84,8 @@ async function bootstrap(): Promise<void> {
   // 状态变化：running → 挂载 DSH Web UI；error/stopped → 卸载
   dshManager.on('statusChange', (state) => {
     if (state.status === 'running' && state.port) {
-      windowManager.attachDshView(`http://127.0.0.1:${state.port}`)
+      // H5: 优先使用 dsh web 打印的完整 URL（alpha 内核含 ?token=…，首次访问签发 cookie 后才能进 UI）
+      windowManager.attachDshView(dshManager.getWebUrl() ?? `http://127.0.0.1:${state.port}`)
       // 内置默认插件预置（幂等，仅首次执行；不阻塞 UI）
       void provisionDefaultPlugins()
     } else if (state.status === 'error' || state.status === 'stopped') {

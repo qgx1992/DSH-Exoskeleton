@@ -52,6 +52,11 @@ export default function App(): React.JSX.Element {
     await api.dsh.restart()
   }, [])
 
+  /** 回到 DSH Web UI：关闭管理面板（主进程同步恢复 WebContentsView 可见） */
+  const handleOpenWebUI = useCallback(() => {
+    setAdminPanel(false)
+  }, [])
+
   // 管理面板显隐与主进程同步（隐藏 DSH Web UI 视图）
   useEffect(() => {
     void api.window.setAdminPanelVisible(adminPanel)
@@ -79,6 +84,7 @@ export default function App(): React.JSX.Element {
             onStart={handleStart}
             onStop={handleStop}
             onRestart={handleRestart}
+            onOpenWebUI={handleOpenWebUI}
           />
         ) : (
           <div className="h-full w-full bg-[#0b0f17]" />
