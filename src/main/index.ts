@@ -24,6 +24,12 @@ const isHiddenLaunch = process.argv.includes('--hidden')
 // 应用名必须早于 requestSingleInstanceLock 设置，才能决定 userData 目录
 // （%APPDATA%\DSH-Exoskeleton：日志/配置存放处）
 app.setName('DSH-Exoskeleton')
+// 开发并行实例：DSH_DEV_USER_DATA 指向独立 userData，避免与已安装实例抢单实例锁
+// （仅开发调试用；未设置时行为与原来完全一致）
+const devUserData = process.env.DSH_DEV_USER_DATA
+if (devUserData) {
+  app.setPath('userData', devUserData)
+}
 // P0：AUMID 对齐 electron-builder.yml 的 appId —— Windows toast 要求与开始菜单快捷方式
 // 一致，不一致会被系统静默丢弃（设计 NOTIFICATION-PLUGIN-DESIGN.md §4.3）
 app.setAppUserModelId('io.dsh.exoskeleton')
