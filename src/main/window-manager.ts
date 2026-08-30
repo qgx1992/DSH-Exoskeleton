@@ -418,22 +418,30 @@ export class WindowManager {
     if (!this.win || this.win.isDestroyed()) return
     if (this.win.isMinimized()) this.win.restore()
     this.win.show()
-    this.win.focus()
-    // Windows 前台锁对策（修复：点击原生通知不置顶）——窗口可见但被其他窗口盖住时，
-    // focus() 受 SetForegroundWindow 限制不会抬到最前；moveTop() 强制提升 z-order，
-    // 再临时置顶一帧后取消，彻底绕开前台锁把窗口带到最前。
     if (process.platform === 'win32') {
+      // Windows 前台锁对策（修复：点击通知/协议激活后窗口不置顶）——
+      // focus() 受 SetForegroundWindow 限制（后台激活的应用拿不到前台权）不会抬到最前。
+      // 正确姿势：先 setAlwaysOnTop(true) 强制 topmost → moveTop/focus 抬升 →
+      // 保持一小段时间再撤销（旧实现 setTimeout(0) 里置顶/撤销被合并成一次 no-op，
+      // 实测失效）。撤销前窗口短暂置顶约 250ms，肉眼几乎无感。
+      // 若用户本就设置了置顶（isAlwaysOnTop 已 true），不再抖动以免误改状态。
       try {
-        this.win.moveTop()
-        if (!this.win.isAlwaysOnTop()) {
+        if (this.win.isAlwaysOnTop()) {
+          this.win.moveTop()
+          this.win.focus()
+        } else {
           this.win.setAlwaysOnTop(true)
+          this.win.moveTop()
+          this.win.focus()
           setTimeout(() => {
             if (this.win && !this.win.isDestroyed()) this.win.setAlwaysOnTop(false)
-          }, 0)
+          }, 250)
         }
       } catch (err) {
         logger.warn('window force-front failed', err)
       }
+    } else {
+      this.win.focus()
     }
     logger.debug('window show called', {})
   }

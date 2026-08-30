@@ -19,6 +19,8 @@ import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { provisionDefaultKernel } from './kernel-provision'
 import { sessionWatcher, wireSessionWatcher } from './session-watcher'
+import { initNotificationProtocol, activateFromUrl } from './notify'
+import { findSession } from './sessions'
 
 const isHiddenLaunch = process.argv.includes('--hidden')
 
@@ -40,9 +42,12 @@ const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, commandLine) => {
     // 重复双击唤出已有窗口
     windowManager.show()
+    // v0.8.2：原生 toast 协议激活（dsh-exo://）——弹出/操作中心点击都会拉起
+    // 协议 → 新进程转发 argv → 这里处理（唤起窗口 + 回放原点击动作/定位会话）
+    handleProtocolLaunch(commandLine)
   })
 
   void bootstrap()
@@ -63,6 +68,9 @@ async function bootstrap(): Promise<void> {
   configStore.init()
   kernelManager.init()
   runtimeManager.init()
+
+  // v0.8.2：注册 dsh-exo:// 协议（原生 toast 协议激活的前置；幂等，每次启动重设）
+  initNotificationProtocol()
 
   // 内核安装进度 → 渲染层
   kernelManager.on('progress', (p) => {
@@ -168,6 +176,57 @@ async function bootstrap(): Promise<void> {
   if (isHiddenLaunch) {
     windowManager.hide()
   }
+
+  // v0.8.2：冷启动协议激活（应用未运行时点击操作中心里的 toast → Windows 带
+  // dsh-exo:// URL 拉起本应用）——放最后，确保窗口/视图就绪后再定位会话
+  handleProtocolLaunch(process.argv)
+}
+
+/**
+ * 处理 dsh-exo:// 协议激活（原生 toast 点击的统一入口）。
+ * - 命中通知注册表（应用运行中、未过期）：原点击动作（唤起/定位/安装）已由
+ *   activateFromUrl 执行，直接返回；
+ * - 未命中（冷启动 / 注册表已过期）：兜底唤起窗口 + 按 kind 处理
+ *   （session-done → 定位会话；update-ready → 触发安装）。
+ */
+function handleProtocolLaunch(argv: string[]): void {
+  const url = argv.find((a) => typeof a === 'string' && a.startsWith('dsh-exo:'))
+  if (!url) return
+  const { handled, payload } = activateFromUrl(url)
+  if (handled) return
+  windowManager.show()
+  if (payload?.kind === 'update-ready') {
+    updater.install()
+    return
+  }
+  if (payload?.session) {
+    void activateSessionFromProtocol(payload.session)
+  }
+}
+
+/** 冷启动协议激活：等待 DSH 视图挂载后定位会话（最多 ~15s） */
+async function activateSessionFromProtocol(uuid: string): Promise<void> {
+  for (let i = 0; i < 15; i++) {
+    // 优先走 webview 插件程序化激活（可靠、会话 ID 精确）
+    if (notificationHub.requestActivate(uuid)) return
+    // 视图就绪后走 DOM 兜底（readId + 标题/时间多候补）
+    if (windowManager.getViewUrl()) {
+      try {
+        const s = await findSession(uuid)
+        windowManager.activateSessionInWebUi(
+          s?.title ?? `会话 ${uuid.slice(0, 8)}`,
+          s?.firstUserText,
+          uuid
+        )
+      } catch (err) {
+        logger.warn('protocol session activate failed', err)
+        windowManager.activateSessionInWebUi(`会话 ${uuid.slice(0, 8)}`, undefined, uuid)
+      }
+      return
+    }
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+  logger.debug('protocol activation: view not ready within 15s, skip session jump', { uuid })
 }
 
 // 托盘常驻：窗口全部关闭时不退出（文档 §4.1.3 "程序常驻后台"）

@@ -173,6 +173,18 @@ app.whenReady().then(async () => {
     notificationHub.dispatch(mk('session-done', { session: { uuid: 'def-1' } }))
     assert(received.length === 1, '无探针（默认激活）→ 走 webview（向后兼容）', received)
 
+    console.log('10) 协议激活 URL 解析/兜底（v0.8.2：操作中心点击修复）')
+    const { parseNotifyUrl, activateFromUrl } = require('./out/notification-hub.cjs')
+    const p1 = parseNotifyUrl('dsh-exo://notify?id=ev-1&session=abc123&kind=session-done')
+    assert(p1 && p1.id === 'ev-1' && p1.session === 'abc123' && p1.kind === 'session-done', '标准 dsh-exo://notify URL 解析')
+    const p2 = parseNotifyUrl('dsh-exo:notify?id=ev-2')
+    assert(p2 && p2.id === 'ev-2', '无 // 形态（dsh-exo:notify?…）解析')
+    assert(parseNotifyUrl('https://evil.example/x') === null, '非 dsh-exo 协议拒绝')
+    assert(parseNotifyUrl('dsh-exo://other?x=1') === null, '非 notify 段拒绝')
+    assert(parseNotifyUrl('dsh-exo://notify?session=../evil') === null, '非法 session（路径穿越）拒绝')
+    const rCold = activateFromUrl('dsh-exo://notify?id=ghost&session=uu-1')
+    assert(rCold.handled === false && rCold.payload && rCold.payload.id === 'ghost' && rCold.payload.session === 'uu-1', '未命中注册表 → cold 兜底返回 payload（调用方唤起窗口+定位会话）')
+
     notificationHub.setWebview(null)
   } catch (e) {
     console.error('TEST CRASH:', e)

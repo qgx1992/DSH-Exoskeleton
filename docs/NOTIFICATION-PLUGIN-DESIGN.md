@@ -307,6 +307,22 @@ auto 决策    = webview 在线 && DSH 窗口是前台焦点 && notifyChannel=au
   2. 原生通知点击优先转发 webview 插件 `sessions.open(id)` 激活（`hub.requestActivate` + 插件 `session-activate` 控制事件，不渲染 toast），webview 离线才回退 DOM hack；
   3. `auto` 路由加入**窗口激活（焦点感知）**：DSH 窗口非前台焦点（失焦/最小化/隐藏/被盖住）
      时页面内 toast 不可见，必须走原生通知（`hub.setWindowActive` 探针，防漏看）；
+- **现场修复（v0.8.2，操作中心点击 + 置顶，日志与 E2E 证据）**：
+  1. **操作中心残留 toast 点击无效且不消失**：Electron 34 的 Windows toast 无可用激活机制
+     （[electron/electron#32585](https://github.com/electron/electron/issues/32585) 确认）——
+     toast 进操作中心后再点击不产生事件、系统也不移除。修复：`notify.ts` 改用自定义
+     `toastXml` 协议激活（`activationType="protocol"` + `launch="dsh-exo://notify?…"`），
+     点击（弹出/操作中心/冷启动）统一拉起 `dsh-exo://` 协议 → 单实例
+     `second-instance`/冷启动 argv → `notify.activateFromUrl()` 命中注册表回放原
+     `actions.onClick` + `close()` 移除；未命中（冷启动）由 `index.ts` 兜底唤起窗口 +
+     定位会话（等待 DSH 视图挂载最多 15s）。Windows 在协议激活成功后自动从操作中心移除。
+  2. **点击通知不置顶**：`windowManager.show()` 前台锁对策改为「先 `setAlwaysOnTop(true)`
+     → `moveTop`/`focus` → 250ms 后撤销」；旧 `setTimeout(0)` 置顶/撤销被 OS 合并成
+     no-op，实测失效。协议激活还顺带获得 Windows 授予的前台权，双保险。
+  3. **双重处理去重**：E2E 实测一个真实 toast 点击会同时触发 Electron 实例 `click` 与
+     协议启动——协议 toast 不再挂实例 `click`，点击只走协议单路径。
+  4. **协议注册**：`app.setAsDefaultProtocolClient('dsh-exo')` 每次启动幂等注册
+     （dev 需传 `process.execPath` + 入口路径）；注册失败自动退回普通 toast（实例 click 兜底）。
 - 剩余待办：§11 的 1/3 需在真实 `dsh web` 环境实测（程序化激活、dev/portable toast 行为）。
 
 每阶段：`npm run typecheck` + `npm test` + 实测验证 → `npm version patch` → 中文 changelog（遵守 AGENT.md §0）。

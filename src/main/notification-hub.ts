@@ -256,7 +256,13 @@ class NotificationHub {
   private execNative(ev: NotificationEvent): boolean {
     try {
       // P3：notify() 返回真实送达结果（原生通道回执不再恒为 true）
-      return notify(ev.title, ev.body, ev.actions?.onClick)
+      // v0.8.2：传 meta（事件 id/kind/会话 uuid）——toast 走协议激活，点击
+      // （弹出/操作中心/冷启动）经 dsh-exo:// 精确回到原事件并回放 onClick
+      return notify(ev.title, ev.body, ev.actions?.onClick, {
+        id: ev.id,
+        kind: ev.kind,
+        sessionUuid: ev.session?.uuid
+      })
     } catch (err) {
       logger.warn('notification native deliver threw', err)
       return false

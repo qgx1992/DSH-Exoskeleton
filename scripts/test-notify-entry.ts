@@ -4,3 +4,5 @@
  */
 export { notificationHub } from '../src/main/notification-hub'
 export { configStore } from '../src/main/config'
+// v0.8.2：协议激活（操作中心点击修复）——parseNotifyUrl / activateFromUrl 一并进测试包
+export { parseNotifyUrl, activateFromUrl, protocolReady } from '../src/main/notify'

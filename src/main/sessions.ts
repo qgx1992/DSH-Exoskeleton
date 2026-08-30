@@ -137,7 +137,7 @@ export async function listSessions(limit?: number): Promise<SessionInfo[]> {
 }
 
 /** 按 uuid 精确查找单个会话 */
-async function findSession(uuid: string): Promise<SessionInfo | null> {
+export async function findSession(uuid: string): Promise<SessionInfo | null> {
   if (!uuid) return null
   const candidates = await scanCandidates(1, uuid)
   if (candidates.length === 0) return null
