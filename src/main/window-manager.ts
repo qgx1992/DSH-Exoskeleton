@@ -18,6 +18,17 @@ const MIN_WIDTH = 900
 const MIN_HEIGHT = 600
 /** 几何保存防抖（ms） */
 const GEOMETRY_DEBOUNCE_MS = 500
+/**
+ * DSH 页面插件加载失败自愈（启动竞态）：
+ * 内核刚监听时 Exoskeleton 立即挂载视图（约 40ms），此时 client-modules 的 bundle 组合
+ * 可能仍在变化（第三方插件异步激活会触发重新组合 → rev 版本号变化），早期页面请求的
+ * 旧 rev bundle URL 返回 404，页面显示 "Failed to load plugins"。浏览器手动访问时内核
+ * 已稳定故不触发。这里轮询检测该错误横幅，发现后清缓存强制重载，直到页面健康。
+ */
+const DSH_VIEW_HEALTH_CHECK_MS = 1200
+/** 启动初期内核 bundle 组合可持续变化约 30-60 秒（第三方插件异步激活 + compatPatch），
+ *  重试间隔 2s 起步指数递增（×2、×3…封顶 10s），最多 30 次 ≈ 覆盖 3 分钟稳定期 */
+const DSH_VIEW_RETRY_MAX = 30
 
 export class WindowManager {
   private win: BrowserWindow | null = null
@@ -27,6 +38,9 @@ export class WindowManager {
   private geometryTimer: NodeJS.Timeout | null = null
   /** 管理面板是否打开（打开时隐藏 DSH Web UI 视图） */
   private adminPanelVisible = false
+  /** DSH 页面插件加载失败的自动重载计数与定时器（启动竞态自愈） */
+  private dshViewRetryCount = 0
+  private dshViewHealthTimer: NodeJS.Timeout | null = null
 
   getWindow(): BrowserWindow | null {
     return this.win
@@ -207,7 +221,35 @@ export class WindowManager {
       void shell.openExternal(u)
       return { action: 'deny' }
     })
+    // 清除 HTTP 缓存：启动竞态下旧 index/旧 bundle rev 可能被缓存，导致刷新后仍请求已失效的 URL
+    void this.view.webContents.session.clearCache().catch(() => {})
+    // 内核每次重启（新端口/新 secret）都会产生新的 dsh-auth cookie，旧的不会自动清理，
+    // 累积到请求头超过 node:http 16KB 上限会触发 431（Request Header Fields Too Large），
+    // 导致插件 bundle 加载失败（浏览器无累积故正常）。保留最近 2 个、清掉更旧的。
+    const viewSession = this.view.webContents.session
+    void viewSession.cookies.get({ domain: '127.0.0.1' }).then((cookies) => {
+      const auth = cookies
+        .filter((c) => typeof c.name === 'string' && c.name.startsWith('dsh-auth-'))
+        .sort((a, b) => (b.expirationDate ?? 0) - (a.expirationDate ?? 0))
+      for (const c of auth.slice(2)) {
+        void viewSession.cookies.remove(`http://${c.domain}${c.path ?? '/'}`, c.name).catch(() => {})
+      }
+      if (auth.length > 2) {
+        logger.warn('dsh view stale auth cookies cleared', { cleared: auth.length - 2 })
+      }
+    }).catch(() => {})
     this.view.webContents.loadURL(url)
+    // 加载完成（含自动重载）后调度健康检查
+    this.view.webContents.on('did-finish-load', () => {
+      this.scheduleDshViewHealthCheck(DSH_VIEW_HEALTH_CHECK_MS)
+    })
+    // 主 frame 加载失败（如内核瞬时未就绪）也走健康检查重试；-3 = ERR_ABORTED 正常中断，忽略
+    this.view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        logger.warn('dsh view main-frame load failed', { errorCode, errorDescription })
+        this.scheduleDshViewHealthCheck(DSH_VIEW_HEALTH_CHECK_MS)
+      }
+    })
     // 管理面板打开时保持隐藏（服务重启重挂载后不打断面板）
     this.view.setVisible(!this.adminPanelVisible)
     // 焦点跟随：点击 DSH 页面时聚焦（保证输入可用）
@@ -217,6 +259,8 @@ export class WindowManager {
   }
 
   detachDshView(): void {
+    this.clearDshViewTimers()
+    this.dshViewRetryCount = 0
     if (this.view && this.win) {
       // 通知中枢 webview 通道下线（服务重启重挂载后自动重新注册）
       notificationHub.setWebview(null)
@@ -226,6 +270,67 @@ export class WindowManager {
       this.viewUrl = null
       logger.info('dsh view detached')
     }
+  }
+
+  /** 清理 DSH 视图的定时器 */
+  private clearDshViewTimers(): void {
+    if (this.dshViewHealthTimer) {
+      clearTimeout(this.dshViewHealthTimer)
+      this.dshViewHealthTimer = null
+    }
+  }
+
+  /**
+   * 轮询检测 DSH 页面是否卡在「Failed to load plugins」错误横幅，是则清缓存强制重载。
+   * 启动竞态下 bundle rev 变化后旧页面请求 404，检测到错误后自动 reloadIgnoringCache 自愈。
+   */
+  private scheduleDshViewHealthCheck(delayMs: number): void {
+    if (this.dshViewHealthTimer) clearTimeout(this.dshViewHealthTimer)
+    this.dshViewHealthTimer = setTimeout(() => {
+      this.dshViewHealthTimer = null
+      const view = this.view
+      if (!view || view.webContents.isDestroyed()) return
+      view.webContents
+        .executeJavaScript(`(async () => {
+          try {
+            const boot = globalThis.__DSH_BOOT__ || {}
+            const urls = (Array.isArray(boot.batches) ? boot.batches : []).map(b => b.url).slice(0, 2)
+            const statuses = []
+            for (const u of urls) {
+              try { const r = await fetch(u, { cache: 'no-store' }); statuses.push(String(r.status) + ':' + u.slice(0, 110)) }
+              catch (e) { statuses.push('ERR:' + u.slice(0, 110)) }
+            }
+            const t = (document.body ? document.body.innerText : '') || ''
+            return { failed: /failed to load plugins/i.test(t), snippet: t.slice(0, 220), url: location.href, statuses }
+          } catch { return { failed: false, snippet: '', url: '', statuses: [] } }
+        })()`)
+        .then((r: unknown) => {
+          const state = r as { failed?: boolean; snippet?: string; url?: string; statuses?: string[] }
+          if (state?.failed !== true) {
+            this.dshViewRetryCount = 0
+            return
+          }
+          logger.warn('dsh view plugin-load check', {
+            attempt: this.dshViewRetryCount + 1,
+            url: state.url,
+            snippet: state.snippet,
+            statuses: state.statuses
+          })
+          if (this.dshViewRetryCount >= DSH_VIEW_RETRY_MAX) {
+            logger.warn('dsh view plugin-load retry exhausted', { count: this.dshViewRetryCount })
+            this.dshViewRetryCount = 0
+            return
+          }
+          this.dshViewRetryCount += 1
+          const delay = Math.min(2_000 + DSH_VIEW_HEALTH_CHECK_MS * this.dshViewRetryCount, 10_000)
+          logger.warn('dsh view shows plugin load failure; reloading', { attempt: this.dshViewRetryCount, delayMs: delay })
+          try {
+            view.webContents.reloadIgnoringCache()
+          } catch { /* 忽略 */ }
+          this.scheduleDshViewHealthCheck(delay)
+        })
+        .catch(() => {})
+    }, delayMs)
   }
 
   private layoutView(): void {

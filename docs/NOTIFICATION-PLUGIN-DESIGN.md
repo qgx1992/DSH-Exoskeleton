@@ -227,7 +227,7 @@ auto 决策    = webview 在线 && DSH 窗口是前台焦点 && notifyChannel=au
 ### 6.1 插件形态
 
 - **归属：独立 GitHub 仓库 `qgx1992/dsh-notify`**（桌面端仓库不再维护插件源码，`plugins/` 已 gitignore）。
-  安装走 `dsh plugin --profile web add github:qgx1992/dsh-notify`；桌面端推荐列表（`recommended-plugins.ts`）指向该仓库；
+  安装走 `dsh plugin --profile web add github:qgx1992/dsh-notify`；桌面端**不再将其列入推荐列表**（`recommended-plugins.ts`），按需自行安装；
 - 遵守 `dsh-ui-tools` 已验证的规则：**纯自建覆盖层、不搬 DSH slot 节点**（规避渲染进程 100% CPU 卡死）、独立 locale NS / data 前缀；
 - `package.json`：`dsh.client.platform = "web"`，`inject` 留空（运行时动态订阅 `window.__dshExo`，不静态注入到 DSH 源码上下文）。
 
@@ -301,7 +301,7 @@ auto 决策    = webview 在线 && DSH 窗口是前台焦点 && notifyChannel=au
 **实现状态**（本次同步交付，分支 `test/notify-plugins`，壳侧改动**不进 `main`**）：
 - P0–P4 主体已实现并测试通过（typecheck / build / `npm test`（含 config 迁移、notify:install、dsh-view preload 集成测试）/ 插件 smoke）；
 - Review 修正已合入：P1 聚合默认窗口 5s、P2 `notify:install` 通道、P3 native 回执真实化（`notify()` 返回 boolean）、P4 移除 `app:getVersion` invoke；
-- 插件源码已**独立到 `qgx1992/dsh-notify`**（桌面端仓库不再维护，`plugins/` gitignore）；桌面端推荐列表指向 `github:qgx1992/dsh-notify`；
+- 插件源码已**独立到 `qgx1992/dsh-notify`**（桌面端仓库不再维护，`plugins/` gitignore）；桌面端**不再将其列入推荐列表**，按需自行安装；
 - **现场修复（点击不跳转，日志证据）**：
   1. webview 握手被 `did-finish-load` 覆盖 → 长期离线 → 通知全降级原生。改为 `did-start-loading` 复位（加载开始即复位，页面 JS 与插件握手在其后执行，顺序稳定）；
   2. 原生通知点击优先转发 webview 插件 `sessions.open(id)` 激活（`hub.requestActivate` + 插件 `session-activate` 控制事件，不渲染 toast），webview 离线才回退 DOM hack；

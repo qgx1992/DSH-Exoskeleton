@@ -7,6 +7,8 @@
 轻量、纯净、功能完整的 DSH 桌面外壳：把官方 `dsh web` 封装为**双击即用**的 Windows 桌面程序。
 遵循「壳核分离」原则——**不改动 DSH 内核**，官方升级无缝跟随；默认**共用 `~/.dsh`**，已有配置零迁移。
 
+完整版本历史见 [更新日志](CHANGELOG.md)。
+
 ## 功能特性
 
 | 模块 | 说明 |
@@ -60,6 +62,8 @@ Electron + TypeScript + React + Tailwind CSS + Vite（electron-vite）+ electron
 ```
 
 ## 开发
+
+> 新手入门：完整上手路径见 [docs/onboarding/](docs/onboarding/README.md)（概念术语 → 环境准备 → 首次运行 → 代码地图 → 第一个改动）。
 
 ```bash
 # 安装依赖

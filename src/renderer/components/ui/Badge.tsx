@@ -16,14 +16,18 @@ const TONES: Record<BadgeTone, string> = {
 export function Badge({
   tone = 'gray',
   className = '',
+  title,
   children
 }: {
   tone?: BadgeTone
   className?: string
+  /** 悬停提示（如启动失败原因） */
+  title?: string
   children: ReactNode
 }): React.JSX.Element {
   return (
     <span
+      title={title}
       className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-chip border px-2 py-px font-mono text-2xs ${TONES[tone]} ${className}`}
     >
       {children}

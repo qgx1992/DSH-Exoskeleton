@@ -65,6 +65,11 @@ export interface AppConfig {
   kernelMode: 'managed' | 'system'
   /** 托管内核默认版本 */
   defaultKernelVersion: string | null
+  /**
+   * 上一个默认内核版本（R-24 崩溃自动回滚目标）：
+   * 切换默认时写入旧值，崩溃回滚成功后清空；null = 无可用回滚目标
+   */
+  previousKernelVersion: string | null
   /** 窗口几何记忆（尺寸/位置；null=首次启动用默认） */
   windowBounds: { width: number; height: number; x: number; y: number } | null
   /** 上次退出时窗口是否最大化 */
@@ -113,6 +118,9 @@ export interface NotificationEvent {
   actions?: { onClick?: () => void }
 }
 
+/** 内核启动健康状态（R-24 试启动门禁与崩溃回滚的持久化记录） */
+export type KernelBootHealth = 'untested' | 'ok' | 'failed'
+
 /** 托管 DSH 内核（多版本共存）信息 */
 export interface KernelInfo {
   version: string
@@ -122,6 +130,17 @@ export interface KernelInfo {
   size: number
   integrity: string | null
   error: string | null
+  /**
+   * 启动健康状态：
+   * - untested：安装后尚未试启动
+   * - ok：试启动门禁通过（或服务实际进入 running）
+   * - failed：试启动失败（设置默认会被门禁拦截 / 崩溃回滚）
+   */
+  bootHealth: KernelBootHealth
+  /** bootHealth=failed 时的失败摘要（stderr 关键行） */
+  failReason: string | null
+  /** 是否正在使用壳子兼容补丁（--patch 文件路径；null = 无需补丁） */
+  compatPatch: string | null
 }
 
 /** 内核安装/操作进度推送 */
@@ -220,6 +239,8 @@ export interface SetupStatus {
 export interface SaveResult {
   ok: boolean
   error?: string
+  /** 非阻断性提示（如“当前内核已使用兼容补丁启动”） */
+  warning?: string
 }
 
 /** 备份快照信息（§4.3.4 备份与回滚） */

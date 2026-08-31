@@ -124,6 +124,7 @@ export function KernelsTab(): React.JSX.Element {
     const r = await window.dshDesktop.kernels.setDefault(v)
     setBusyVersion(null)
     if (!r.ok) setMessage({ type: 'err', text: r.error ?? '设置失败' })
+    else if (r.warning) setMessage({ type: 'ok', text: r.warning })
     await refresh()
   }
 
@@ -322,9 +323,20 @@ export function KernelsTab(): React.JSX.Element {
                     <span className="font-mono text-sm font-medium text-ink">v{k.version}</span>
                     {activeVersion === k.version && <Badge tone="cyan">● 当前默认</Badge>}
                     {k.status === 'error' && <Badge tone="red">安装异常</Badge>}
+                    {k.bootHealth === 'failed' && (
+                      <Badge tone="red" title={k.failReason ?? '试启动失败，已拦截设为默认'}>
+                        启动失败
+                      </Badge>
+                    )}
+                    {k.bootHealth === 'ok' && k.compatPatch && (
+                      <Badge tone="amber" title={k.failReason ?? '官方修复前需兼容补丁启动'}>
+                        兼容补丁
+                      </Badge>
+                    )}
                   </div>
                   <div className="mt-0.5 font-mono text-2xs text-ink-3">
                     {fmtSize(k.size)} · {k.installedAt ? new Date(k.installedAt).toLocaleString() : '-'}
+                    {k.bootHealth === 'failed' && k.failReason ? ' · ' + k.failReason.slice(0, 120) : ''}
                   </div>
                 </div>
                 {activeVersion !== k.version && k.status !== 'error' && (

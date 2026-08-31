@@ -14,12 +14,45 @@ import { backupManager } from './backup'
 import { listInstalled, listCatalog, installPlugin, uninstallPlugin, checkPluginUpdates, upgradePlugin } from './plugins'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
+import { trialBootManagedKernel, compatPatchPathFor } from './kernel-compat'
 import { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } from './profiles'
 import { listSessions, openSession, removeSession, exportSession, showSessionInFolder, isSessionId } from './sessions'
 import { notify } from './notify'
 import type { AppConfig } from '../shared/types'
 
 export function registerIpcHandlers(): void {
+  // R-24: 内核崩溃循环 → 自动回滚默认到上一可用版本（防「设为默认即裸崩循环」）
+  dshManager.onBootFailure = (info) => {
+    try {
+      const cfg = configStore.get()
+      if (cfg.kernelMode !== 'managed') return
+      const bad = info.version ?? cfg.defaultKernelVersion
+      if (!bad || cfg.defaultKernelVersion !== bad) return
+      const prev = cfg.previousKernelVersion
+      if (!prev || prev === bad || !kernelManager.listInstalled().some((k) => k.version === prev)) return
+      if (kernelManager.bootHealthOf(prev) === 'failed') {
+        logger.warn('kernel auto-rollback skipped: previous default known-unhealthy', { prev })
+        return
+      }
+      logger.error('kernel crash-loop detected, auto-rollback default', {
+        bad,
+        prev,
+        attempts: info.attempts,
+        lastError: info.lastError
+      })
+      kernelManager.setBootHealth(bad, 'failed', info.lastError ?? '连续崩溃')
+      configStore.set({ defaultKernelVersion: prev, previousKernelVersion: null })
+      const st = dshManager.getState().status
+      if (st === 'error' || st === 'stopped') {
+        setTimeout(() => {
+          void dshManager.start().catch((err) => logger.warn('restart after rollback failed', err))
+        }, 800)
+      }
+    } catch (err) {
+      logger.warn('kernel auto-rollback failed', err)
+    }
+  }
+
   // ---------- 首次启动引导 ----------
   ipcMain.handle('setup:check', () => checkSetupStatus())
   ipcMain.handle('setup:save', (_e, apiKey: string) => saveApiKey(apiKey))
@@ -49,12 +82,48 @@ export function registerIpcHandlers(): void {
     if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
       return { ok: false, error: '内核 v' + version + ' 未安装，无法设为默认' }
     }
-    const cfg = configStore.set({ defaultKernelVersion: version })
+    const oldVersion = configStore.get().kernelMode === 'managed' ? configStore.get().defaultKernelVersion : null
+    if (version === oldVersion) return { ok: true }
+
+    // R-24: 切到托管版本先在克隆 DSH_HOME 上试启动（失败不改配置；已验过 ok 则直接放行——
+    // spawn 时仍会按注册表注入兼容补丁，无需重复验证）
+    if (version !== null && kernelManager.bootHealthOf(version) !== 'ok') {
+      const dshHome = dshManager.resolveDshHome()
+      const t0 = Date.now()
+      const trial = await trialBootManagedKernel(version, dshHome, { timeoutMs: 60_000 })
+      const took = Math.round((Date.now() - t0) / 1000)
+      if (!trial.ok) {
+        kernelManager.setBootHealth(version, 'failed', trial.error)
+        kernelManager.setCompatPatch(version, null)
+        logger.error('kernel default switch blocked by trial boot', { version, error: trial.error, took })
+        return {
+          ok: false,
+          error:
+            '内核 v' + version + ' 试启动失败（' + took + 's）：' +
+            (trial.error ?? '未知错误') +
+            '。已保留当前默认 ' + (oldVersion ?? '系统 dsh') + '，未切换。'
+        }
+      }
+      kernelManager.setBootHealth(version, 'ok')
+      kernelManager.setCompatPatch(version, trial.patchUsed ? compatPatchPathFor(version) : null)
+      logger.info('kernel default switch trial ok', { version, took, patchUsed: trial.patchUsed, url: trial.url })
+    }
+
+    // 提交切换（记录上一默认，供崩溃自动回滚使用）
+    const cfg = configStore.set({
+      defaultKernelVersion: version,
+      previousKernelVersion: oldVersion ?? null
+    })
+    if (version !== null) kernelManager.setCompatPatch(version, compatPatchPathFor(version))
     // 服务运行中则自动换内核重启
     if (dshManager.getState().status === 'running') {
       await dshManager.restart()
     }
-    return { ok: cfg.defaultKernelVersion === version }
+    const patched = version !== null && kernelManager.bootHealthOf(version) === 'ok' && !!kernelManager.listInstalled().find((k) => k.version === version)?.compatPatch
+    return {
+      ok: cfg.defaultKernelVersion === version,
+      warning: patched ? '当前内核需通过兼容补丁启动（官方修复版发布前，部分 UI 特性暂缺）' : undefined
+    }
   })
   ipcMain.handle('kernels:setMode', async (_e, mode: 'managed' | 'system') => {
     const cfg = configStore.set({ kernelMode: mode })
@@ -84,6 +153,25 @@ export function registerIpcHandlers(): void {
     return r
   })
   ipcMain.handle('profiles:setKernel', async (_e, id: string, version: string | null) => {
+    // R-23: 绑定前校验目标内核已安装
+    if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装，无法绑定' }
+    }
+    // R-24: 绑定「当前激活档案」的投递内核 → 试启动门禁（失败不生效；spawn 仍按注册表注入补丁）
+    const bindingActive = configStore.get().activeProfileId === id
+    if (bindingActive && version !== null && kernelManager.bootHealthOf(version) !== 'ok') {
+      const dshHome = dshManager.resolveDshHome()
+      const trial = await trialBootManagedKernel(version, dshHome, { timeoutMs: 60_000 })
+      if (!trial.ok) {
+        kernelManager.setBootHealth(version, 'failed', trial.error)
+        return {
+          ok: false,
+          error: '内核 v' + version + ' 试启动失败：' + (trial.error ?? '未知错误') + '。绑定未生效，请先处理该内核启动问题。'
+        }
+      }
+      kernelManager.setBootHealth(version, 'ok')
+      kernelManager.setCompatPatch(version, trial.patchUsed ? compatPatchPathFor(version) : null)
+    }
     const r = setProfileKernel(id, version)
     if (r.ok && configStore.get().activeProfileId === id && dshManager.getState().status === 'running') {
       await dshManager.restart()

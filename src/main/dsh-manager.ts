@@ -15,6 +15,7 @@ import { logger } from './logger'
 import { configStore } from './config'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
+import { compatPatchArgsFor } from './kernel-compat'
 import type { DSHState } from '../shared/types'
 
 const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
@@ -47,6 +48,10 @@ export class DSHManager extends EventEmitter {
   private nodeExe: string | null = null
   /** H5: 当前进程打印的 Web UI 完整 URL（含认证 token；alpha 内核需携带 token 首次访问以签发 cookie） */
   private webUrl: string | null = null
+  /** R-24: 当前解析到的托管内核版本（用于 spawn 注入兼容补丁 / 崩溃回滚定位） */
+  private activeKernelVersion: string | null = null
+  /** R-24: 连续崩溃达上限（MAX_RESTARTS）时触发（壳层据此自动回滚默认内核） */
+  onBootFailure: ((info: { version: string | null; attempts: number; lastError: string | null }) => void) | null = null
   private healthTimer: NodeJS.Timeout | null = null
   /** H2: 进行中的 start()（并发防护：并发调用复用同一实例） */
   private startInFlight: Promise<void> | null = null
@@ -94,6 +99,8 @@ export class DSHManager extends EventEmitter {
    */
   private async resolveExecutable(): Promise<{ command: string; args: string[] }> {
     if (this.executable) return this.executable
+    // R-24: 重新解析入口时清除旧托管版本标记（下方托管分支会重新赋值；缓存命中则保留）
+    this.activeKernelVersion = null
 
     // ① 托管内核（kernelMode=managed）—— 多内核共存路由（阶段 C：Profile 绑定优先）
     kernelManager.init()
@@ -106,6 +113,7 @@ export class DSHManager extends EventEmitter {
       if (binJs) {
         const nodeExe = await this.resolveNode()
         this.executable = { command: nodeExe, args: [binJs] }
+        this.activeKernelVersion = kernelVersion
         logger.info('dsh entry resolved via managed kernel', { version: kernelVersion, profile: profile?.id, binJs })
         return this.executable
       }
@@ -256,11 +264,22 @@ export class DSHManager extends EventEmitter {
     try {
       const exe = await this.resolveExecutable()
       this.dshHome = this.resolveDshHome()
+      // 启动前确保第一锚点（profile 私有 node_modules/@deepseek-ai）官方包链接指向当前内核：
+      // 升级/切换内核后残留旧内核或 npm 全局链接会导致同一进程双模块实例
+      // （agent preset 切换报 tool already registered 的根因，见 kernel-manager.relinkProfileAnchor）
+      if (this.activeKernelVersion) kernelManager.relinkProfileAnchor(this.activeKernelVersion)
       const cfg = configStore.get()
       const portArg = cfg.port > 0 && cfg.port < 65536 ? String(cfg.port) : '0'
-      const args = [...exe.args, 'web', '--host', '127.0.0.1', '--port', portArg, '--no-open']
+      // R-24: 托管内核按版本注入兼容补丁（--patch 叠层，官方一等机制；无补丁为空数组）
+      const compat = this.activeKernelVersion ? compatPatchArgsFor(this.activeKernelVersion) : []
+      const args = [...exe.args, 'web', ...compat, '--host', '127.0.0.1', '--port', portArg, '--no-open']
 
-      logger.info(`spawning dsh web`, { command: exe.command, args, dshHome: this.dshHome })
+      logger.info(`spawning dsh web`, {
+        command: exe.command,
+        args,
+        compatPatch: compat.length > 0 ? compat[1] : null,
+        dshHome: this.dshHome
+      })
       const child = spawn(exe.command, args, {
         env: {
           ...process.env,
@@ -342,6 +361,8 @@ export class DSHManager extends EventEmitter {
             this.port = port
             // H1: 记录稳定运行起点（用于崩溃循环 vs 稳定后崩溃的判定）
             this.stableSince = Date.now()
+            // R-24: 实际进入 running → 更新该内核启动健康状态
+            if (this.activeKernelVersion) kernelManager.setBootHealth(this.activeKernelVersion, 'ok')
             this.setStatus('running')
             return
           }
@@ -418,6 +439,12 @@ export class DSHManager extends EventEmitter {
     }
     if (this.restartCount >= MAX_RESTARTS) {
       this.lastError = '连续崩溃超过 ' + MAX_RESTARTS + ' 次，停止自动重启（请检查 DSH 内核配置或查看日志）'
+      // R-24: 通知壳层（自动回滚默认内核到上一可用版本）
+      this.onBootFailure?.({
+        version: this.activeKernelVersion ?? this.version,
+        attempts: this.restartCount,
+        lastError: this.lastError
+      })
       this.setStatus('error')
       return
     }
@@ -472,8 +499,8 @@ export class DSHManager extends EventEmitter {
           resolvePromise()
         } else if (Date.now() - t0 > 3_000) {
           clearInterval(iv)
-          this.killTree(pid)
-          resolvePromise()
+          // 等待 taskkill 完成再返回，保证 stop 后无孙进程/端口残留（restart 立即起新进程不冲突）
+          void this.killTreeAndWait(pid).then(() => resolvePromise())
         }
       }, 200)
     })
@@ -505,6 +532,23 @@ export class DSHManager extends EventEmitter {
     }
   }
 
+  /** 强制结束进程树并等待 taskkill 完成（stop 路径用：保证孙进程/端口在返回前已清理） */
+  private killTreeAndWait(pid: number, timeoutMs = 5_000): Promise<void> {
+    return new Promise((resolvePromise) => {
+      if (!pid) {
+        resolvePromise()
+        return
+      }
+      try {
+        execFile('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true }, () => resolvePromise())
+        // 兜底：taskkill 回调不触发时也要归还（Promise 幂等，重复 resolve 无副作用）
+        setTimeout(resolvePromise, timeoutMs)
+      } catch {
+        resolvePromise()
+      }
+    })
+  }
+
   /**
    * 失效内核/运行时缓存：切换托管内核（默认版本/模式/Profile 绑定）后必须重新解析
    * 入口并重探测版本，否则 restart 会复用缓存的旧 executable/nodeExe/version，
@@ -514,6 +558,7 @@ export class DSHManager extends EventEmitter {
     this.executable = null
     this.nodeExe = null
     this.version = null
+    this.activeKernelVersion = null
     // H5: 停止后旧进程的认证 URL 不再有效，下一次 start 会重新解析新 URL
     this.webUrl = null
   }

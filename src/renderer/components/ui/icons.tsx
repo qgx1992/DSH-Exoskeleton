@@ -196,3 +196,22 @@ export function IconSpinner(props: IconProps): React.JSX.Element {
     </Svg>
   )
 }
+
+/** 心形：打赏/支持入口 */
+export function IconHeart(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </Svg>
+  )
+}
+
+/** 关闭 × */
+export function IconX(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </Svg>
+  )
+}

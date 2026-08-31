@@ -27,6 +27,8 @@ const DEFAULTS: AppConfig = {
   defaultKernelProvisioned: false,
   kernelMode: 'managed',
   defaultKernelVersion: null,
+  // R-24: 上一个默认内核（崩溃自动回滚目标；无历史为 null）
+  previousKernelVersion: null,
   windowBounds: null,
   windowMaximized: false,
   activeProfileId: 'default',

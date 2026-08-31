@@ -8,13 +8,14 @@
 import { app } from 'electron'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn, execFile } from 'node:child_process'
 import { logger } from './logger'
 import { configStore } from './config'
 import { runtimeManager } from './runtime-manager'
 import { compareVersions } from '../shared/version'
-import type { KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
+import type { KernelBootHealth, KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
 /** registry 根（install --registry 参数需要根 URL，不是包元数据 URL） */
@@ -30,6 +31,10 @@ interface KernelMeta {
   size: number
   integrity: string | null
   error: string | null
+  /** R-24: 启动健康状态（kernels.json 持久化；旧索引缺字段按 untested 归一） */
+  bootHealth: KernelBootHealth
+  failReason: string | null
+  compatPatch: string | null
 }
 
 interface KernelIndex {
@@ -58,7 +63,14 @@ export class KernelManager extends EventEmitter {
   private loadIndex(): void {
     try {
       if (fs.existsSync(this.indexFile())) {
-        this.index = JSON.parse(fs.readFileSync(this.indexFile(), 'utf-8')) as KernelIndex
+        const parsed = JSON.parse(fs.readFileSync(this.indexFile(), 'utf-8')) as KernelIndex
+        // R-24 兼容：旧 kernels.json 无 bootHealth 等字段 → 归一为 untested
+        for (const meta of Object.values(parsed.kernels)) {
+          if (!meta.bootHealth) meta.bootHealth = 'untested'
+          if (meta.failReason === undefined) meta.failReason = null
+          if (meta.compatPatch === undefined) meta.compatPatch = null
+        }
+        this.index = parsed
       }
     } catch (err) {
       logger.warn('kernels index load failed', err)
@@ -115,8 +127,123 @@ export class KernelManager extends EventEmitter {
       installedAt: k.installedAt,
       size: k.size,
       integrity: k.integrity,
-      error: k.error
+      error: k.error,
+      bootHealth: k.bootHealth ?? 'untested',
+      failReason: k.failReason ?? null,
+      compatPatch: k.compatPatch ?? null
     }
+  }
+
+  /**
+   * R-24: 记录内核启动健康状态（试启动门禁结果 / 崩溃回滚）。
+   * ok 且带补丁时由 setCompatPatch 同步记录补丁文件路径。
+   */
+  setBootHealth(version: string, health: KernelBootHealth, reason?: string | null): void {
+    this.init()
+    const meta = this.index.kernels[version]
+    if (!meta) return
+    meta.bootHealth = health
+    meta.failReason = health === 'failed' ? (reason ?? null) : null
+    this.persistIndex()
+    logger.info('kernel boot health', { version, health, reason: meta.failReason })
+  }
+
+  /** 记录该版本当前使用的兼容补丁文件（null = 无补丁） */
+  setCompatPatch(version: string, patch: string | null): void {
+    this.init()
+    const meta = this.index.kernels[version]
+    if (!meta) return
+    meta.compatPatch = patch
+    this.persistIndex()
+  }
+
+  /**
+   * 重建第一锚点（profile 私有 node_modules/@deepseek-ai）的官方包链接 → 指定内核。
+   *
+   * 背景（版本混杂修复）：Exoskeleton 托管内核场景下，host 组合从内核 store 解析官方包；
+   * 而第一锚点是 pnpm 管理的目录，dsh 的 heal 只维护第二锚点（profiles/node_modules），
+   * 这里残留指向 npm 全局或旧内核的 symlink 会让同一进程出现双模块实例
+   * （模块内 Symbol 分裂，如 @deepseek-ai/dsh-scope 的 kScope → preset 工具注册 scope 判定
+   * 失效 → 切换 agent preset 报 "tool xxx is already registered"）。
+   * 升级/切换内核后必须把这里的官方包链接统一指到新内核，否则版本混杂复发。
+   *
+   * 只处理 symlink/junction（不碰 pnpm 安装的真实目录）；目标包在内核中不存在时跳过并告警。
+   */
+  relinkProfileAnchor(kernelVersion: string): { relinked: string[]; skipped: string[] } {
+    const relinked: string[] = []
+    const skipped: string[] = []
+    try {
+      const cfg = configStore.get()
+      const dshHome = cfg.dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+      const anchorDir = path.join(dshHome, 'profiles', 'web', 'node_modules', '@deepseek-ai')
+      const kernelDir = path.join(this.kernelsDir, KernelManager.safeDirName(kernelVersion))
+      if (!fs.existsSync(anchorDir) || !fs.existsSync(kernelDir)) return { relinked, skipped }
+      const entries = fs.readdirSync(anchorDir, { withFileTypes: true })
+      for (const e of entries) {
+        if (!e.isSymbolicLink()) continue // 只处理链接，pnpm 安装的真实目录不碰
+        const linkPath = path.join(anchorDir, e.name)
+        let target: string
+        try {
+          target = fs.readlinkSync(linkPath)
+        } catch {
+          continue
+        }
+        // 已指向目标内核 → 幂等跳过
+        if (target.includes(kernelDir)) continue
+        const targetPkg = this.resolveKernelPackagePath(kernelDir, e.name)
+        if (!targetPkg) {
+          skipped.push(e.name)
+          logger.warn('relink profile anchor: package not found in kernel, skipped', { pkg: e.name, kernelVersion })
+          continue
+        }
+        try {
+          fs.rmSync(linkPath, { force: true })
+          // Windows 用 junction（免管理员/开发者模式，与现有链接一致）；POSIX 用目录符号链接
+          fs.symlinkSync(targetPkg, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
+          relinked.push(e.name)
+          logger.info('relink profile anchor', { pkg: e.name, from: target, to: targetPkg })
+        } catch (err) {
+          logger.warn('relink profile anchor failed', { pkg: e.name, err })
+          skipped.push(e.name)
+        }
+      }
+    } catch (err) {
+      logger.warn('relink profile anchor error', err)
+    }
+    return { relinked, skipped }
+  }
+
+  /** 在内核目录中定位官方包路径：顶级 node_modules → .pnpm 扁平 → .pnpm store 布局 */
+  private resolveKernelPackagePath(kernelDir: string, pkg: string): string | null {
+    const candidates = [
+      path.join(kernelDir, 'node_modules', '@deepseek-ai', pkg),
+      path.join(kernelDir, 'node_modules', '.pnpm', 'node_modules', '@deepseek-ai', pkg)
+    ]
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(c)) return c
+      } catch {
+        /* noop */
+      }
+    }
+    // store 布局：.pnpm/@deepseek-ai+<pkg>@<version>_<hash>/node_modules/@deepseek-ai/<pkg>
+    try {
+      const storeRoot = path.join(kernelDir, 'node_modules', '.pnpm')
+      const matches = fs.readdirSync(storeRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && d.name.startsWith('@deepseek-ai+' + pkg + '@'))
+      for (const m of matches) {
+        const p = path.join(storeRoot, m.name, 'node_modules', '@deepseek-ai', pkg)
+        if (fs.existsSync(p)) return p
+      }
+    } catch {
+      /* noop */
+    }
+    return null
+  }
+
+  /** 读取内核启动健康状态（未记录 → untested） */
+  bootHealthOf(version: string): KernelBootHealth {
+    return this.index.kernels[version]?.bootHealth ?? 'untested'
   }
 
   /** npm registry 可用版本列表 */
@@ -333,7 +460,10 @@ export class KernelManager extends EventEmitter {
       installedAt: null,
       size: 0,
       integrity: null,
-      error: null
+      error: null,
+      bootHealth: 'untested',
+      failReason: null,
+      compatPatch: null
     }
     this.index.kernels[version] = meta
     this.persistIndex()
@@ -392,6 +522,8 @@ export class KernelManager extends EventEmitter {
       meta.size = dirSizeSync(kernelDir)
       meta.error = null
       this.persistIndex()
+      // 新内核就绪即重建第一锚点官方包链接（指向本内核），后续切换默认/绑定档案时不再版本混杂
+      this.relinkProfileAnchor(version)
       this.emitProgress({ version, stage: 'done', percent: 100, message: `内核 v${version} 安装完成（${chk.stdout.trim()}）` })
       logger.info('kernel installed', { version, size: meta.size })
       return { ok: true }

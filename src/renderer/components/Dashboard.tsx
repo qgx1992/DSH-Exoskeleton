@@ -10,6 +10,7 @@ import { PluginsTab } from './panels/PluginsTab'
 import { KernelsTab } from './panels/KernelsTab'
 import { ProfilesTab } from './panels/ProfilesTab'
 import { SessionsTab } from './panels/SessionsTab'
+import { TipDialog } from './TipDialog'
 import {
   IconActivity,
   IconShield,
@@ -20,7 +21,8 @@ import {
   IconZap,
   IconRefresh,
   IconSettings,
-  IconBox
+  IconBox,
+  IconHeart
 } from './ui/icons'
 
 type Tab = 'overview' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
@@ -49,6 +51,7 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
 
 export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('overview')
+  const [tipOpen, setTipOpen] = useState(false)
 
   return (
     <div className="flex h-full bg-canvas">
@@ -68,6 +71,17 @@ export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Pr
             {t.label}
           </button>
         ))}
+        {/* 打赏入口：紧跟在「更新」之后，点击弹出打赏图（非页面标签） */}
+        <button
+          onClick={() => setTipOpen(true)}
+          title="打赏支持"
+          className="relative flex items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm text-ink-3 transition-colors duration-150 ease-hallmark hover:bg-white/5 hover:text-accent"
+        >
+          <span className="flex w-4 justify-center opacity-90">
+            <IconHeart size={15} />
+          </span>
+          支持作者
+        </button>
         <div className="flex-1" />
         <div className="px-2.5 pb-1 text-2xs leading-relaxed text-ink-3">服务运行后主区域将显示 DSH Web UI</div>
       </nav>
@@ -87,6 +101,8 @@ export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Pr
         {tab === 'logs' && <LogsTab />}
         {tab === 'update' && <UpdateTab />}
       </main>
+
+      <TipDialog open={tipOpen} onClose={() => setTipOpen(false)} />
     </div>
   )
 }
