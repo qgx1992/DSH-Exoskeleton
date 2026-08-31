@@ -6,6 +6,22 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.8.3] - 2026-08-31
+
+### ✨ 新功能
+- **内核兼容层（R-24）**：托管 alpha 内核带病（如 alpha.2 移除旧 settings API 导出）时自动注入官方 `--patch` 叠层兼容启动，不写用户 profile、不改内核；切换默认/绑定内核前**试启动门禁**（克隆 DSH_HOME 实际拉起 + 健康检查），失败拦截并保留当前版本；崩溃自动回滚 + bootHealth 持久化。
+- 管理面板新增「支持作者」打赏入口（TipDialog）。
+- 首次引导文档（docs/onboarding）。
+
+### 🐛 Bug 修复
+- **预设切换报 `tool "pwsh" is already registered`（版本混杂根治）**：内核升级/切换后，profile 私有第一锚点 `~/.dsh/profiles/web/node_modules/@deepseek-ai` 的官方包链接统一重建指向当前托管内核（`relinkProfileAnchor`，幂等、只处理 symlink/junction）；此前残留指向 npm 全局或旧内核的链接会让同一进程出现双模块实例（scope Symbol 分裂），预设工具注册进 root 表撞名。触发点：内核安装成功后 + 每次服务启动前（覆盖切默认/切档案/重启全部路径）。
+- **服务停止残留进程**：`stop()` 改为等待 taskkill 进程树清理完成再返回，重启/切换内核时不再残留旧孙进程与端口。
+- **内嵌 Web UI 加载失败（431）自愈**：attach 时清理累积的 `dsh-auth-*` cookie（保留最近 2 个，修复多次重启累积超 node:http 16KB 请求头上限导致的 431）+ 清缓存 + 检测「Failed to load plugins」自动绕缓存重载（最多 30 次）。
+
+### 🧹 维护
+- 新增测试：`test-kernel-compat.cjs`（兼容层）、`test-relink-anchor.cjs`（第一锚点重链接 + 幂等）。
+- AGENT.md §7 新增「版本混杂 + relink 根治」「野目录」踩坑记录。
+
 ## [0.8.2] - 2026-08-30
 
 ### 🐛 Bug 修复

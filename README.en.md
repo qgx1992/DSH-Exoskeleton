@@ -21,7 +21,7 @@ Following the **shell-kernel separation** principle — **no changes to the DSH 
 | Backup & rollback | Manual archive + automatic snapshots (before plugin install/uninstall, before restore) + one-click rollback; snapshots stored in `userData\backups` |
 | Plugin management | GitHub topic `dsh-plugin` + npm dual-source catalogs, one-click install/uninstall (reuses `dsh plugin`), conflict pre-check + automatic backup before operations |
 | Auto-update | NSIS installers use electron-updater silent download → notify → one-click restart & install; the portable build guides a manual download |
-| Kernel management (Phase A/B/C/D) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + first-launch default kernel provisioning + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota |
+| Kernel management (Phase A/B/C/D) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + first-launch default kernel provisioning + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota + **compat-patch auto-injection for buggy alpha kernels (R-24: trial-boot gate + crash auto-rollback)** |
 | Data reuse | `DSH_HOME` environment variable takes priority, otherwise `%USERPROFILE%\.dsh` |
 | Security isolation | Listens only on `127.0.0.1`, renderer sandbox, `contextIsolation`, Node integration disabled |
 
