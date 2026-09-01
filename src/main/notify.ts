@@ -203,6 +203,22 @@ function sweepShown(): void {
 }
 
 /**
+ * 按 id 关闭并移除已投递通知（session-ask 专用：用户回答后撤销操作中心残留 toast，P2 撤销）。
+ * @returns 是否命中（false = 未投递过 / 已过期清扫 / 实例已销毁）
+ */
+export function closeNotification(evId: string): boolean {
+  const rec = shown.get(evId)
+  if (!rec) return false
+  shown.delete(evId)
+  try {
+    rec.n.close()
+  } catch {
+    /* 忽略：toast 已不在 */
+  }
+  return true
+}
+
+/**
  * 发送原生通知。
  * @param meta 关联元数据（事件 id / kind / 会话 uuid）——提供后 toast 走协议激活，
  *   点击（含操作中心、冷启动）可精确回到原事件并执行 onClick。

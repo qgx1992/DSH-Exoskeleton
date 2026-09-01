@@ -6,6 +6,12 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.8.4] - 未发布
+
+### ✨ 新功能
+- **询问卡等待通知（session-ask）**：Agent 提问（`ask_user_question`）或计划审批（`exit_plan_mode`）阻塞等待用户输入时发送 Windows 通知（标题、问题文本、轮次），点击跳回提问会话；用户回答后自动从操作中心撤销残留 toast。检测原理：`user-questions/request` 是仅实时推送的 waterfall 事件、不落会话日志，改用持久化影子信号——`tool/call`（白名单工具）入日志而同 `callId` 的 `tool/result` 未出现即卡片等待中（`zstd-worker` 增量解析 + `session-watcher` pending 状态机，已用真实会话数据验证 38/38 全配对）。设置面板新增「询问卡等待通知」开关（默认开）；非白名单工具的慢执行不误报；`turn/end(interrupted/aborted)` 与秒答（call+result 同批）均已处理。
+- 新增测试：`test-ask-detect.cjs`（合成多帧 zstd 会话验证检测状态机 9 场景）。
+
 ## [0.8.3] - 2026-08-31
 
 ### ✨ 新功能

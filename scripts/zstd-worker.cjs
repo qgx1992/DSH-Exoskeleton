@@ -1,7 +1,9 @@
 // zstd worker：由系统 Node(≥22.4，内置 zstd) 运行，主进程通过 stdio 行式 JSON 请求解压/信息
 // 命令：
 //   {"cmd":"init"}                                   → {"ok":true,"zstd":true}
-//   {"cmd":"frameEvents","file":path,"offset":n}     → {"ok":true,"events":[{type,seq,turnEndMax}]}
+//   {"cmd":"frameEvents","file":path,"offset":n}     → {"ok":true,"events":[{type,seq,turnEndMax}],
+//                                                      askOpens:[{callId,turn,time,questions}],
+//                                                      toolResultCallIds:[string]}
 //   {"cmd":"headInfo","file":path}                   → {"ok":true,"cwd":"...","title":"..."}
 const zlib = require('node:zlib')
 const fs = require('node:fs')
@@ -61,6 +63,37 @@ function decompress(buffer, frame) {
   }
 }
 
+/** 询问卡检测（session-ask）：会产出等待用户回答的卡片工具名白名单。
+ *  严格按名过滤：其他工具的“call 无 result”只是慢执行（如 pwsh），不是卡片，不可泛化。 */
+const ASK_TOOL_NAMES = new Set(['ask_user_question', 'exit_plan_mode'])
+
+/** 从 tool/call 的 arguments 提取问题文本（worker 内解析并截断，主进程只收短文本）。
+ *  arguments 可达数 KB 且解析可能失败，失败/非卡片工具一律返回 undefined（壳侧回退通用文案）。 */
+function parseAskQuestions(name, argsJson) {
+  if (!ASK_TOOL_NAMES.has(name) || typeof argsJson !== 'string' || !argsJson) return undefined
+  try {
+    const args = JSON.parse(argsJson)
+    if (name === 'exit_plan_mode') {
+      // 计划审批卡：从 plan 参数取摘要（exit_plan_mode 无 questions 数组）
+      const plan = typeof args.plan === 'string' ? args.plan.trim() : ''
+      return plan ? ['计划审批：' + plan.replace(/\s+/g, ' ').slice(0, 110)] : undefined
+    }
+    if (!Array.isArray(args.questions) || args.questions.length === 0) return undefined
+    const out = []
+    for (const q of args.questions) {
+      if (!q || typeof q !== 'object') continue
+      const header = typeof q.header === 'string' ? q.header.trim() : ''
+      const question = typeof q.question === 'string' ? q.question.trim() : ''
+      const text = header && question ? header + '：' + question : (question || header)
+      if (text) out.push(text.slice(0, 120))
+      if (out.length >= 3) break // 通知正文最多展示 3 个问题，防超长
+    }
+    return out.length > 0 ? out : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function parseEvents(text) {
   const events = []
   for (const line of text.split('\n')) {
@@ -73,13 +106,22 @@ function parseEvents(text) {
         : undefined
       // turn：turn/end 的 data.turn（轮次编号，用于按轮去重）
       const turn = j.data && typeof j.data.turn === 'number' ? j.data.turn : undefined
-      events.push({
+      const ev = {
         type: j.type,
         seq: typeof j.seq === 'number' ? j.seq : 0,
         time: typeof j.time === 'number' ? j.time : 0,
         kind,
         turn
-      })
+      }
+      // session-ask：tool/call 带出卡片信息（仅白名单工具）；tool/result 带出配对键 callId
+      if (j.type === 'tool/call' && j.data) {
+        ev.name = j.data.name
+        ev.callId = j.data.callId
+        ev.questions = parseAskQuestions(j.data.name, j.data.arguments)
+      } else if (j.type === 'tool/result' && j.data && j.data.message && j.data.message.source) {
+        ev.callId = j.data.message.source.callId
+      }
+      events.push(ev)
     } catch { /* noop */ }
   }
   return events
@@ -121,6 +163,9 @@ function handle(req, res) {
         let events = []
         let turnEndMax = 0
         const turnEnds = []
+        // session-ask：本批新打开的询问卡（tool/call，白名单工具）与配对用的 result callId 集合
+        const askOpens = []
+        const toolResultCallIds = new Set()
         let turnStarts = 0
         // 本批最后一个 turn 事件（按 seq 最大者判定类型）：
         //   - 'end'   → 本批以轮次结束收尾，更新完成候选
@@ -144,10 +189,15 @@ function handle(req, res) {
             } else if (ev.type === 'turn/start') {
               turnStarts++
               if (ev.seq > lastTurnSeq) { lastTurnSeq = ev.seq; lastTurnType = 'start' }
+            } else if (ev.type === 'tool/call' && ASK_TOOL_NAMES.has(ev.name) && ev.callId) {
+              askOpens.push({ callId: ev.callId, turn: ev.turn, time: ev.time, questions: ev.questions })
+            } else if (ev.type === 'tool/result' && ev.callId) {
+              toolResultCallIds.add(ev.callId)
             }
           }
         }
-        res({ ok: true, events, turnEndMax, turnEnds, turnStarts, lastTurnType, lastEndTime })
+        res({ ok: true, events, turnEndMax, turnEnds, turnStarts, lastTurnType, lastEndTime,
+          askOpens, toolResultCallIds: [...toolResultCallIds] })
         return
       }
       if (req.cmd === 'headInfo') {

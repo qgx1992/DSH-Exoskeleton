@@ -143,6 +143,15 @@ class NotificationHub {
       this.deliver(ev)
       return
     }
+    // 询问卡等待：独立开关（不参与聚合——低频事件，聚合反而延迟提示）
+    if (ev.kind === 'session-ask') {
+      if (configStore.get().notifyAskCard === false) {
+        logger.debug('notification session-ask skipped (off)', { id: ev.id })
+        return
+      }
+      this.deliver(ev)
+      return
+    }
     // 服务事件开关（保留原字段语义；在 hub 一处生效）
     if (ev.kind.startsWith('service') && !configStore.get().notifyServiceEvents) {
       logger.debug('notification service event skipped (off)', { id: ev.id, kind: ev.kind })

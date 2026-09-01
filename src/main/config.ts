@@ -21,6 +21,8 @@ const DEFAULTS: AppConfig = {
   // 聚合窗口默认 5s（P1 review 修正）：过大会让单轮通知延迟整个窗口；
   // 聚合模式语义上「首轮必须缓冲到窗口结束才 flush」，单轮通知最长延迟一个窗口
   notifyAggregateWindowMs: 5000,
+  // 询问卡等待通知（session-ask）：默认开——等待回答是最容易被漏看的状态（用户不在场时 Agent 干等）
+  notifyAskCard: true,
   onboardingDone: false,
   defaultPluginsProvisioned: false,
   // 阶段 D：首启默认内核预置标记（false = 待预置；老配置迁移见 load()）

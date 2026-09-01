@@ -182,6 +182,18 @@ export function SettingsTab(): React.JSX.Element {
 
           <div className="flex items-center justify-between">
             <div>
+              <div className="text-ink">询问卡等待通知</div>
+              <div className="mt-0.5 text-xs text-ink-3">Agent 提问等待你回答时发送 Windows 通知，回答后自动撤销</div>
+            </div>
+            <Toggle
+              checked={cfg.notifyAskCard !== false}
+              onChange={(v) => void save({ notifyAskCard: v })}
+              aria-label="询问卡等待通知"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
               <div className="text-ink">通知渠道</div>
               <div className="mt-0.5 text-xs text-ink-3">auto = Web UI 可见时页面内提示，失焦/隐藏走系统通知</div>
             </div>

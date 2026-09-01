@@ -52,6 +52,8 @@ export interface AppConfig {
   notifyChannel: 'auto' | 'native' | 'webview'
   /** 聚合窗口（ms）：同一会话 N ms 内多轮合并为「已完成 N 轮」（§3.3，默认 5000） */
   notifyAggregateWindowMs: number
+  /** 询问卡等待通知：Agent 提问（ask_user_question/exit_plan_mode）阻塞等回答时弹通知（默认开） */
+  notifyAskCard: boolean
   /** 首次启动引导是否已完成 */
   onboardingDone: boolean
   /** 内置默认插件是否已完成首装预置（true 后不再自动补装，尊重用户手动卸载） */
@@ -93,6 +95,7 @@ export interface AppConfig {
 /** 通知事件类型（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.1，壳↔webview 桥与插件的契约） */
 export type NotificationEventKind =
   | 'session-done' // 一轮对话完成
+  | 'session-ask' // 询问卡等待回答：Agent 提问（ask_user_question/exit_plan_mode）阻塞等用户输入
   | 'service-ready' // 服务就绪
   | 'service-error' // 服务异常
   | 'service-restarting' // 崩溃自动重启
@@ -117,6 +120,8 @@ export interface NotificationEvent {
     project?: string
     sessionTitle?: string
     firstUserText?: string
+    /** session-ask 专用：卡片问题文本（worker 内已截断；最多 3 条，每条 ≤120 字符） */
+    questions?: string[]
   }
   service?: { port?: number; error?: string; restartCount?: number }
   update?: { version?: string }

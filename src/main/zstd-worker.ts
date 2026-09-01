@@ -24,6 +24,10 @@ interface WorkerPayload {
   cwd?: string
   title?: string
   firstUserText?: string
+  /** session-ask：本批新打开的询问卡（tool/call，白名单工具；questions 已在 worker 内解析截断，可能为 undefined） */
+  askOpens?: Array<{ callId: string; turn?: number; time?: number; questions?: string[] }>
+  /** session-ask：本批所有 tool/result 的 callId（去重；与 pending 卡片配对即「已回答」） */
+  toolResultCallIds?: string[]
 }
 
 export class ZstdWorkerClient {

@@ -15,8 +15,17 @@
 | 来源 | 触发 | 代码 |
 | :--- | :--- | :--- |
 | **对话完成** | 主进程轮询 `~/.dsh/sessions/*/session-*/session.jsonl.zstd`，解析到非 interrupted 的 `turn/end` 即通知（按轮去重），点击 → 唤起窗口 + `activateSessionInWebUi` | `session-watcher.ts` |
+| **询问卡等待（v0.8.4）** | Agent 提问（`ask_user_question`）或计划审批（`exit_plan_mode`）阻塞等用户输入时通知，回答后自动撤销操作中心残留 toast | `session-watcher.ts`（pending 配对状态机）+ `zstd-worker.cjs`（askOpens/toolResultCallIds） |
 | **服务事件** | 服务就绪 / 异常 / 崩溃重启 | `index.ts` statusChange |
 | **更新就绪** | electron-updater 下载完成 | `updater.ts` |
+
+#### 询问卡等待的检测原理（v0.8.4 取证）
+
+内核的 `user-questions/request` 是仅经 WebSocket 实时推送的 waterfall 事件（`packages/interaction/user-questions`），**不写入会话日志**（扫描全部 206 个真实会话验证），壳侧 log 轮询对卡片是盲的。但工具调用与结果都会落盘，构成可靠的影子信号：
+
+- `tool/call`（`data.name` ∈ 白名单 `ask_user_question`/`exit_plan_mode`）入日志而同 `callId`（`data.message.source.callId`）的 `tool/result` 未出现 ⇒ 卡片等待中；result 配对到达 ⇒ 已回答。真实数据验证：38 次调用全部可配对、零误配（call 与 result 相邻 seq、间隔即等待时长）。
+- 严格按工具名过滤：其他工具「call 无 result」只是慢执行（如 pwsh），不是卡片。
+- 崩溃/中止收敛：`turn/end(kind=interrupted/aborted)` 按轮清 pending；call+result 同批帧（秒答）不触发；watcher 启动前已挂的卡片不回填（与 turn/end 基线语义一致）。
 
 历史提交显示这功能被反复修过（v0.4.1 延迟与点击定位、v0.5.0 事件驱动、v0.5.1/5.2 点击跳转、v0.5.4 turn 去重 / interrupted 过滤），说明根因没被根治。
 
@@ -86,6 +95,7 @@
 ```ts
 export type NotificationEventKind =
   | 'session-done'        // 一轮对话完成
+  | 'session-ask'         // 询问卡等待回答（v0.8.4）：Agent 提问/计划审批阻塞等用户输入
   | 'service-ready'       // 服务就绪
   | 'service-error'       // 服务异常
   | 'service-restarting'  // 崩溃自动重启

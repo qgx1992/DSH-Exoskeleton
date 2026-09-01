@@ -17,7 +17,7 @@ Following the **shell-kernel separation** principle — **no changes to the DSH 
 | Single instance | Double-click brings up the existing window |
 | Dashboard | Unified management panel for status / settings / logs / updates |
 | First-run wizard | Detects `~/.dsh/.credentials.yaml`; shows a wizard when no API Key is configured and writes the Key into the local credentials file |
-| Native notifications | Windows notifications for service ready / error / crash-restart (toggleable) |
+| Native notifications | Windows notifications for service ready / error / crash-restart / session done / **question card awaiting answer** (toggleable) |
 | Backup & rollback | Manual archive + automatic snapshots (before plugin install/uninstall, before restore) + one-click rollback; snapshots stored in `userData\backups` |
 | Plugin management | GitHub topic `dsh-plugin` + npm dual-source catalogs, one-click install/uninstall (reuses `dsh plugin`), conflict pre-check + automatic backup before operations |
 | Auto-update | NSIS installers use electron-updater silent download → notify → one-click restart & install; the portable build guides a manual download |
