@@ -190,6 +190,9 @@ export class KernelManager extends EventEmitter {
         }
         // 已指向目标内核 → 幂等跳过
         if (target.includes(kernelDir)) continue
+        // dsh 官方管理的链接（profile 内部 module-fallback 体系，如指向
+        // ~/.dsh/profiles/web/.dsh-module-fallback/…）→ 不处理，它们不是版本混杂来源
+        if (target.includes('.dsh-module-fallback') || target.includes(path.sep + 'profiles' + path.sep)) continue
         const targetPkg = this.resolveKernelPackagePath(kernelDir, e.name)
         if (!targetPkg) {
           skipped.push(e.name)
@@ -213,11 +216,64 @@ export class KernelManager extends EventEmitter {
     return { relinked, skipped }
   }
 
-  /** 在内核目录中定位官方包路径：顶级 node_modules → .pnpm 扁平 → .pnpm store 布局 */
+  /**
+   * 快照第一锚点官方包链接（试启动门禁用）：返回当前 symlink 的 {name, target}。
+   * 试启动后 {@link restoreProfileAnchor} 精确还原，保证门禁对链接完全无副作用
+   * （恢复 relink 会改变路径形式，如 store 布局↔扁平，可能让运行中进程的已加载模块
+   * 与新加载模块路径不一致 → 双模块实例）。
+   */
+  snapshotProfileAnchor(): Array<{ name: string; target: string }> {
+    const out: Array<{ name: string; target: string }> = []
+    try {
+      const cfg = configStore.get()
+      const dshHome = cfg.dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+      const anchorDir = path.join(dshHome, 'profiles', 'web', 'node_modules', '@deepseek-ai')
+      if (!fs.existsSync(anchorDir)) return out
+      for (const e of fs.readdirSync(anchorDir, { withFileTypes: true })) {
+        if (!e.isSymbolicLink()) continue
+        try {
+          out.push({ name: e.name, target: fs.readlinkSync(path.join(anchorDir, e.name)) })
+        } catch {
+          /* noop */
+        }
+      }
+    } catch {
+      /* noop */
+    }
+    return out
+  }
+
+  /** 按快照精确还原第一锚点链接（先删现有链接，再按快照目标重建；幂等） */
+  restoreProfileAnchor(snapshot: Array<{ name: string; target: string }>): void {
+    try {
+      const cfg = configStore.get()
+      const dshHome = cfg.dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+      const anchorDir = path.join(dshHome, 'profiles', 'web', 'node_modules', '@deepseek-ai')
+      if (!fs.existsSync(anchorDir)) return
+      for (const s of snapshot) {
+        try {
+          const linkPath = path.join(anchorDir, s.name)
+          // 只处理已是链接的条目（避免覆盖 pnpm 真实目录）
+          if (!fs.lstatSync(linkPath).isSymbolicLink()) continue
+          const current = fs.readlinkSync(linkPath)
+          if (current === s.target) continue
+          fs.rmSync(linkPath, { force: true })
+          fs.symlinkSync(s.target, linkPath, process.platform === 'win32' ? 'junction' : 'dir')
+        } catch {
+          /* noop */
+        }
+      }
+    } catch {
+      /* noop */
+    }
+  }
+
+  /** 在内核目录中定位官方包路径：顶级 node_modules → .pnpm store 布局 → .pnpm 扁平
+   *  （store 布局优先于扁平：host 组合（dsh-base/web-app bundle）从 pnpm store 路径解析，
+   *   第一锚点指向扁平会与 host 双实例 → typert codec 校验失败，v0.8.3 实测） */
   private resolveKernelPackagePath(kernelDir: string, pkg: string): string | null {
     const candidates = [
-      path.join(kernelDir, 'node_modules', '@deepseek-ai', pkg),
-      path.join(kernelDir, 'node_modules', '.pnpm', 'node_modules', '@deepseek-ai', pkg)
+      path.join(kernelDir, 'node_modules', '@deepseek-ai', pkg)
     ]
     for (const c of candidates) {
       try {
@@ -235,6 +291,13 @@ export class KernelManager extends EventEmitter {
         const p = path.join(storeRoot, m.name, 'node_modules', '@deepseek-ai', pkg)
         if (fs.existsSync(p)) return p
       }
+    } catch {
+      /* noop */
+    }
+    // 扁平：.pnpm/node_modules/@deepseek-ai/<pkg>
+    const flat = path.join(kernelDir, 'node_modules', '.pnpm', 'node_modules', '@deepseek-ai', pkg)
+    try {
+      if (fs.existsSync(flat)) return flat
     } catch {
       /* noop */
     }

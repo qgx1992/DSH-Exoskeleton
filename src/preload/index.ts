@@ -38,7 +38,9 @@ const api: DesktopApi = {
     install: (pkg) => ipcRenderer.invoke('plugins:install', pkg),
     uninstall: (pkg) => ipcRenderer.invoke('plugins:uninstall', pkg),
     checkUpdate: () => ipcRenderer.invoke('plugins:checkUpdate'),
-    upgrade: (name, latest) => ipcRenderer.invoke('plugins:upgrade', name, latest)
+    upgrade: (name, latest) => ipcRenderer.invoke('plugins:upgrade', name, latest),
+    recommend: (name) => ipcRenderer.invoke('plugins:recommend', name),
+    unrecommend: (name) => ipcRenderer.invoke('plugins:unrecommend', name)
   },
   kernels: {
     installed: () => ipcRenderer.invoke('kernels:installed'),
@@ -47,6 +49,7 @@ const api: DesktopApi = {
     uninstall: (version) => ipcRenderer.invoke('kernels:uninstall', version),
     setDefault: (version) => ipcRenderer.invoke('kernels:setDefault', version),
     setMode: (mode) => ipcRenderer.invoke('kernels:setMode', mode),
+    trial: (version) => ipcRenderer.invoke('kernels:trial', version),
     checkUpdate: () => ipcRenderer.invoke('kernels:checkUpdate'),
     quota: () => ipcRenderer.invoke('kernels:quota'),
     onProgress: (callback) => subscribe('kernels:progress', callback)

@@ -34,7 +34,8 @@ const DEFAULTS: AppConfig = {
   activeProfileId: 'default',
   profiles: [{ id: 'default', name: '默认档案', kernelVersion: null, createdAt: Date.now() }],
   kernelsQuotaMB: 1024,
-  kernelRegistry: ''
+  kernelRegistry: '',
+  customRecommendedPlugins: []
 }
 
 const ENCRYPTED_PREFIX = 'enc:'
@@ -85,6 +86,14 @@ export class ConfigStore {
     const raw = cfg as unknown as { notifySessionDone: boolean | 'off' | 'per-turn' | 'aggregate' }
     if (typeof raw.notifySessionDone === 'boolean') {
       raw.notifySessionDone = raw.notifySessionDone ? 'per-turn' : 'off'
+    }
+    // 自定义推荐列表：旧配置缺失补空，并过滤形状不合法的条目
+    if (!Array.isArray(cfg.customRecommendedPlugins)) {
+      cfg.customRecommendedPlugins = []
+    } else {
+      cfg.customRecommendedPlugins = cfg.customRecommendedPlugins.filter(
+        (p) => !!p && typeof p.name === 'string' && typeof p.installTarget === 'string'
+      )
     }
     return cfg
   }

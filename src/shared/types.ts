@@ -2,6 +2,7 @@
  * @shared 主进程与渲染进程共享的类型定义
  * 对应开发文档 §6 API 设计
  */
+import type { RecommendedPlugin } from './recommended-plugins'
 
 /** DSH 服务状态 */
 export type DSHStatus = 'starting' | 'running' | 'stopped' | 'error'
@@ -82,6 +83,11 @@ export interface AppConfig {
   kernelsQuotaMB: number
   /** 内核安装 registry 根（空 = 官方 npmjs；如 https://registry.npmmirror.com 加速国内） */
   kernelRegistry: string
+  /**
+   * 用户自定义推荐插件（「已安装」行点「加入推荐」写入）；与内置 RECOMMENDED_PLUGINS
+   * 合并展示在推荐区，按 name 去重（内置优先），仅本面板可增删。
+   */
+  customRecommendedPlugins: RecommendedPlugin[]
 }
 
 /** 通知事件类型（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.1，壳↔webview 桥与插件的契约） */
@@ -179,6 +185,19 @@ export interface RuntimeInfo {
 }
 
 /** 内核更新检测结果（阶段 B：channels latest/rc） */
+/** 内核试启动检测结果（手动「检测」按钮与「设为默认」门禁共用语义） */
+export interface KernelTrialResult {
+  ok: boolean
+  /** 试启动耗时（秒） */
+  took: number
+  /** 是否携带兼容补丁启动 */
+  patchUsed: boolean
+  /** 成功时的 Web UI URL（含 token，老内核为纯端口地址） */
+  url: string | null
+  /** 失败摘要 */
+  error: string | null
+}
+
 export interface KernelUpdateInfo {
   /** 当前使用的内核版本（托管模式） */
   current: string | null
@@ -298,6 +317,12 @@ export interface InstalledPlugin {
   version: string
   /** 最近一次插件更新检测结果（null = 尚未检测） */
   update: PluginUpdateInfo | null
+  /**
+   * 当前生效内核的兼容补丁停用了该插件时的说明（loader 行 id + 原因）；
+   * 未停用 / 非托管内核 / 无补丁 时为 null。用于面板「已停用」徒章 + 悬停原因，
+   * 解释“装了却看不到效果”（如 alpha.2 停用 dshmarket / better-sidebar）。
+   */
+  compatDisabled: string | null
 }
 
 /** 插件更新检测结果（plugins:checkUpdate 逐插件产出） */
@@ -353,6 +378,10 @@ export interface DesktopApi {
     checkUpdate: () => Promise<InstalledPlugin[]>
     /** 升级插件到最新版（latest = 检测到的最新版本；npm 必须传精确版本，否则 range 内会 no-op） */
     upgrade: (name: string, latest?: string) => Promise<PluginActionResult>
+    /** 把已安装插件加入「推荐插件」列表（自定义推荐，持久化于 config） */
+    recommend: (name: string) => Promise<SaveResult>
+    /** 从推荐列表移除自定义推荐项（内置精选不可移除） */
+    unrecommend: (name: string) => Promise<SaveResult>
   }
   kernels: {
     installed: () => Promise<KernelInfo[]>
@@ -364,6 +393,8 @@ export interface DesktopApi {
     setMode: (mode: 'managed' | 'system') => Promise<SaveResult>
     /** 检查内核更新（dist-tags latest/rc） */
     checkUpdate: () => Promise<KernelUpdateInfo>
+    /** 手动试启动检测（与「设为默认」门禁同路径；不切换默认，结果写入 bootHealth） */
+    trial: (version: string) => Promise<KernelTrialResult>
     /** 内核/运行时存储统计（配额） */
     quota: () => Promise<KernelQuota>
     /** 订阅安装/切换进度 */

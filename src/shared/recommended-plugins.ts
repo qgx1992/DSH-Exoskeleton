@@ -13,7 +13,8 @@ export interface RecommendedPlugin {
   /** 中文简介 */
   description: string
   /** 来源 */
-  source: 'npm' | 'github'
+  /** 来源（local = 用户把本地 link: 插件加入推荐） */
+  source: 'npm' | 'github' | 'local'
   /** 主页链接 */
   url: string
   /** 内置默认启用：首次运行（服务就绪时）自动安装并注册进 bundles，新装即自带 */

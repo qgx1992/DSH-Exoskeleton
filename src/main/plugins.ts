@@ -14,8 +14,9 @@ import { dshManager } from './dsh-manager'
 import { backupManager } from './backup'
 import { configStore } from './config'
 import { compareVersions } from '../shared/version'
-import { RECOMMENDED_PLUGINS } from '../shared/recommended-plugins'
-import type { PluginCatalogItem, InstalledPlugin, PluginActionResult, PluginUpdateInfo } from '../shared/types'
+import { RECOMMENDED_PLUGINS, type RecommendedPlugin } from '../shared/recommended-plugins'
+import { COMPAT_PATCHES } from './kernel-compat'
+import type { PluginCatalogItem, InstalledPlugin, PluginActionResult, PluginUpdateInfo, SaveResult } from '../shared/types'
 
 const GITHUB_SEARCH = 'https://api.github.com/search/repositories?q=topic:dsh-plugin&sort=stars&order=desc&per_page=40'
 const NPM_SEARCH = 'https://registry.npmjs.org/-/v1/search?text=keywords:dsh-plugin&size=30'
@@ -30,16 +31,66 @@ function profileDir(): string {
 export function listInstalled(): InstalledPlugin[] {
   const dir = profileDir()
   const out: InstalledPlugin[] = []
+  // 当前生效内核的兼容补丁会按 loader 行 id 停用部分插件（如 alpha.2 下的 dshmarket /
+  // better-sidebar）：这类“装了但看不到效果”在面板上显式标出，避免用户误判为安装失败。
+  const compat = activeCompatDisabledRows()
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8'))
     const deps: Record<string, string> = pkg?.dependencies ?? {}
     for (const [name, version] of Object.entries(deps)) {
-      out.push({ name, version: String(version), update: null })
+      let compatDisabled: string | null = null
+      if (compat) {
+        const hit = pluginEntryRowIds(name).filter((id) => compat.rows.has(id))
+        if (hit.length > 0) {
+          compatDisabled =
+            '当前内核 v' + (configStore.get().defaultKernelVersion ?? '?') + ' 的兼容补丁停用了该插件（entry: ' + hit.join(', ') + '）。' +
+            '插件已安装但在本内核下不加载，升级插件适配或换内核后自动恢复。'
+        }
+      }
+      out.push({ name, version: String(version), update: null, compatDisabled })
     }
   } catch (err) {
     logger.warn('read installed plugins failed', err)
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * 当前生效托管内核的兼容补丁停用行（loader entry id 集合）；
+ * 系统 dsh 模式 / 无默认内核 / 该版本无补丁 → null。
+ */
+function activeCompatDisabledRows(): { rows: Set<string>; note: string } | null {
+  try {
+    const cfg = configStore.get()
+    if (cfg.kernelMode !== 'managed') return null
+    const version = cfg.defaultKernelVersion
+    if (!version) return null
+    const spec = COMPAT_PATCHES[version]
+    if (!spec || spec.rows.length === 0) return null
+    return { rows: new Set(spec.rows), note: spec.note }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 解析插件包自带的 bundle 补丁层（cordis.patch.yml），取它 insert 的 loader 行 id。
+ * 形如 `- insert:` 下的 `- id: dsh-market` / `name: 'dshmarket'`。补丁文件很小且形状固定，
+ * 正则足够（不为这一个字段引入 YAML 解析依赖）。
+ */
+function pluginEntryRowIds(name: string): string[] {
+  try {
+    const file = path.join(nodeModulesDir(), name, 'cordis.patch.yml')
+    const text = fs.readFileSync(file, 'utf-8')
+    const ids: string[] = []
+    for (const m of text.matchAll(/^\s*-?\s*id:\s*['"]?([A-Za-z0-9._-]+)['"]?\s*$/gm)) {
+      const id = m[1]
+      if (id && !ids.includes(id)) ids.push(id)
+    }
+    return ids
+  } catch {
+    return []
+  }
 }
 
 function nodeModulesDir(): string {
@@ -367,5 +418,61 @@ export async function provisionDefaultPlugins(): Promise<void> {
     logger.info('default plugins provisioned', { names: DEFAULT_PLUGINS.map((p) => p.name) })
   } catch (err) {
     logger.warn('default plugin provisioning error', err instanceof Error ? err.message : String(err))
+  }
+}
+
+/**
+ * 把已安装插件加入「推荐插件」列表（用户自定义推荐，持久化于 config.customRecommendedPlugins）。
+ * installTarget 取 profile dependencies 的声明 spec（github: / link: / 版本号），
+ * 保证推荐区点「安装」能装回同一来源；内置精选已有同名项时拒绝（避免重复条目）。
+ */
+export function recommendPlugin(name: string): SaveResult {
+  const trimmed = (name ?? '').trim()
+  if (!trimmed) return { ok: false, error: '插件名不能为空' }
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(profileDir(), 'package.json'), 'utf-8'))
+    const declared: unknown = manifest?.dependencies?.[trimmed]
+    if (typeof declared !== 'string' || !declared) return { ok: false, error: '插件未安装：' + trimmed }
+    if (RECOMMENDED_PLUGINS.some((p) => p.name === trimmed)) {
+      return { ok: false, error: '该插件已在内置推荐列表中' }
+    }
+    // 描述/主页尽量从已装包补齐；读不到时用占位（不影响安装）
+    let meta: { description?: unknown; homepage?: unknown } = {}
+    try {
+      meta = JSON.parse(fs.readFileSync(path.join(nodeModulesDir(), trimmed, 'package.json'), 'utf-8'))
+    } catch {
+      /* noop */
+    }
+    const src = detectSource(declared)
+    const entry: RecommendedPlugin = {
+      installTarget: declared,
+      name: trimmed,
+      description: typeof meta.description === 'string' && meta.description.trim() ? meta.description.trim() : '已加入推荐的插件',
+      source: src === 'github' ? 'github' : src === 'local' ? 'local' : 'npm',
+      url: typeof meta.homepage === 'string' ? meta.homepage : ''
+    }
+    const cfg = configStore.get()
+    const list = cfg.customRecommendedPlugins ?? []
+    if (list.some((p) => p.name === trimmed)) return { ok: true }
+    configStore.set({ customRecommendedPlugins: [...list, entry] })
+    logger.info('plugin added to recommendations', { name: trimmed, source: entry.source })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/** 从推荐列表移除自定义推荐项（内置精选不可移除） */
+export function unrecommendPlugin(name: string): SaveResult {
+  try {
+    const cfg = configStore.get()
+    const list = cfg.customRecommendedPlugins ?? []
+    const next = list.filter((p) => p.name !== name)
+    if (next.length === list.length) return { ok: false, error: '该插件不在自定义推荐列表中' }
+    configStore.set({ customRecommendedPlugins: next })
+    logger.info('plugin removed from recommendations', { name })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

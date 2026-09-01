@@ -114,13 +114,28 @@ export function cloneProfileHome(dshHome: string, profileName = 'web'): { home: 
       fs.mkdirSync(path.join(cloneProfile, 'node_modules'), { recursive: true })
     }
   }
-  // 维护兜底层 $DSH_HOME/profiles/node_modules 同样 junction（官方文档：裸插件名解析路径）
+  // 维护兜底层 $DSH_HOME/profiles/node_modules（官方文档：裸插件名解析路径）
+  // 注意：必须【复制】而非 junction——被测内核启动时会 heal 重建这个目录里的链接
+  // （moduleFallback），junction 会把被测内核写的链接直接落回真实目录（v0.8.3 实测：
+  // trialBoot 0.1.1 把第二锚点 dsh-client-runtime/dsh-host-apiproxy 改写指向 0.1.1，
+  // 污染扩散到第一锚点，导致 alpha.2 下 cost-meter typert 校验失败崩溃）。
+  // 复制链接到克隆目录（目标不变），被测内核 heal 只影响克隆副本。
   const realFallback = path.join(dshHome, 'profiles', 'node_modules')
   if (fs.existsSync(realFallback)) {
     try {
-      fs.symlinkSync(realFallback, path.join(home, 'profiles', 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir')
-    } catch {
-      /* 最坏情况缺兜底层，试启动仍能覆盖绝大多数场景 */
+      const cloneFallback = path.join(home, 'profiles', 'node_modules')
+      fs.mkdirSync(cloneFallback, { recursive: true })
+      for (const e of fs.readdirSync(realFallback, { withFileTypes: true })) {
+        if (!e.isSymbolicLink()) continue
+        try {
+          const target = fs.readlinkSync(path.join(realFallback, e.name))
+          fs.symlinkSync(target, path.join(cloneFallback, e.name), process.platform === 'win32' ? 'junction' : 'dir')
+        } catch {
+          /* noop */
+        }
+      }
+    } catch (err) {
+      logger.warn('compat probe: profile fallback copy failed, boot may differ from production', err)
     }
   }
   // home 级用户补丁层（$DSH_HOME/cordis.patch.yml，机器级偏好）
@@ -200,6 +215,16 @@ export async function trialBootManagedKernel(
     const patchArgs = opts.patchPaths === undefined ? compatPatchArgsFor(version) : (opts.patchPaths ?? [])
     const patchUsed = patchArgs.length > 0
     const clone = cloneProfileHome(dshHome)
+    // R-24 门禁环境对齐：试启动前先把真实第一锚点（profiles/web/node_modules/@deepseek-ai）
+    // relink 到被测内核（克隆目录 junction 引用真实目录，自动跟随）——实际切换后 doStart
+    // 也会这么干，门禁因此测的是与真实启动完全一致的环境（避免"门禁说行/实际不行"失真）。
+    // 先快照原链接，结束后 restoreProfileAnchor 精确还原（路径形式不变，无副作用）。
+    const anchorSnapshot = kernelManager.snapshotProfileAnchor()
+    try {
+      kernelManager.relinkProfileAnchor(version)
+    } catch (err) {
+      logger.warn('kernel trial boot: relink profile anchor failed', err)
+    }
     const args = [binJs, 'web', ...patchArgs, '--host', '127.0.0.1', '--port', '0', '--no-open']
     logger.info('kernel trial boot', { version, patchUsed, patchArgs, cloneHome: clone.home })
 
@@ -261,6 +286,8 @@ export async function trialBootManagedKernel(
     }
     if (child.exitCode === null && child.signalCode === null) killTree(child.pid ?? 0)
     clone.cleanup()
+    // 门禁无副作用：按快照精确还原第一锚点链接（路径形式不变）
+    kernelManager.restoreProfileAnchor(anchorSnapshot)
     return result
   } catch (err) {
     return {

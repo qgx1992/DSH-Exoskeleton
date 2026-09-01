@@ -4,6 +4,7 @@ import { RECOMMENDED_PLUGINS, type RecommendedPlugin } from '../../../shared/rec
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, Notice } from '../ui/Card'
+import { RowNotice, type RowMessage } from '../ui/RowNotice'
 import { EmptyState } from '../ui/EmptyState'
 import { IconSearch } from '../ui/icons'
 
@@ -15,7 +16,21 @@ export function PluginsTab(): React.JSX.Element {
   const [busyName, setBusyName] = useState<string | null>(null)
   const [installingAll, setInstallingAll] = useState(false)
   const [checkingUpdates, setCheckingUpdates] = useState(false)
-  const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const [message, setMessage] = useState<RowMessage | null>(null)
+  /** 行内结果提示（key = 插件 name / installTarget）：操作结果跟随触发它的插件行，
+   *  而非页面顶/底横幅（长列表里看不到反馈）；顶部全量操作（检查更新/一键安装）仍用 message */
+  const [rowMsg, setRowMsg] = useState<Record<string, RowMessage | null>>({})
+  const setRow = (key: string, m: RowMessage | null): void => {
+    setRowMsg((prev) => ({ ...prev, [key]: m }))
+  }
+
+  const [recBusy, setRecBusy] = useState<string | null>(null)
+  /** 用户自定义推荐（config.customRecommendedPlugins）；与内置精选合并展示在推荐区 */
+  const [customRecs, setCustomRecs] = useState<RecommendedPlugin[]>([])
+  const refreshCustomRecs = useCallback(async (): Promise<void> => {
+    const cfg = await window.dshDesktop.config.get()
+    setCustomRecs(cfg.customRecommendedPlugins ?? [])
+  }, [])
 
   const refreshInstalled = useCallback(async () => {
     const list = await window.dshDesktop.plugins.installed()
@@ -59,21 +74,52 @@ export function PluginsTab(): React.JSX.Element {
   useEffect(() => {
     void refreshInstalled()
     void loadCatalog('')
-  }, [loadCatalog, refreshInstalled])
+    void refreshCustomRecs()
+  }, [loadCatalog, refreshCustomRecs, refreshInstalled])
 
   const isInstalled = (pkg: string): boolean => installed.some((i) => i.name === pkg)
   const isRecommendedInstalled = (p: RecommendedPlugin): boolean => installed.some((i) => i.name === p.name)
 
+  /** 推荐区数据源 = 内置精选 + 用户自定义（按 name 去重，内置优先） */
+  const allRecommended: RecommendedPlugin[] = [
+    ...RECOMMENDED_PLUGINS,
+    ...customRecs.filter((c) => !RECOMMENDED_PLUGINS.some((r) => r.name === c.name))
+  ]
+  const isCustomRecommended = (name: string): boolean => customRecs.some((c) => c.name === name)
+  const isRecommendedAnywhere = (name: string): boolean => allRecommended.some((r) => r.name === name)
+
+  /** 加入推荐：写入自定义推荐列表，结果就地显示在该插件行 */
+  const addRecommend = async (name: string): Promise<void> => {
+    setRecBusy(name)
+    setRow(name, null)
+    try {
+      const r = await window.dshDesktop.plugins.recommend(name)
+      setRow(name, r.ok ? { type: 'ok', text: '已加入推荐列表（见下方「推荐插件」区）' } : { type: 'err', text: r.error ?? '加入推荐失败' })
+      await refreshCustomRecs()
+    } finally {
+      setRecBusy(null)
+    }
+  }
+
+  /** 移出推荐：仅自定义项可移除，结果就地显示在推荐区该行 */
+  const removeRecommend = async (p: RecommendedPlugin): Promise<void> => {
+    setRecBusy(p.name)
+    setRow('rec:' + p.name, null)
+    try {
+      const r = await window.dshDesktop.plugins.unrecommend(p.name)
+      setRow('rec:' + p.name, r.ok ? { type: 'ok', text: '已移出推荐列表' } : { type: 'err', text: r.error ?? '移出失败' })
+      await refreshCustomRecs()
+    } finally {
+      setRecBusy(null)
+    }
+  }
+
   const install = async (pkg: string): Promise<void> => {
     setBusyName(pkg)
-    setMessage(null)
+    setRow(pkg, null)
     try {
       const r = await window.dshDesktop.plugins.install(pkg)
-      setMessage(
-        r.ok
-          ? { type: 'ok', text: '已安装 ' + pkg + '（安装前已自动备份）' }
-          : { type: 'err', text: r.error ?? '安装 ' + pkg + ' 失败' }
-      )
+      setRow(pkg, r.ok ? { type: 'ok', text: '已安装（安装前已自动备份）' } : { type: 'err', text: r.error ?? '安装失败' })
       await refreshInstalled()
     } finally {
       setBusyName(null)
@@ -81,7 +127,7 @@ export function PluginsTab(): React.JSX.Element {
   }
 
   const installAllRecommended = async (): Promise<void> => {
-    const todo = RECOMMENDED_PLUGINS.filter((p) => !isRecommendedInstalled(p))
+    const todo = allRecommended.filter((p) => !isRecommendedInstalled(p))
     if (todo.length === 0) return
     setInstallingAll(true)
     setMessage(null)
@@ -108,14 +154,10 @@ export function PluginsTab(): React.JSX.Element {
   const uninstall = async (name: string): Promise<void> => {
     if (!window.confirm('卸载插件「' + name + '」？卸载前会自动创建备份快照。')) return
     setBusyName(name)
-    setMessage(null)
+    setRow(name, null)
     try {
       const r = await window.dshDesktop.plugins.uninstall(name)
-      setMessage(
-        r.ok
-          ? { type: 'ok', text: '已卸载 ' + name + '（卸载前已自动备份）' }
-          : { type: 'err', text: r.error ?? '卸载 ' + name + ' 失败' }
-      )
+      setRow(name, r.ok ? { type: 'ok', text: '已卸载（卸载前已自动备份）' } : { type: 'err', text: r.error ?? '卸载失败' })
       await refreshInstalled()
     } finally {
       setBusyName(null)
@@ -124,14 +166,10 @@ export function PluginsTab(): React.JSX.Element {
 
   const upgrade = async (name: string, latest?: string): Promise<void> => {
     setBusyName(name)
-    setMessage(null)
+    setRow(name, null)
     try {
       const r = await window.dshDesktop.plugins.upgrade(name, latest)
-      setMessage(
-        r.ok
-          ? { type: 'ok', text: '已升级插件 ' + name + (latest ? ' 到 v' + latest : '') + '（升级前已自动备份）' }
-          : { type: 'err', text: r.error ?? '升级 ' + name + ' 失败' }
-      )
+      setRow(name, r.ok ? { type: 'ok', text: '已升级到 v' + (latest ?? 'latest') + '（升级前已自动备份）' } : { type: 'err', text: r.error ?? '升级失败' })
       // 升级成功后静默重检，让「有新版本」徽标即时归零
       if (r.ok) await refreshUpdates()
     } finally {
@@ -139,7 +177,7 @@ export function PluginsTab(): React.JSX.Element {
     }
   }
 
-  const pendingCount = RECOMMENDED_PLUGINS.filter((p) => !isRecommendedInstalled(p)).length
+  const pendingCount = allRecommended.filter((p) => !isRecommendedInstalled(p)).length
 
   return (
     <div className="flex flex-col gap-4">
@@ -167,7 +205,8 @@ export function PluginsTab(): React.JSX.Element {
               const upd = p.update
               const upgradable = !!upd?.available && !!upd.latest
               return (
-                <div key={p.name} className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
+                <div key={p.name}>
+                  <div className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
                   <span className="min-w-0 flex-1 truncate font-mono text-sm text-ink" title={upd?.current && upd.current !== upd.declared ? '当前实际 v' + upd.current : p.name}>
                     {p.name}
                   </span>
@@ -183,6 +222,13 @@ export function PluginsTab(): React.JSX.Element {
                       检测失败
                     </span>
                   )}
+                  {/* 当前内核的兼容补丁停用了该插件（装了但不加载）：显式标出并悬停说明，
+                      避免“装了看不到效果”被误判为安装失败 */}
+                  {p.compatDisabled && (
+                    <Badge tone="amber" title={p.compatDisabled}>
+                      已停用
+                    </Badge>
+                  )}
                   {upgradable && (
                     <Button
                       variant="primary"
@@ -194,9 +240,22 @@ export function PluginsTab(): React.JSX.Element {
                       {busyName === p.name ? '升级中…' : '升级'}
                     </Button>
                   )}
+                  {/* 已安装 → 一键加入推荐（内置精选/已在列表则显示禁用态） */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={recBusy === p.name}
+                    disabled={recBusy !== null || busyName === p.name || isRecommendedAnywhere(p.name)}
+                    onClick={() => void addRecommend(p.name)}
+                    title={isRecommendedAnywhere(p.name) ? '已在推荐列表中' : '加入推荐列表，展示在下方「推荐插件」区'}
+                  >
+                    {recBusy === p.name ? '加入中…' : isRecommendedAnywhere(p.name) ? '已推荐' : '加入推荐'}
+                  </Button>
                   <Button variant="danger" size="sm" disabled={busyName === p.name} onClick={() => void uninstall(p.name)}>
                     {busyName === p.name ? '处理中…' : '卸载'}
                   </Button>
+                  </div>
+                  <RowNotice msg={rowMsg[p.name]} />
                 </div>
               )
             })}
@@ -220,20 +279,25 @@ export function PluginsTab(): React.JSX.Element {
         </div>
         <p className="mt-1 text-xs text-ink-3">精选社区插件，覆盖搜索、视觉、计费、侧边栏、远程访问与右键菜单，一键补齐常用能力。</p>
         <div className="mt-3 space-y-1.5">
-          {RECOMMENDED_PLUGINS.map((p) => {
+          {allRecommended.map((p) => {
             const done = isRecommendedInstalled(p)
             const busy = busyName === p.installTarget
+            const custom = isCustomRecommended(p.name)
             return (
-              <div key={p.name} className="flex items-start gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
+              <div key={p.name}>
+              <div className="flex items-start gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-mono text-sm font-medium text-accent">{p.name}</span>
                     {p.defaultEnabled && <Badge tone="cyan">默认启用</Badge>}
-                    <Badge tone={p.source === 'github' ? 'gray' : 'green'}>{p.source === 'github' ? 'GitHub' : 'npm'}</Badge>
+                    {custom && <Badge tone="gray" title="由你在「已安装」列表加入推荐">自定义</Badge>}
+                    <Badge tone={p.source === 'github' ? 'gray' : p.source === 'local' ? 'gray' : 'green'}>
+                      {p.source === 'github' ? 'GitHub' : p.source === 'local' ? '本地' : 'npm'}
+                    </Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-ink-2">{p.description}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => void window.dshDesktop.app.openExternal(p.url)}>
+                <Button variant="ghost" size="sm" disabled={!p.url} onClick={() => void window.dshDesktop.app.openExternal(p.url)}>
                   主页
                 </Button>
                 <Button
@@ -245,6 +309,21 @@ export function PluginsTab(): React.JSX.Element {
                 >
                   {busy ? '安装中…' : done ? '已安装' : '安装'}
                 </Button>
+                {/* 自定义推荐可移出（内置精选不可移除） */}
+                {custom && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    loading={recBusy === p.name}
+                    disabled={recBusy !== null}
+                    onClick={() => void removeRecommend(p)}
+                    title="从推荐列表移除（不会卸载插件）"
+                  >
+                    移出推荐
+                  </Button>
+                )}
+              </div>
+              <RowNotice msg={rowMsg[p.installTarget] ?? rowMsg['rec:' + p.name]} />
               </div>
             )
           })}
@@ -285,10 +364,8 @@ export function PluginsTab(): React.JSX.Element {
             />
           )}
           {catalog.map((p) => (
-            <div
-              key={p.source + '-' + p.packageName}
-              className="flex items-start gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2"
-            >
+            <div key={p.source + '-' + p.packageName}>
+              <div className="flex items-start gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="truncate font-mono text-sm font-medium text-accent">{p.packageName}</span>
@@ -317,6 +394,8 @@ export function PluginsTab(): React.JSX.Element {
               >
                 {busyName === p.packageName ? '安装中…' : isInstalled(p.packageName) ? '已安装' : '安装'}
               </Button>
+              </div>
+              <RowNotice msg={rowMsg[p.packageName]} />
             </div>
           ))}
         </div>

@@ -11,7 +11,7 @@ import { updater } from './updater'
 import { rebuildMenu } from './tray'
 import { checkSetupStatus, saveApiKey, clearApiKey } from './setup'
 import { backupManager } from './backup'
-import { listInstalled, listCatalog, installPlugin, uninstallPlugin, checkPluginUpdates, upgradePlugin } from './plugins'
+import { listInstalled, listCatalog, installPlugin, uninstallPlugin, checkPluginUpdates, upgradePlugin, recommendPlugin, unrecommendPlugin } from './plugins'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { trialBootManagedKernel, compatPatchPathFor } from './kernel-compat'
@@ -71,6 +71,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('plugins:uninstall', (_e, pkg: string) => uninstallPlugin(pkg))
   ipcMain.handle('plugins:checkUpdate', () => checkPluginUpdates())
   ipcMain.handle('plugins:upgrade', (_e, name: string, latest?: string) => upgradePlugin(name, latest))
+  ipcMain.handle('plugins:recommend', (_e, name: string) => recommendPlugin(name))
+  ipcMain.handle('plugins:unrecommend', (_e, name: string) => unrecommendPlugin(name))
 
   // ---------- 内核管理（多版本共存）----------
   ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())
@@ -132,6 +134,21 @@ export function registerIpcHandlers(): void {
       await dshManager.restart()
     }
     return { ok: cfg.kernelMode === mode }
+  })
+  /**
+   * 手动试启动检测：与「设为默认」门禁同路径（trialBootManagedKernel），
+   * 不切换默认、不改 config，只把结果写入 bootHealth 供面板展示。
+   */
+  ipcMain.handle('kernels:trial', async (_e, version: string) => {
+    if (!kernelManager.listInstalled().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装' }
+    }
+    const t0 = Date.now()
+    const trial = await trialBootManagedKernel(version, dshManager.resolveDshHome(), { timeoutMs: 60_000 })
+    const took = Math.round((Date.now() - t0) / 1000)
+    kernelManager.setBootHealth(version, trial.ok ? 'ok' : 'failed', trial.ok ? null : trial.error)
+    if (trial.ok) kernelManager.setCompatPatch(version, trial.patchUsed ? compatPatchPathFor(version) : null)
+    return { ok: trial.ok, took, patchUsed: trial.patchUsed, url: trial.url, error: trial.error }
   })
   ipcMain.handle('kernels:checkUpdate', () => kernelManager.checkUpdate())
   ipcMain.handle('kernels:quota', () => kernelManager.quota())

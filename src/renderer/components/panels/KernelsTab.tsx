@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/types'
 import { DEFAULT_KERNEL_VERSION } from '../../../shared/kernel-defaults'
 import { Button } from '../ui/Button'
+import { RowNotice, type RowMessage } from '../ui/RowNotice'
 import { Badge } from '../ui/Badge'
 import { Select } from '../ui/Field'
 import { Card, Notice } from '../ui/Card'
@@ -30,7 +31,14 @@ export function KernelsTab(): React.JSX.Element {
   const [installing, setInstalling] = useState<string | null>(null)
   const [progress, setProgress] = useState<KernelProgress | null>(null)
   const [busyVersion, setBusyVersion] = useState<string | null>(null)
+  const [trialVersion, setTrialVersion] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  /** 行内结果提示（key = 内核版本）：检测/切换/卸载失败等结果跟随对应版本行，
+   *  不再用页面底部全局横幅（列表滚动后看不到反馈）；卸载成功后行消失，改用全局提示 */
+  const [rowMsg, setRowMsg] = useState<Record<string, RowMessage | null>>({})
+  const setRow = (key: string, m: RowMessage | null): void => {
+    setRowMsg((prev) => ({ ...prev, [key]: m }))
+  }
 
   // 阶段 B：内置 Node 运行时
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
@@ -121,10 +129,12 @@ export function KernelsTab(): React.JSX.Element {
 
   const setDefault = async (v: string | null): Promise<void> => {
     setBusyVersion(v ?? '(none)')
+    if (v) setRow(v, null)
     const r = await window.dshDesktop.kernels.setDefault(v)
     setBusyVersion(null)
-    if (!r.ok) setMessage({ type: 'err', text: r.error ?? '设置失败' })
-    else if (r.warning) setMessage({ type: 'ok', text: r.warning })
+    const m: RowMessage = !r.ok ? { type: 'err', text: r.error ?? '设置失败' } : r.warning ? { type: 'ok', text: r.warning } : { type: 'ok', text: '已切换默认内核' + (v ? ' v' + v : '（系统 dsh）') }
+    if (v) setRow(v, m)
+    else setMessage(m)
     await refresh()
   }
 
@@ -137,7 +147,25 @@ export function KernelsTab(): React.JSX.Element {
     setBusyVersion(k.version)
     const r = await window.dshDesktop.kernels.uninstall(k.version)
     setBusyVersion(null)
-    setMessage(r.ok ? { type: 'ok', text: '已卸载 v' + k.version } : { type: 'err', text: r.error ?? '卸载失败' })
+    // 成功：行会消失，提示只能走全局横幅；失败：留在该版本行内
+    if (r.ok) setMessage({ type: 'ok', text: '已卸载 v' + k.version })
+    else setRow(k.version, { type: 'err', text: r.error ?? '卸载失败' })
+    await refresh()
+  }
+
+  /** 手动试启动检测：与「设为默认」门禁同路径（trialBootManagedKernel），不切换默认；
+   *  结果写入 bootHealth（面板红/黄标签随之更新），失败展示门禁摘要。 */
+  const trialBoot = async (k: KernelInfo): Promise<void> => {
+    setTrialVersion(k.version)
+    setRow(k.version, null)
+    const r = await window.dshDesktop.kernels.trial(k.version)
+    setTrialVersion(null)
+    setRow(
+      k.version,
+      r.ok
+        ? { type: 'ok', text: '检测通过（' + r.took + 's' + (r.patchUsed ? '，需兼容补丁' : '') + '），现在可以设为默认' }
+        : { type: 'err', text: '检测失败（' + r.took + 's）：' + (r.error ?? '未知错误').slice(0, 300) }
+    )
     await refresh()
   }
 
@@ -317,7 +345,8 @@ export function KernelsTab(): React.JSX.Element {
         ) : (
           <div className="mt-3 space-y-1.5">
             {installed.map((k) => (
-              <div key={k.version} className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
+              <div key={k.version}>
+              <div className="flex items-center gap-3 rounded-control border border-rule/60 bg-canvas/50 px-3 py-2">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-medium text-ink">v{k.version}</span>
@@ -351,6 +380,16 @@ export function KernelsTab(): React.JSX.Element {
                   </Button>
                 )}
                 <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={trialVersion === k.version}
+                  disabled={trialVersion !== null || busyVersion === k.version}
+                  onClick={() => void trialBoot(k)}
+                  title="试启动检测（与「设为默认」门禁同路径，不切换默认）"
+                >
+                  {trialVersion === k.version ? '检测中…' : '检测'}
+                </Button>
+                <Button
                   variant="danger"
                   size="sm"
                   disabled={busyVersion === k.version || activeVersion === k.version}
@@ -358,6 +397,8 @@ export function KernelsTab(): React.JSX.Element {
                 >
                   卸载
                 </Button>
+              </div>
+              <RowNotice msg={rowMsg[k.version]} />
               </div>
             ))}
           </div>
