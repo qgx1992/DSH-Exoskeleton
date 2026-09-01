@@ -6,11 +6,25 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
-## [0.8.4] - 未发布
+## [0.8.5] - 2026-09-01
 
 ### ✨ 新功能
 - **询问卡等待通知（session-ask）**：Agent 提问（`ask_user_question`）或计划审批（`exit_plan_mode`）阻塞等待用户输入时发送 Windows 通知（标题、问题文本、轮次），点击跳回提问会话；用户回答后自动从操作中心撤销残留 toast。检测原理：`user-questions/request` 是仅实时推送的 waterfall 事件、不落会话日志，改用持久化影子信号——`tool/call`（白名单工具）入日志而同 `callId` 的 `tool/result` 未出现即卡片等待中（`zstd-worker` 增量解析 + `session-watcher` pending 状态机，已用真实会话数据验证 38/38 全配对）。设置面板新增「询问卡等待通知」开关（默认开）；非白名单工具的慢执行不误报；`turn/end(interrupted/aborted)` 与秒答（call+result 同批）均已处理。
 - 新增测试：`test-ask-detect.cjs`（合成多帧 zstd 会话验证检测状态机 9 场景）。
+
+## [0.8.4] - 2026-09-01
+
+> 补录：v0.8.4 发布时 CHANGELOG 漏记，内容按 Release 说明回填。
+
+### ✨ 新功能
+- **内核面板「检测」按钮**：每个内核行可单独试启动检测（与「设为默认」门禁同路径），不切换默认，结果就地显示并写入启动健康状态。
+- **插件「加入推荐」**：已安装行可一键把插件加入「推荐插件」列表（自定义推荐持久化，支持「移出推荐」）；推荐区可装回同一来源。
+- **「已停用」徽标**：被当前内核兼容补丁停用的插件在已安装列表显式标注，悬停说明原因与恢复条件。
+- **行内结果提示（RowNotice）**：检测 / 设为默认 / 卸载 / 升级 / 安装等操作结果就地跟随触发它的那一行。
+
+### 🐛 Bug 修复
+- **内核更新检测按发布通道取真实最新版**：综合 npm `dist-tags` 全部通道（latest/next/alpha/rc）取最大版本，UI 标注版本来源「通道」；修复 latest 停在旧稳定版导致的误报/漏报。
+- 一键升级提示位置就地跟随升级卡片；「设为默认」增加确认提醒。
 
 ## [0.8.3] - 2026-08-31
 
