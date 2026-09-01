@@ -23,6 +23,9 @@ function fmtSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+/** 升级卡片行内提示的 key（结果跟随「一键升级」按钮所在卡片，不进页底全局横幅） */
+const UPGRADE_ROW = '__upgrade__'
+
 export function KernelsTab(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
   const [installed, setInstalled] = useState<KernelInfo[]>([])
@@ -128,6 +131,13 @@ export function KernelsTab(): React.JSX.Element {
   }
 
   const setDefault = async (v: string | null): Promise<void> => {
+    // 切换默认会直接换内核并重启服务（Web UI 短暂中断），属于需知情操作 → 先弹确认
+    const tip = v
+      ? '设为默认内核 v' +
+        v +
+        ' 将：\n\n· 立即改用该内核，若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据存盘不丢失）\n· 该内核尚未「检测」通过时，会先做试启动检测，不通过则不切换\n· 随时可切回其他已安装内核\n\n确认切换？'
+      : '取消托管内核默认，改用系统 dsh？\n\n· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）\n\n确认？'
+    if (!window.confirm(tip)) return
     setBusyVersion(v ?? '(none)')
     if (v) setRow(v, null)
     const r = await window.dshDesktop.kernels.setDefault(v)
@@ -180,11 +190,11 @@ export function KernelsTab(): React.JSX.Element {
     const latest = update?.latest
     if (!latest) return
     setInstalling(latest)
-    setMessage(null)
+    setRow(UPGRADE_ROW, null)
     const r = await window.dshDesktop.kernels.install(latest, registry || undefined)
     if (!r.ok) {
       setInstalling(null)
-      setMessage({ type: 'err', text: r.error ?? '升级失败' })
+      setRow(UPGRADE_ROW, { type: 'err', text: r.error ?? '升级失败' })
       return
     }
     // R-1: 等待安装落盘并确认已安装后才设为默认（避免默认内核指向未安装版本）
@@ -199,14 +209,14 @@ export function KernelsTab(): React.JSX.Element {
     }
     if (!installedOk) {
       setInstalling(null)
-      setMessage({ type: 'err', text: '内核 v' + latest + ' 安装状态未确认（可能尚未落盘），未切换默认版本，请稍后重试' })
+      setRow(UPGRADE_ROW, { type: 'err', text: '内核 v' + latest + ' 安装状态未确认（可能尚未落盘），未切换默认版本，请稍后重试' })
       await refresh()
       void window.dshDesktop.kernels.checkUpdate().then(setUpdate)
       return
     }
     const dr = await window.dshDesktop.kernels.setDefault(latest)
     setInstalling(null)
-    setMessage(dr.ok ? { type: 'ok', text: '已升级并切换至 v' + latest } : { type: 'err', text: dr.error ?? '切换失败' })
+    setRow(UPGRADE_ROW, dr.ok ? { type: 'ok', text: '已升级并切换至 v' + latest } : { type: 'err', text: dr.error ?? '切换失败' })
     await refresh()
     void window.dshDesktop.kernels.checkUpdate().then(setUpdate)
   }
@@ -320,6 +330,12 @@ export function KernelsTab(): React.JSX.Element {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-warning">
               <span className="font-semibold">内核新版本可用：v{update.latest}</span>
+              {/* 标注版本来自哪个发布通道（latest/alpha/next/rc）：该包的 latest tag 会停在旧版 */}
+              {update.latestTag && (
+                <span className="ml-2 rounded bg-surface-2/60 px-1.5 py-px font-mono text-2xs text-ink-3" title="该版本来自 npm registry 的 dist-tag 发布通道">
+                  通道: {update.latestTag}
+                </span>
+              )}
               <span className="ml-2 text-xs text-warning/80">当前 v{update.current ?? '系统 dsh'}</span>
               {update.rc && update.rc !== update.latest && (
                 <span className="ml-2 rounded bg-surface-2/60 px-1.5 py-px font-mono text-2xs text-ink-3">rc: v{update.rc}</span>
@@ -329,6 +345,8 @@ export function KernelsTab(): React.JSX.Element {
               {installing !== null ? '升级中…' : '一键升级'}
             </Button>
           </div>
+          {/* 升级结果就地跟随本卡片（按钮旁），不再落在页面底部 */}
+          <RowNotice msg={rowMsg[UPGRADE_ROW]} />
         </section>
       )}
 

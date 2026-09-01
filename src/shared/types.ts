@@ -201,11 +201,17 @@ export interface KernelTrialResult {
 export interface KernelUpdateInfo {
   /** 当前使用的内核版本（托管模式） */
   current: string | null
-  /** registry dist-tags.latest（稳定版） */
+  /**
+   * 可升级的最新版：综合 npm dist-tags 的**全部通道**（latest / next / alpha / rc …）
+   * 取版本最大者。@deepseek-ai/dsh 的 latest tag 会长期停在旧稳定版（新版走 alpha 通道
+   * 发布），只看 dist-tags.latest 会把更旧的版本当作“新版本可用”推荐。
+   */
   latest: string | null
+  /** latest 来自哪个发布通道 tag（latest / next / alpha / rc），供 UI 标注来源 */
+  latestTag: string | null
   /** registry dist-tags.rc（预发布渠道） */
   rc: string | null
-  /** 是否有可升级的新稳定版 */
+  /** 是否有可升级的新版本（latest > current） */
   available: boolean
   /** 内核 registry 页面 */
   url: string | null

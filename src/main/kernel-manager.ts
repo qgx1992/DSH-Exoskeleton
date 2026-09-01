@@ -689,13 +689,14 @@ export class KernelManager extends EventEmitter {
     return null
   }
 
-  /** 内核更新检测（阶段 B：registry dist-tags latest/rc） */
+  /** 内核更新检测（阶段 B：综合 dist-tags 各通道取真实最新版） */
   async checkUpdate(): Promise<KernelUpdateInfo> {
     const cfg = configStore.get()
     const current = cfg.kernelMode === 'managed' ? cfg.defaultKernelVersion : null
     const info: KernelUpdateInfo = {
       current,
       latest: null,
+      latestTag: null,
       rc: null,
       available: false,
       url: 'https://www.npmjs.com/package/@deepseek-ai/dsh',
@@ -709,9 +710,23 @@ export class KernelManager extends EventEmitter {
       })
       if (!res.ok) throw new Error('registry ' + res.status)
       const data = (await res.json()) as { 'dist-tags'?: Record<string, string> }
-      info.latest = data['dist-tags']?.latest ?? null
-      info.rc = data['dist-tags']?.rc ?? null
-      info.available = !!info.latest && !!current && compareVersions(info.latest, current) > 0
+      const tags = data['dist-tags'] ?? {}
+      // 不能只看 dist-tags.latest：@deepseek-ai/dsh 的 latest 会长期停在旧稳定版（如 0.1.1-rc.2），
+      // 新版本走 alpha/next 通道发布。取全部通道里的最大版本作为“可升级最新版”，
+      // 否则会把比当前更旧的 tag 当成新版本（误报升级 + 漏报真新版）。
+      let latest: string | null = null
+      let latestTag: string | null = null
+      for (const [tag, ver] of Object.entries(tags)) {
+        if (typeof ver !== 'string' || !KernelManager.isValidVersion(ver)) continue
+        if (latest === null || compareVersions(ver, latest) > 0) {
+          latest = ver
+          latestTag = tag
+        }
+      }
+      info.latest = latest
+      info.latestTag = latestTag
+      info.rc = typeof tags['rc'] === 'string' ? tags['rc'] : null
+      info.available = !!latest && !!current && compareVersions(latest, current) > 0
       return info
     } catch (err) {
       info.error = err instanceof Error ? err.message : String(err)
