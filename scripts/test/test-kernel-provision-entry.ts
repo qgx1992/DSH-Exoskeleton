@@ -5,7 +5,7 @@
  * - DEFAULT_KERNEL_VERSION / KernelManager.isValidVersion：默认版本常量格式
  * esbuild 打包为 scripts/out/kernel-provision.cjs，供 test-kernel-provision.cjs 断言
  */
-export { ConfigStore } from '../src/main/config'
-export { needsDefaultKernelProvision } from '../src/main/kernel-provision'
-export { DEFAULT_KERNEL_VERSION } from '../src/shared/kernel-defaults'
-export { KernelManager } from '../src/main/kernel-manager'
+export { ConfigStore } from '../../src/main/config'
+export { needsDefaultKernelProvision } from '../../src/main/kernel-provision'
+export { DEFAULT_KERNEL_VERSION } from '../../src/shared/kernel-defaults'
+export { KernelManager } from '../../src/main/kernel-manager'

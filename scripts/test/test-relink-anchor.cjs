@@ -16,7 +16,7 @@ const assert = (cond, label) => {
 
 app.whenReady().then(async () => {
   try {
-    const { kernelManager } = require('./out/kernel-manager.cjs')
+    const { kernelManager } = require('../out/kernel-manager.cjs')
     kernelManager.init()
 
     const ver = '0.1.2-alpha.2'

@@ -12,7 +12,7 @@ const assert = (cond, label) => {
 
 app.whenReady().then(async () => {
   try {
-    const { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } = require('./out/profiles.cjs')
+    const { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } = require('../out/profiles.cjs')
     // 干净起点：删除测试 userData 的 config.json
     const cfgFile = path.join(app.getPath('userData'), 'config.json')
     if (fs.existsSync(cfgFile)) fs.rmSync(cfgFile)

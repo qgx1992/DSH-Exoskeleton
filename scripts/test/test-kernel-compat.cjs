@@ -16,8 +16,8 @@ const assert = (cond, label) => {
 
 app.whenReady().then(async () => {
   try {
-    const { COMPAT_PATCHES, compatPatchDirFor, ensureCompatPatch, compatPatchArgsFor } = require('./out/kernel-compat.cjs')
-    const { kernelManager } = require('./out/kernel-manager.cjs')
+    const { COMPAT_PATCHES, compatPatchDirFor, ensureCompatPatch, compatPatchArgsFor } = require('../out/kernel-compat.cjs')
+    const { kernelManager } = require('../out/kernel-manager.cjs')
 
     console.log('1) 补丁注册表')
     const spec = COMPAT_PATCHES['0.1.2-alpha.2']

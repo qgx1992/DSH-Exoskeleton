@@ -1,5 +1,5 @@
 // 勘察：会话文件尾部事件类型（找明确的"结束"标记）+ 前端事件通道
-import { scanZstdFrames, decompressFrame } from '../src/shared/session-jsonl.ts'
+import { scanZstdFrames, decompressFrame } from '../../src/shared/session-jsonl.ts'
 import fs from 'node:fs'
 
 const buf = fs.readFileSync(process.argv[2])

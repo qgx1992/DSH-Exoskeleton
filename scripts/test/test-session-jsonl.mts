@@ -6,7 +6,7 @@ import {
   decodeWorkspaceName,
   projectNameFromPath,
   truncate
-} from '../src/shared/session-jsonl.ts'
+} from '../../src/shared/session-jsonl.ts'
 import fs from 'node:fs'
 
 let passed = 0
@@ -44,7 +44,7 @@ assert(truncate('abcde', 3) === 'abc…', 'truncate')
 console.log('4) 帧扫描/真实文件（可选）')
 const file = process.argv[2]
 if (file && fs.existsSync(file)) {
-  const { scanZstdFrames, readSessionRecords } = await import('../src/shared/session-jsonl.ts')
+  const { scanZstdFrames, readSessionRecords } = await import('../../src/shared/session-jsonl.ts')
   const buf = fs.readFileSync(file)
   const frames = scanZstdFrames(buf)
   assert(frames.length > 0, `真实会话识别 ${frames.length} 个 frame`)

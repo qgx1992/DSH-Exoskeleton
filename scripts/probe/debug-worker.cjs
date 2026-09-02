@@ -25,7 +25,7 @@ const f2 = zlib.zstdCompressSync(
 fs.appendFileSync(file, f2)
 console.log('f1 len:', f1.length, 'total:', fs.statSync(file).size)
 
-const worker = spawn('node', [path.join(__dirname, 'zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
+const worker = spawn('node', [path.join(__dirname, '..', 'zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
 let out = ''
 let count = 0
 worker.stdout.on('data', (c) => {

@@ -51,7 +51,7 @@ npm run dev
 | :--- | :--- | :--- |
 | `npm run dev` | 开发模式（HMR） | 主进程改动需重启 |
 | `npm run typecheck` | TypeScript 双工程类型检查 | **任何改动收尾前必跑**（硬门禁） |
-| `npm test` | 主进程模块冒烟测试（`scripts/test-*.cjs`） | 涉及行为/测试范围的改动要跑 |
+| `npm test` | 主进程模块冒烟测试（`scripts/test/test-*.cjs`） | 涉及行为/测试范围的改动要跑 |
 | `npm run build` | 构建产物到 `out/` | |
 | `npm run dist` | 构建 + electron-builder 打包 | NSIS 安装版 + 便携版 + win-unpacked |
 | `npm run release:notes -- vX.Y.Z --out ...` | 生成中文更新日志 | 发布流程用，见 AGENT.md §0 |

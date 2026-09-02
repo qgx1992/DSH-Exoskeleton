@@ -26,7 +26,7 @@ const assert = (cond, label) => {
 
 app.whenReady().then(async () => {
   try {
-    const { backupManager } = require('./out/backup.cjs')
+    const { backupManager } = require('../out/backup.cjs')
 
     console.log('1) 创建手动存档')
     const info = await backupManager.create('unit-test-manual', 'manual')

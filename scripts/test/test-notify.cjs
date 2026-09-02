@@ -25,7 +25,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 app.whenReady().then(async () => {
   try {
-    const { notificationHub, configStore } = require('./out/notification-hub.cjs')
+    const { notificationHub, configStore } = require('../out/notification-hub.cjs')
 
     // 观察 deliver 的假 webview 通道 + click 回调
     const received = []
@@ -174,7 +174,7 @@ app.whenReady().then(async () => {
     assert(received.length === 1, '无探针（默认激活）→ 走 webview（向后兼容）', received)
 
     console.log('10) 协议激活 URL 解析/兜底（v0.8.2：操作中心点击修复）')
-    const { parseNotifyUrl, activateFromUrl } = require('./out/notification-hub.cjs')
+    const { parseNotifyUrl, activateFromUrl } = require('../out/notification-hub.cjs')
     const p1 = parseNotifyUrl('dsh-exo://notify?id=ev-1&session=abc123&kind=session-done')
     assert(p1 && p1.id === 'ev-1' && p1.session === 'abc123' && p1.kind === 'session-done', '标准 dsh-exo://notify URL 解析')
     const p2 = parseNotifyUrl('dsh-exo:notify?id=ev-2')

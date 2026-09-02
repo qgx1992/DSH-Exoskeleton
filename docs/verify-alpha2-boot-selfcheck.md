@@ -57,7 +57,7 @@
   1. profile 固定安装 `@deepseek-ai/dsh-settings@0.1.1-rc.2`（满足插件 peer 声明，两个插件无需禁用）——需在 ~/.dsh profile 安装依赖，属用户数据改动，待授权；
   2. 或等 dshmarket / dsh-better-sidebar 发布与 alpha.2 兼容的新版；
   3. 官方移除/改名相关 API 的下一版内核发布后，注册表补丁自动退役。
-- 最终实机探针（`scripts/probe-compat-gate.cjs`，真实内核 + 真实 profile 克隆）：
+- 最终实机探针（`scripts/probe/probe-compat-gate.cjs`，真实内核 + 真实 profile 克隆）：
   ```
   A) 无补丁试启动 → 失败（dsh-market installSettingsSection 缺失，复现真实崩溃面）
   B) 带三行补丁试启动 → ok=true url=http://127.0.0.1:41015/?token=… stderr 空

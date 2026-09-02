@@ -1,7 +1,7 @@
 // 本机实测探针（不进 npm test）：用真实内核 + 真实 profile 走一遍 R-24 试启动门禁。
 // 运行：node node_modules/esbuild/bin/esbuild src/main/kernel-compat.ts --bundle --platform=node
 //        --external:electron --external:@deepseek-ai/* --format=cjs --outfile=scripts/out/kernel-compat.cjs
-//       electron scripts/probe-compat-gate.cjs
+//       electron scripts/probe/probe-compat-gate.cjs
 // 断言：0.1.2-alpha.2 在真实 profile 上「无补丁必失败、带补丁必成功」——两段都验证。
 const { app } = require('electron')
 const os = require('os')
@@ -11,7 +11,7 @@ app.setName('DSH-Exoskeleton') // 对齐真实 userData（kernels/ 索引与内�
 
 app.whenReady().then(async () => {
   try {
-    const { trialBootManagedKernel, compatPatchArgsFor } = require('./out/kernel-compat.cjs')
+    const { trialBootManagedKernel, compatPatchArgsFor } = require('../out/kernel-compat.cjs')
     const dshHome = path.join(os.homedir(), '.dsh')
     const version = '0.1.2-alpha.2'
 

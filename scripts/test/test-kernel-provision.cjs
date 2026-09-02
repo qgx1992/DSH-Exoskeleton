@@ -13,10 +13,11 @@ const assert = (cond, label) => {
 app.whenReady().then(async () => {
   try {
     const { ConfigStore, needsDefaultKernelProvision, DEFAULT_KERNEL_VERSION, KernelManager } =
-      require('./out/kernel-provision.cjs')
+      require('../out/kernel-provision.cjs')
 
     console.log('1) 默认内核版本常量')
-    assert(DEFAULT_KERNEL_VERSION === '0.1.2-alpha.1', '默认内核为 0.1.2-alpha.1')
+    // 不断言具体版本号（每次升内核都会腐烂）；版本升级的把关在发布流程（见 kernel-defaults.ts 注释），此处只验格式
+    assert(typeof DEFAULT_KERNEL_VERSION === 'string' && DEFAULT_KERNEL_VERSION.length > 0, '默认内核版本常量非空: ' + DEFAULT_KERNEL_VERSION)
     assert(KernelManager.isValidVersion(DEFAULT_KERNEL_VERSION), '版本号格式合法（VERSION_RE）')
 
     console.log('2) 预置守卫（纯函数）')

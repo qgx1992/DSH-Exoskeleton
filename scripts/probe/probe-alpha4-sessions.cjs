@@ -1,11 +1,11 @@
 // 兼容性回归探针：用壳的生产 zstd-worker 解析 alpha.4 写出的真实会话文件。
-// 运行：node scripts/probe-alpha4-sessions.cjs
+// 运行：node scripts/probe/probe-alpha4-sessions.cjs
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
 const os = require('os')
 
-const worker = spawn('node', [path.resolve(__dirname, 'zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
+const worker = spawn('node', [path.resolve(__dirname, '..', 'zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
 let buf = ''
 const pending = new Map()
 let seqId = 0

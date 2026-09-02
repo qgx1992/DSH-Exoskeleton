@@ -25,7 +25,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 app.whenReady().then(async () => {
   let win = null
   try {
-    const preload = path.join(__dirname, 'out', 'dsh-view.cjs')
+    const preload = path.join(__dirname, '..', 'out', 'dsh-view.cjs')
     if (!fs.existsSync(preload)) throw new Error('preload bundle missing: ' + preload)
 
     win = new BrowserWindow({

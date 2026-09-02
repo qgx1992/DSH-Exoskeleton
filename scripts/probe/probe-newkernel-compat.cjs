@@ -1,7 +1,7 @@
 // 本机实测探针（不进 npm test）：新内核 0.1.2-alpha.3 / 0.1.2-alpha.4 兼容性门禁。
 // 运行：node node_modules/esbuild/bin/esbuild src/main/kernel-compat.ts --bundle --platform=node
 //        --external:electron --external:@deepseek-ai/* --format=cjs --outfile=scripts/out/kernel-compat.cjs
-//       electron scripts/probe-newkernel-compat.cjs
+//       electron scripts/probe/probe-newkernel-compat.cjs
 // 断言：
 //   A) alpha.3 / alpha.4 无补丁试启动（注册表未收录 → 生产路径就是无补丁）→ 预期成功；
 //      失败则用 alpha.2 补丁行做对照定位首个失败插件。
@@ -14,7 +14,7 @@ app.setName('DSH-Exoskeleton') // 对齐真实 userData（kernels/ 索引与内�
 
 app.whenReady().then(async () => {
   try {
-    const { trialBootManagedKernel, compatPatchArgsFor, compatPatchPathFor } = require('./out/kernel-compat.cjs')
+    const { trialBootManagedKernel, compatPatchArgsFor, compatPatchPathFor } = require('../out/kernel-compat.cjs')
     const dshHome = path.join(os.homedir(), '.dsh')
     const versions = ['0.1.2-alpha.3', '0.1.2-alpha.4']
     const results = {}

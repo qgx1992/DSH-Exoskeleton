@@ -1,6 +1,6 @@
 // 端到端验证（阶段 B 验收）：内置 Node 运行时真实下载 → 托管内核真实安装 → dsh web 启动 + 健康检查
 // 运行：node node_modules/esbuild/bin/esbuild src/main/runtime-manager.ts --bundle --platform=node --external:electron --format=cjs --outfile=scripts/out/runtime-manager.cjs
-//       electron scripts/e2e-kernel.cjs
+//       electron scripts/probe/e2e-kernel.cjs
 // 注意：需要网络（nodejs.org + npm registry），耗时数分钟；使用独立 DSH_HOME，不触碰 ~/.dsh
 const { app } = require('electron')
 const { spawn } = require('child_process')
@@ -18,8 +18,8 @@ const assert = (cond, label) => {
 app.whenReady().then(async () => {
   const dshHome = path.join(app.getPath('userData'), 'e2e-dsh-home')
   try {
-    const { runtimeManager } = require('./out/runtime-manager.cjs')
-    const { kernelManager } = require('./out/kernel-manager.cjs')
+    const { runtimeManager } = require('../out/runtime-manager.cjs')
+    const { kernelManager } = require('../out/kernel-manager.cjs')
     runtimeManager.init()
     kernelManager.init()
 

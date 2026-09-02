@@ -132,7 +132,7 @@ Stored in `%APPDATA%\DSH-Exoskeleton\config.json`:
 
 ## Kernel Management (Phase B/C/D shipped)
 
-- **First-launch default kernel provisioning (Phase D)**: on a fresh install, the default kernel (currently `0.1.2-alpha.1`, see `src/shared/kernel-defaults.ts`) is installed automatically on first launch and set as the default — machines without Node download the built-in runtime first; upgrading users are skipped automatically, and failures retry on the next launch.
+- **First-launch default kernel provisioning (Phase D)**: on a fresh install, the default kernel (currently `0.1.2-alpha.4`, see `src/shared/kernel-defaults.ts`) is installed automatically on first launch and set as the default — machines without Node download the built-in runtime first; upgrading users are skipped automatically, and failures retry on the next launch.
 - **Built-in Node runtime**: one-click download from the kernel panel (~30MB, nodejs.org; switchable to the npmmirror mirror via `DSH_NODE_DIST`). No system Node needed afterwards (truly zero barrier).
 - Install goes through the npm registry (switchable to the npmmirror mirror to accelerate domestic networks, see `docs/KERNEL-MANAGER-DESIGN.md`).
 - The dependency tree is large (a single kernel is ~50MB+), so the first install time depends on the network; the kernel store has disk quota protection (`kernelsQuotaMB`, default 1GB).

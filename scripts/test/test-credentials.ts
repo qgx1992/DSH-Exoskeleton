@@ -1,6 +1,6 @@
 /**
  * 独立测试 @shared/credentials 的解析/编辑逻辑（Node 24 原生运行 TS，无需 electron）
- * 运行：node --experimental-strip-types scripts/test-credentials.ts
+ * 运行：node --experimental-strip-types scripts/test/test-credentials.ts
  */
 import fs from 'node:fs'
 import os from 'node:os'
@@ -11,7 +11,7 @@ import {
   editCredentialsText,
   removeCredentialsText,
   readCredentialsFile
-} from '../src/shared/credentials.ts'
+} from '../../src/shared/credentials.ts'
 
 let passed = 0
 let failed = 0

@@ -30,6 +30,7 @@ jobs:
         run: npm ci
 
       # test-kernel.cjs 的离线种子克隆依赖全局安装的 @deepseek-ai/dsh
+      # 版本须与 scripts/test/test-kernel.cjs 内的 ver 常量一致（种子按该版本号写入索引）；改一处必改另一处
       - name: Install global dsh (test seed)
         run: npm install -g @deepseek-ai/dsh@0.1.1-rc.2
 

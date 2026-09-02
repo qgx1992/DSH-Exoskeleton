@@ -6,7 +6,7 @@ const buf = fs.readFileSync(process.argv[2])
 // 用 shared 的帧扫描（直接内联引用类逻辑：读源文件解析太绕，此处简单实现——
 // 直接从 test 模块复用则复制算法；这里只为勘察，先解第一个 frame）
 // 简化：手动解析第一帧（读 descriptor 单段）→ 不通用；改用我的 shared 模块
-import { scanZstdFrames, decompressFrame } from '../src/shared/session-jsonl.ts'
+import { scanZstdFrames, decompressFrame } from '../../src/shared/session-jsonl.ts'
 const frames = scanZstdFrames(buf)
 console.log('frames:', frames.length)
 const text = decompressFrame(buf, frames[0])

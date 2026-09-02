@@ -80,7 +80,7 @@ const turnEnd = (turn, kind) => ({
 app.whenReady().then(async () => {
   let sessionWatcher, notificationHub, configStore
   try {
-    ({ sessionWatcher, wireSessionWatcher, notificationHub, configStore } = require('./out/session-ask.cjs'))
+    ({ sessionWatcher, wireSessionWatcher, notificationHub, configStore } = require('../out/session-ask.cjs'))
 
     // hub 拦截：fake webview 通道 + webview 渠道 → 事件不落原生（可断言、不扰民）
     const received = []

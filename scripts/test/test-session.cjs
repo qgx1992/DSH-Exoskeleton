@@ -40,7 +40,7 @@ const zstdFrame = (lines, out) => {
 
 app.whenReady().then(async () => {
   try {
-    const { sessionWatcher, wireSessionWatcher } = require('./out/session-watcher.cjs')
+    const { sessionWatcher, wireSessionWatcher } = require('../out/session-watcher.cjs')
     wireSessionWatcher()
 
     const wsName = '--D-test_ws--'

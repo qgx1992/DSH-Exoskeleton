@@ -4,6 +4,6 @@
  * 保证测试里 configStore.set() / fake webview 通道影响的是 watcher→hub 链路的同一实例
  * （与 test-notify-entry.ts 同构）。
  */
-export { sessionWatcher, wireSessionWatcher } from '../src/main/session-watcher'
-export { notificationHub } from '../src/main/notification-hub'
-export { configStore } from '../src/main/config'
+export { sessionWatcher, wireSessionWatcher } from '../../src/main/session-watcher'
+export { notificationHub } from '../../src/main/notification-hub'
+export { configStore } from '../../src/main/config'

@@ -9,7 +9,9 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 ## [0.8.6] - 未发布
 
 ### 🧹 维护
-- **首启默认内核升级至 0.1.2-alpha.4**：全新安装预置内核从 0.1.2-alpha.1 提升到已实测免补丁的 alpha.4（试启动门禁 + 会话解析回归通过，见 `probe-newkernel-compat.cjs` / `probe-alpha4-sessions.cjs`）。
+- **测试链重构**：`npm test` 由 package.json 内 20+ 段 `&&` 串跑改为 `scripts/run-tests.mjs`（用例表声明式，失败报「用例名+阶段+退出码」，支持 `npm test -- <子串>` 单跑）；无全局 dsh 种子的环境 test-kernel 明确走跳过分支不再计失败；kernel-provision 不再断言具体默认内核版本号（防每次升内核腐烂）。
+- **文档纠偏**：AGENT.md 基线描述更新为 main/v0.8.x（原 test/own-plugins 线已并入删除）；README 中英首启预置内核版本 `0.1.2-alpha.1` → `0.1.2-alpha.4`（与 kernel-defaults.ts 同步）。
+- **首启默认内核升级至 0.1.2-alpha.4**：全新安装预置内核从 0.1.2-alpha.1 提升到已实测免补丁的 alpha.4（试启动门禁 + 会话解析回归通过，见 `scripts/probe/probe-newkernel-compat.cjs` / `scripts/probe/probe-alpha4-sessions.cjs`）。
 - **兼容补丁注册表注释**：明确 alpha.3 / alpha.4 无需补丁、勿添加空条目。
 
 ### 📝 已知行为
