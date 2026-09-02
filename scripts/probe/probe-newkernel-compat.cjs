@@ -1,9 +1,10 @@
-// 本机实测探针（不进 npm test）：新内核 0.1.2-alpha.3 / 0.1.2-alpha.4 兼容性门禁。
+// 本机实测探针（不进 npm test）：新内核兼容性门禁（alpha.3/4/5…）。
 // 运行：node node_modules/esbuild/bin/esbuild src/main/kernel-compat.ts --bundle --platform=node
 //        --external:electron --external:@deepseek-ai/* --format=cjs --outfile=scripts/out/kernel-compat.cjs
-//       electron scripts/probe/probe-newkernel-compat.cjs
+//       electron scripts/probe/probe-newkernel-compat.cjs [版本号 ...]
+//   不带参数时默认测 alpha.3 + alpha.4；新版验证时把版本号作为参数传入（如 0.1.2-alpha.5）。
 // 断言：
-//   A) alpha.3 / alpha.4 无补丁试启动（注册表未收录 → 生产路径就是无补丁）→ 预期成功；
+//   A) 各版本无补丁试启动（注册表未收录 → 生产路径就是无补丁）→ 预期成功；
 //      失败则用 alpha.2 补丁行做对照定位首个失败插件。
 // 全程走 R-24 门禁（克隆 DSH_HOME + 第一锚点 relink/restore，零副作用）。
 const { app } = require('electron')
@@ -16,7 +17,8 @@ app.whenReady().then(async () => {
   try {
     const { trialBootManagedKernel, compatPatchArgsFor, compatPatchPathFor } = require('../out/kernel-compat.cjs')
     const dshHome = path.join(os.homedir(), '.dsh')
-    const versions = ['0.1.2-alpha.3', '0.1.2-alpha.4']
+    const versions = process.argv.slice(2).filter((a) => !a.startsWith('-'))
+    if (versions.length === 0) versions.push('0.1.2-alpha.3', '0.1.2-alpha.4')
     const results = {}
 
     for (const v of versions) {

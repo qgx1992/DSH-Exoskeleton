@@ -21,10 +21,10 @@ import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 
 /** 内置兼容补丁注册表：key = 内核版本 → 需禁用的 loader 行 id 列表。
- * 注意：注册表只收录「实测需补丁」的版本；未收录版本（如 0.1.2-alpha.3 / 0.1.2-alpha.4）
+ * 注意：注册表只收录「实测需补丁」的版本；未收录版本（如 0.1.2-alpha.3 / alpha.4 / alpha.5）
  * 即表示无需补丁、以原样启动，无需添加条目（添加空条目反而会产生无效补丁文件）。
- * 验证记录：0.1.2-alpha.3 / 0.1.2-alpha.4 已过本机试启动门禁（无补丁）且会话文件解析回归通过，
- * 见 scripts/probe/probe-newkernel-compat.cjs 与 scripts/probe/probe-alpha4-sessions.cjs。 */
+ * 验证记录：0.1.2-alpha.3 / alpha.4 / alpha.5 均已过本机试启动门禁（无补丁）且会话文件解析回归通过，
+ * 见 scripts/probe/probe-newkernel-compat.cjs（支持传入版本号参数）与 scripts/probe/probe-alpha4-sessions.cjs。 */
 export const COMPAT_PATCHES: Record<string, { rows: string[]; note: string }> = {
   '0.1.2-alpha.2': {
     rows: ['ui-deliverables', 'dsh-market', 'better-sidebar'],

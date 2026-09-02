@@ -135,7 +135,7 @@ dist/win-unpacked/                            # 免安装绿色版文件夹
 
 ## 内核管理（阶段 B/C/D 已落地）
 
-- **首启默认内核预置（阶段 D）**：全新安装首次启动自动安装默认内核（当前 `0.1.2-alpha.4`，见 `src/shared/kernel-defaults.ts`）并设为默认——无 Node 的机器会先自动下载内置运行时再装内核；老用户升级自动跳过，失败下次启动重试
+- **首启默认内核预置（阶段 D）**：全新安装首次启动自动安装默认内核（当前 `0.1.2-alpha.5`，见 `src/shared/kernel-defaults.ts`）并设为默认——无 Node 的机器会先自动下载内置运行时再装内核；老用户升级自动跳过，失败下次启动重试
 - **内置 Node 运行时**：内核面板一键下载（~30MB，nodejs.org，可用 `DSH_NODE_DIST` 换 npmmirror 镜像），之后无需系统 Node（真零门槛）
 - 安装走 npm registry（可切 npmmirror 镜像加速国内网络，见 `docs/KERNEL-MANAGER-DESIGN.md`）
 - 依赖树较大（单内核 ~50MB+），首次安装耗时受网络影响；内核仓库有磁盘配额保护（`kernelsQuotaMB`，默认 1GB）

@@ -6,4 +6,4 @@
  *   （@deepseek-ai/dsh，官方源或 npmmirror 镜像均可见），
  *   否则预置会在每次启动时安装失败并静默重试、回退系统 dsh
  */
-export const DEFAULT_KERNEL_VERSION = '0.1.2-alpha.4'
+export const DEFAULT_KERNEL_VERSION = '0.1.2-alpha.5'

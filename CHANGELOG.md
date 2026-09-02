@@ -6,6 +6,15 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.8.7] - 2026-09-02
+
+### 🧹 维护
+- **首启默认内核升级至 0.1.2-alpha.5**：全新安装预置内核从 0.1.2-alpha.4 提升到 alpha.5（本机试启动门禁无补丁通过 + 会话解析回归通过，含 alpha.5 运行时读写 alpha.4 时代会话文件的严口径验证；见 `scripts/probe/probe-newkernel-compat.cjs`——已支持传入版本号参数——与 `scripts/probe/probe-alpha4-sessions.cjs`）。
+- **兼容补丁注册表注释**：补记 alpha.5 无需补丁。
+
+### ✅ 已修复（随内核升级）
+- **消除 v0.8.6「会话标题过渡」已知行为**：官方 alpha.5 实现投影缓存跨版本读兼容（`compatibleVersions: [3,4]` + lineage 字段转 optional + `backup-and-skip` 兜底 + bootstrap 投毒修复），升级到 alpha.5 后旧会话标题在侧边栏立即可服务，无需逐个打开恢复。
+
 ## [0.8.6] - 2026-09-02
 
 ### 🧹 维护
