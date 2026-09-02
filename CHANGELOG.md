@@ -6,10 +6,11 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
-## [0.8.6] - 未发布
+## [0.8.6] - 2026-09-02
 
 ### 🧹 维护
 - **测试链重构**：`npm test` 由 package.json 内 20+ 段 `&&` 串跑改为 `scripts/run-tests.mjs`（用例表声明式，失败报「用例名+阶段+退出码」，支持 `npm test -- <子串>` 单跑）；无全局 dsh 种子的环境 test-kernel 明确走跳过分支不再计失败；kernel-provision 不再断言具体默认内核版本号（防每次升内核腐烂）。
+- **scripts/ 目录分层**：CI 常驻冒烟测试移入 `scripts/test/`，一次性实机探针/勘察脚本移入 `scripts/probe/`（git rename 保留历史），内部相对路径与全部文档引用连带修正；`zstd-worker.cjs`（打包资产）与构建脚本留根目录。
 - **dist/ 清理策略**：新增 `scripts/prune-dist.mjs`（`npm run clean:dist`）——按 semver 只保留最近 10 个版本的 Setup/Portable/blockmap，孤儿 blockmap 一并纳管，`--dry-run` 预览；非版本化产物（win-unpacked、latest.yml）不动。
 - **文档纠偏**：AGENT.md 基线描述更新为 main/v0.8.x（原 test/own-plugins 线已并入删除）；README 中英首启预置内核版本 `0.1.2-alpha.1` → `0.1.2-alpha.4`（与 kernel-defaults.ts 同步）。
 - **首启默认内核升级至 0.1.2-alpha.4**：全新安装预置内核从 0.1.2-alpha.1 提升到已实测免补丁的 alpha.4（试启动门禁 + 会话解析回归通过，见 `scripts/probe/probe-newkernel-compat.cjs` / `scripts/probe/probe-alpha4-sessions.cjs`）。
