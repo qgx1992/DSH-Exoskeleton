@@ -16,6 +16,7 @@
     "dist:dir": "npm run build && electron-builder --dir",
     "dist:win": "npm run build && electron-builder --win",
     "release:notes": "node scripts/release-notes.mjs",
+    "clean:dist": "node scripts/prune-dist.mjs",
     "gen:icon": "node scripts/build-blackgold.mjs && node scripts/build-whale-component.mjs && electron scripts/render-icons.cjs"
   },
   "devDependencies": {
