@@ -9,7 +9,7 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 ## [0.8.8] - 2026-09-04
 
 ### ✨ 新功能
-- **管理面板「网页版」标签（官方网页版 DeepSeek）**：管理面板左侧导航新增「网页版」标签（总览之后），右侧以独立 WebContentsView 承载 chat.deepseek.com 官方网页版。**为何不用 iframe**：官方响应头实测 `Content-Security-Policy: frame-ancestors none`，任何 iframe 嵌入都会被拦截；独立 WebContentsView 是顶级浏览上下文，不受该 CSP 限制（等价浏览器新标签）。登录态保存在独立持久化分区（persist:deepseek-web），重启应用后仍保持登录；站内新窗口在视图内导航，外链交给系统浏览器。标签切换同步显隐原生视图，左侧导航不受遮挡，随时切回其他面板。
+- **网页版 DeepSeek（官方 chat.deepseek.com）面板**：标题栏右上角「网页版」按钮（地球图标，位于「打开管理面板」左侧，激活态高亮）一键直达官方网页版，再点关闭；管理面板按钮固定落在「总览」。承载方式：独立 WebContentsView 加载 chat.deepseek.com（登录态存独立持久化分区 persist:deepseek-web，重启保留）。**为何不用 iframe**：官方响应头实测 `Content-Security-Policy: frame-ancestors none`，任何 iframe 嵌入都会被拦截；独立 WebContentsView 是顶级浏览上下文，不受该 CSP 限制（等价浏览器新标签）。站内新窗口在视图内导航，外链交给系统浏览器。
 
 ## [0.8.7] - 2026-09-02
 
