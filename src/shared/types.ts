@@ -448,6 +448,8 @@ export interface DesktopApi {
     onMaximizeChange: (callback: (maximized: boolean) => void) => () => void
     /** 显示/隐藏管理面板（隐藏时恢复显示 DSH Web UI 视图） */
     setAdminPanelVisible: (visible: boolean) => Promise<void>
+    /** 显示/隐藏管理面板「网页版 DeepSeek」原生视图（独立 WebContentsView，登录态本机保留） */
+    setWebPanelVisible: (visible: boolean) => Promise<void>
   }
   updater: {
     check: () => Promise<UpdateInfo>

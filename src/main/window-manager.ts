@@ -12,6 +12,10 @@ import { configStore } from './config'
 import { notificationHub } from './notification-hub'
 
 const TITLEBAR_HEIGHT = 36
+/** 管理面板左侧导航宽度（对应 renderer w-44 = 11rem = 176px），网页版视图从它右侧开始 */
+const NAV_WIDTH = 176
+/** 官方网页版 DeepSeek（管理面板「网页版」标签，独立 WebContentsView 承载） */
+const DEEPSEEK_WEB_URL = 'https://chat.deepseek.com'
 const DEFAULT_WIDTH = 1200
 const DEFAULT_HEIGHT = 800
 const MIN_WIDTH = 900
@@ -38,6 +42,10 @@ export class WindowManager {
   private geometryTimer: NodeJS.Timeout | null = null
   /** 管理面板是否打开（打开时隐藏 DSH Web UI 视图） */
   private adminPanelVisible = false
+  /** 「网页版 DeepSeek」原生视图（独立 WebContentsView，懒创建；管理面板内显示） */
+  private webView: WebContentsView | null = null
+  /** 网页版视图是否显示（管理面板打开且「网页版」标签激活） */
+  private webPanelVisible = false
   /** DSH 页面插件加载失败的自动重载计数与定时器（启动竞态自愈） */
   private dshViewRetryCount = 0
   private dshViewHealthTimer: NodeJS.Timeout | null = null
@@ -335,11 +343,16 @@ export class WindowManager {
 
   private layoutView(): void {
     const win = this.win
-    const view = this.view
-    if (!win || !view) return
+    if (!win) return
     const [w, h] = win.getContentSize()
-    const y = process.env.ELECTRON_RENDERER_URL ? TITLEBAR_HEIGHT : TITLEBAR_HEIGHT
-    view.setBounds({ x: 0, y, width: w, height: Math.max(0, h - y) })
+    const y = TITLEBAR_HEIGHT
+    if (this.view && !this.view.webContents.isDestroyed()) {
+      this.view.setBounds({ x: 0, y, width: w, height: Math.max(0, h - y) })
+    }
+    // 网页版视图：从左侧导航栏右侧开始（管理面板打开时布局，隐藏时 setVisible(false) 已不占交互）
+    if (this.webView && !this.webView.webContents.isDestroyed()) {
+      this.webView.setBounds({ x: NAV_WIDTH, y, width: Math.max(0, w - NAV_WIDTH), height: Math.max(0, h - y) })
+    }
   }
 
   getViewUrl(): string | null {
@@ -354,9 +367,78 @@ export class WindowManager {
       if (!visible) {
         this.view.webContents.focus()
       }
-      logger.info('admin panel visibility', { visible, hasDshView: true })
-    } else {
-      logger.info('admin panel visibility', { visible, hasDshView: false })
+    }
+    // 网页版视图跟随面板：面板关闭必隐藏（DSH 视图恢复全屏覆盖），打开时按「网页版」标签状态恢复
+    if (this.webView && !this.webView.webContents.isDestroyed()) {
+      this.webView.setVisible(visible && this.webPanelVisible)
+    }
+    logger.info('admin panel visibility', { visible, hasDshView: !!this.view, hasWebView: !!this.webView })
+  }
+
+  /**
+   * 管理面板「网页版」标签：显示/隐藏官方网页版 DeepSeek。
+   * 懒创建独立 WebContentsView（持久化 session 分区，登录态落盘保留），
+   * 从左侧导航栏右侧开始布局，保证面板标签可随时切换。
+   */
+  setWebPanelVisible(visible: boolean): void {
+    this.webPanelVisible = visible
+    if (!this.win) return
+    if (visible) {
+      const view = this.ensureWebView()
+      view.setVisible(true)
+      this.layoutView()
+      view.webContents.focus()
+    } else if (this.webView && !this.webView.webContents.isDestroyed()) {
+      this.webView.setVisible(false)
+    }
+    logger.info('web panel visibility', { visible, hasWebView: !!this.webView })
+  }
+
+  /** 懒创建官方网页版 DeepSeek 视图（独立 WebContentsView，仅创建一次，后续显示/隐藏复用） */
+  private ensureWebView(): WebContentsView {
+    if (this.webView && !this.webView.webContents.isDestroyed()) return this.webView
+    const view = new WebContentsView({
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false,
+        spellcheck: true,
+        // 持久化分区：cookie/localStorage 落盘，重启后官方网页版登录态保留
+        partition: 'persist:deepseek-web'
+      }
+    })
+    this.webView = view
+    this.win?.contentView.addChildView(view)
+    view.setVisible(false)
+    // 站内新窗口在当前视图内导航（登录弹窗等）；外链交给系统浏览器
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith(DEEPSEEK_WEB_URL)) {
+        void view.webContents.loadURL(url)
+      } else {
+        void shell.openExternal(url)
+      }
+      return { action: 'deny' }
+    })
+    // 主 frame 加载失败记录（断网等）；-3 = ERR_ABORTED 正常中断，忽略
+    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (isMainFrame && errorCode !== -3) {
+        logger.warn('deepseek web view load failed', { errorCode, errorDescription })
+      }
+    })
+    view.webContents.loadURL(DEEPSEEK_WEB_URL)
+    this.layoutView()
+    logger.info('deepseek web view created', { url: DEEPSEEK_WEB_URL })
+    return view
+  }
+
+  /** 销毁网页版视图（应用退出时释放） */
+  private destroyWebView(): void {
+    if (this.webView && this.win) {
+      this.win.contentView.removeChildView(this.webView)
+      this.webView.webContents.close()
+      this.webView = null
+      this.webPanelVisible = false
+      logger.info('deepseek web view destroyed')
     }
   }
 
@@ -581,6 +663,7 @@ export class WindowManager {
     // R-16: 同步落盘（persist 已改异步防抖，退出前必须 flush 保证最后一次写入不丢）
     configStore.flush()
     this.detachDshView()
+    this.destroyWebView()
     app.quit()
   }
 }

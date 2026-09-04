@@ -273,6 +273,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('window:setAdminPanelVisible', (_e, visible: boolean) => {
     windowManager.setAdminPanelVisible(visible === true)
   })
+  ipcMain.handle('window:setWebPanelVisible', (_e, visible: boolean) => {
+    windowManager.setWebPanelVisible(visible === true)
+  })
 
   // ---------- 托盘 ----------
   ipcMain.handle('tray:show', () => windowManager.show())

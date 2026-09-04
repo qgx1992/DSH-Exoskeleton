@@ -206,6 +206,17 @@ export function IconHeart(props: IconProps): React.JSX.Element {
   )
 }
 
+/** 地球：管理面板「网页版 DeepSeek」标签 */
+export function IconGlobe(props: IconProps): React.JSX.Element {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </Svg>
+  )
+}
+
 /** 关闭 × */
 export function IconX(props: IconProps): React.JSX.Element {
   return (
