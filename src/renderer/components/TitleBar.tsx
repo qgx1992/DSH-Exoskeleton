@@ -1,7 +1,7 @@
 import type { DSHStatus } from '../../shared/types'
 import { WhaleIcon } from './WhaleIcon'
 import { StatusDot } from './ui/StatusDot'
-import { IconSettings } from './ui/icons'
+import { IconGlobe, IconSettings } from './ui/icons'
 
 interface Props {
   status: DSHStatus
@@ -13,6 +13,10 @@ interface Props {
   adminPanel: boolean
   /** 切换管理面板显隐 */
   onToggleAdminPanel: () => void
+  /** 「网页版 DeepSeek」是否激活（管理面板打开且落在网页版标签） */
+  webPanel: boolean
+  /** 切换网页版 DeepSeek 显隐 */
+  onToggleWebPanel: () => void
 }
 
 const STATUS_LABEL: Record<DSHStatus, string> = {
@@ -22,7 +26,7 @@ const STATUS_LABEL: Record<DSHStatus, string> = {
   error: '服务异常'
 }
 
-export function TitleBar({ status, port, version, appVersion, maximized, adminPanel, onToggleAdminPanel }: Props): React.JSX.Element {
+export function TitleBar({ status, port, version, appVersion, maximized, adminPanel, onToggleAdminPanel, webPanel, onToggleWebPanel }: Props): React.JSX.Element {
   return (
     // 窗口控制按钮贴右缘（Win11 惯例），故只用左内边距
     <header className="titlebar-drag flex h-9 shrink-0 items-center gap-3 border-b border-rule bg-surface pl-3">
@@ -45,6 +49,14 @@ export function TitleBar({ status, port, version, appVersion, maximized, adminPa
 
       {/* 窗口控制按钮（Win11 风格：全高、贴角、hover 微圆角；关闭键 hover 红实底） */}
       <div className="titlebar-no-drag flex h-full items-center">
+        {/* 「网页版 DeepSeek」入口：放在「打开管理面板」按钮左边；激活态高亮（管理面板打开且落在网页版标签） */}
+        <button
+          className={webPanel ? 'flex h-full w-11 items-center justify-center rounded-t-[4px] transition-colors duration-150 bg-accent/15 text-accent hover:bg-accent/25' : 'flex h-full w-11 items-center justify-center rounded-t-[4px] transition-colors duration-150 text-ink-2 hover:bg-white/5 hover:text-ink active:bg-white/10'}
+          title={webPanel ? '关闭网页版 DeepSeek' : '打开网页版 DeepSeek'}
+          onClick={onToggleWebPanel}
+        >
+          <IconGlobe size={14} strokeWidth={2} />
+        </button>
         <button
           className={`flex h-full w-11 items-center justify-center rounded-t-[4px] transition-colors duration-150 ${
             adminPanel ? 'bg-accent/15 text-accent hover:bg-accent/25' : 'text-ink-2 hover:bg-white/5 hover:text-ink active:bg-white/10'

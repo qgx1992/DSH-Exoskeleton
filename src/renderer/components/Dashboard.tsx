@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { DSHState } from '../../shared/types'
 import { OverviewTab } from './panels/OverviewTab'
 import { StatusTab } from './panels/StatusTab'
@@ -26,10 +26,17 @@ import {
   IconGlobe
 } from './ui/icons'
 
-type Tab = 'overview' | 'web' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
+/** 导航标签（左侧导航可切换的普通面板） */
+type Tab = 'overview' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'
+/** 附加视图：网页版 DeepSeek（入口在标题栏右上角按钮，不属于左侧导航） */
+type PanelView = Tab | 'web'
 
 interface Props {
   state: DSHState | null
+  /** 当前激活视图（受控；'web' = 网页版 DeepSeek，由 App 标题栏按钮驱动） */
+  activeTab: PanelView
+  /** 视图切换回调 */
+  onTabChange: (tab: PanelView) => void
   onStart: () => void
   onStop: () => void
   onRestart: () => void
@@ -39,7 +46,6 @@ interface Props {
 
 const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'overview', label: '总览', icon: <IconOverview size={15} /> },
-  { id: 'web', label: '网页版', icon: <IconGlobe size={15} /> },
   { id: 'status', label: '状态', icon: <IconActivity size={15} /> },
   { id: 'sessions', label: '会话', icon: <IconMessage size={15} /> },
   { id: 'settings', label: '设置', icon: <IconSettings size={15} /> },
@@ -51,18 +57,8 @@ const TABS: { id: Tab; label: string; icon: ReactNode }[] = [
   { id: 'update', label: '更新', icon: <IconRefresh size={15} /> }
 ]
 
-export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
-  const [tab, setTab] = useState<Tab>('overview')
+export function Dashboard({ state, activeTab, onTabChange, onStart, onStop, onRestart, onOpenWebUI }: Props): React.JSX.Element {
   const [tipOpen, setTipOpen] = useState(false)
-
-  // 「网页版」标签：显示/隐藏主进程原生视图（chat.deepseek.com，独立 WebContentsView，
-  // 覆盖管理面板内容区左侧导航右侧的区域；其余标签隐藏）。面板关闭时随组件卸载隐藏。
-  useEffect(() => {
-    void window.dshDesktop.window.setWebPanelVisible(tab === 'web')
-    return () => {
-      void window.dshDesktop.window.setWebPanelVisible(false)
-    }
-  }, [tab])
 
   return (
     <div className="flex h-full bg-canvas">
@@ -72,12 +68,10 @@ export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Pr
         {TABS.map((t) => (
           <button
             key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`relative flex items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm transition-colors duration-150 ease-hallmark ${
-              tab === t.id ? 'bg-surface-2 text-accent' : 'text-ink-2 hover:bg-white/5 hover:text-ink'
-            }`}
+            onClick={() => onTabChange(t.id)}
+            className={'relative flex items-center gap-2 rounded-control px-2.5 py-1.5 text-left text-sm transition-colors duration-150 ease-hallmark ' + (activeTab === t.id ? 'bg-surface-2 text-accent' : 'text-ink-2 hover:bg-white/5 hover:text-ink')}
           >
-            {tab === t.id && <span className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-full bg-accent" />}
+            {activeTab === t.id && <span className="absolute bottom-1.5 left-0 top-1.5 w-0.5 rounded-full bg-accent" />}
             <span className="flex w-4 justify-center opacity-90">{t.icon}</span>
             {t.label}
           </button>
@@ -98,11 +92,11 @@ export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Pr
       </nav>
 
       {/* 内容区（key 触发 180ms 入场动画） */}
-      <main key={tab} className="panel-enter min-w-0 flex-1 overflow-y-auto p-5">
-        {tab === 'overview' && (
+      <main key={activeTab} className="panel-enter min-w-0 flex-1 overflow-y-auto p-5">
+        {activeTab === 'overview' && (
           <OverviewTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} onOpenWebUI={onOpenWebUI} />
         )}
-        {tab === 'web' && (
+        {activeTab === 'web' && (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <IconGlobe size={30} className="text-ink-3 opacity-60" />
             <p className="mt-2 text-sm font-medium text-ink">网页版 DeepSeek</p>
@@ -111,15 +105,15 @@ export function Dashboard({ state, onStart, onStop, onRestart, onOpenWebUI }: Pr
             </p>
           </div>
         )}
-        {tab === 'status' && <StatusTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} />}
-        {tab === 'sessions' && <SessionsTab onOpenWebUI={onOpenWebUI} />}
-        {tab === 'settings' && <SettingsTab />}
-        {tab === 'kernels' && <KernelsTab />}
-        {tab === 'profiles' && <ProfilesTab />}
-        {tab === 'plugins' && <PluginsTab />}
-        {tab === 'backup' && <BackupTab />}
-        {tab === 'logs' && <LogsTab />}
-        {tab === 'update' && <UpdateTab />}
+        {activeTab === 'status' && <StatusTab state={state} onStart={onStart} onStop={onStop} onRestart={onRestart} />}
+        {activeTab === 'sessions' && <SessionsTab onOpenWebUI={onOpenWebUI} />}
+        {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'kernels' && <KernelsTab />}
+        {activeTab === 'profiles' && <ProfilesTab />}
+        {activeTab === 'plugins' && <PluginsTab />}
+        {activeTab === 'backup' && <BackupTab />}
+        {activeTab === 'logs' && <LogsTab />}
+        {activeTab === 'update' && <UpdateTab />}
       </main>
 
       <TipDialog open={tipOpen} onClose={() => setTipOpen(false)} />
