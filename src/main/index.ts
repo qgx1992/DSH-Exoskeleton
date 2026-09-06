@@ -13,7 +13,7 @@ import { createTray, destroyTray, rebuildMenu } from './tray'
 import { dshManager } from './dsh-manager'
 import { registerIpcHandlers } from './ipc-handlers'
 import { notificationHub } from './notification-hub'
-import { provisionDefaultPlugins } from './plugins'
+import { provisionDefaultPlugins, reconcileInstalledBundles } from './plugins'
 import { updater } from './updater'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
@@ -103,6 +103,9 @@ async function bootstrap(): Promise<void> {
       windowManager.attachDshView(dshManager.getWebUrl() ?? `http://127.0.0.1:${state.port}`)
       // 内置默认插件预置（幂等，仅首次执行；不阻塞 UI）
       void provisionDefaultPlugins()
+      // 历史欠账修复：IGNORED_BUILDS 时代 `dsh plugin add` exit 1 中断的 bundle reconcile 补上
+      // （幂等：已注册的跳过；不阻塞 UI）
+      void reconcileInstalledBundles()
     } else if (state.status === 'error' || state.status === 'stopped') {
       windowManager.detachDshView()
     }

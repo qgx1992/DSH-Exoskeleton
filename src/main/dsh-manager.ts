@@ -16,6 +16,7 @@ import { configStore } from './config'
 import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { compatPatchArgsFor } from './kernel-compat'
+import { ensurePnpm } from './pnpm'
 import type { DSHState } from '../shared/types'
 
 const PORT_RE = /dsh web: http:\/\/127\.0\.0\.1:(\d+)/i
@@ -591,12 +592,20 @@ export class DSHManager extends EventEmitter {
   async execDsh(args: string[], timeoutMs = 120_000): Promise<{ code: number | null; stdout: string; stderr: string }> {
     const exe = await this.resolveExecutable()
     const dshHome = this.dshHome ?? this.resolveDshHome()
+    // 插件管理自愈（见 pnpm.ts）：`dsh plugin` 内部裸调 `pnpm`，本机缺 pnpm 会 exit 1
+    // （面板报「安装失败（exit 1）」）。用嵌入式 Node 运行时的 npm 预置 pnpm 并
+    // 注入其目录到子进程 PATH，让 dsh 能找到裸命令 pnpm。
+    const pnpm = await ensurePnpm(exe.command)
+    const env: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: dshHome }
+    if (pnpm.pnpmDir) {
+      const sep = path.delimiter
+      const cur = env.PATH || ''
+      const parts = cur.split(sep)
+      if (!parts.includes(pnpm.pnpmDir)) env.PATH = pnpm.pnpmDir + sep + cur
+    }
     return new Promise((resolvePromise) => {
       const child = spawn(exe.command, [...exe.args, ...args], {
-        env: {
-          ...process.env,
-          DSH_HOME: dshHome
-        },
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true
       })

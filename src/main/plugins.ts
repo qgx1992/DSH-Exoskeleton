@@ -282,6 +282,151 @@ function conflictCheck(target: string, installed: InstalledPlugin[]): string | n
   return null
 }
 
+/**
+ * pnpm 10+/12 供应链策略：未在 allowBuilds 白名单的依赖 build script 被拦截时，
+ * pnpm 以 exit 1 + ERR_PNPM_IGNORED_BUILDS 收尾（依赖其实已写入 package.json）。
+ * 与内核安装（kernel-manager.isIgnoredBuilds）同语义：原生模块（node-pty 等）由
+ * prebuilt 或 fallback build 提供，忽略构建不等于安装失败。
+ */
+function isIgnoredBuilds(r: { stdout: string; stderr: string }): boolean {
+  return /ERR_PNPM_IGNORED_BUILDS|IGNORED_BUILDS/i.test(r.stderr + ' ' + r.stdout)
+}
+
+/** 从 IGNORED_BUILDS 报错里解析被拦截的包名（"Ignored build scripts: node-pty@1.1.0, …"） */
+function ignoredBuildPackages(r: { stdout: string; stderr: string }): string[] {
+  const m = /Ignored build scripts:\s*([^\n]+)/i.exec(r.stderr)
+  if (!m) return []
+  return m[1]
+    .split(/[,，]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((spec) => {
+      // "@scope/name@version" / "name@version" → 剥掉版本号保留包名
+      const scoped = spec.match(/^(@[^@\s]+\/)?([^@\s]+)@[\w.\-+]+$/)
+      if (scoped) return (scoped[1] ?? '') + scoped[2]
+      // GitHub 等无法识别 spec（github:owner/repo#sha）原样返回；allowBuilds 若匹配不上由
+      // isIgnoredBuilds 兜底按成功处理
+      return spec
+    })
+}
+
+/**
+ * 把包名设为 profile pnpm-workspace.yaml 的 allowBuilds:true（pnpm 12 构建白名单）。
+ * 字符串级编辑（文件小且形状固定，不为白名单维护引入 YAML 解析依赖，风格同 pluginEntryRowIds）。
+ * 覆盖三种形态：已有条目（含 pnpm 自动写入的占位 "set this to true or false"）→ 置 true；
+ * allowBuilds 块存在缺该包 → 追加行；块不存在 → 末尾新建。
+ */
+function allowBuild(pkg: string): void {
+  try {
+    const file = path.join(profileDir(), 'pnpm-workspace.yaml')
+    let text = ''
+    try {
+      text = fs.readFileSync(file, 'utf-8')
+    } catch {
+      /* 文件不存在时从零创建 */
+    }
+    const esc = pkg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const entryRe = new RegExp('^(\\s*)' + esc + '\\s*:.*$', 'm')
+    if (entryRe.test(text)) {
+      text = text.replace(entryRe, '  ' + pkg + ': true')
+    } else if (/^allowBuilds:\s*$/m.test(text)) {
+      text = text.replace(/^allowBuilds:\s*$/m, 'allowBuilds:\n  ' + pkg + ': true')
+    } else {
+      const sep = text === '' || text.endsWith('\n') ? '' : '\n'
+      text += sep + 'allowBuilds:\n  ' + pkg + ': true\n'
+    }
+    fs.writeFileSync(file, text, 'utf-8')
+    logger.info('allowBuilds updated', { pkg, file })
+  } catch (err) {
+    logger.warn('allowBuilds update failed', { pkg, err })
+  }
+}
+
+/**
+ * 执行 dsh 插件子命令；遇 ERR_PNPM_IGNORED_BUILDS 时把被拦包写入 allowBuilds 白名单后重试一次。
+ * 重试成功后 pnpm 会执行 build script 并以 exit 0 收尾，dsh 的 bundle reconcile 得以正常完成。
+ */
+async function execDshWithAllowBuilds(
+  args: string[]
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  let r = await dshManager.execDsh(args)
+  if (r.code !== 0 && isIgnoredBuilds(r)) {
+    const pkgs = ignoredBuildPackages(r)
+    logger.info('ignored builds detected, allowing build scripts and retrying', { pkgs })
+    for (const p of pkgs) allowBuild(p)
+    if (pkgs.length > 0) r = await dshManager.execDsh(args)
+  }
+  return r
+}
+
+/** 已装包是否声明 dsh.bundle（bundle 层插件）；读不到按否 */
+function declaresBundle(name: string): boolean {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(nodeModulesDir(), name, 'package.json'), 'utf-8'))
+    return !!meta?.dsh?.bundle
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 修复历史欠账：已安装且声明 dsh.bundle、但未进入 dsh.profile.bundles 的插件补注册。
+ * IGNORED_BUILDS 时代 `dsh plugin add` 以 exit 1 收尾，依赖写入了、bundle reconcile 中断，
+ * 导致市场把本该是 bundle 层插件的条目显示成「未进入 bundle 层 / 纯客户端」。幂等：
+ * 已在 bundles 的跳过；只补不删。服务就绪时调用一次，新安装成功路径也调用。
+ */
+export function reconcileInstalledBundles(): void {
+  try {
+    const dir = profileDir()
+    const pkgPath = path.join(dir, 'package.json')
+    if (!fs.existsSync(pkgPath)) return
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    const deps: Record<string, string> = pkg?.dependencies ?? {}
+    const bundles: string[] = pkg?.dsh?.profile?.bundles ?? []
+    const missing = Object.keys(deps).filter((name) => !bundles.includes(name) && declaresBundle(name))
+    if (missing.length === 0) return
+    // R-3: 原子写（临时文件 + rename）
+    pkg.dsh = pkg.dsh ?? {}
+    pkg.dsh.profile = pkg.dsh.profile ?? {}
+    pkg.dsh.profile.bundles = [...bundles, ...missing]
+    const tmp = pkgPath + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(pkg, null, 2) + '\n', 'utf-8')
+    fs.renameSync(tmp, pkgPath)
+    logger.info('reconciled missing bundles', { added: missing })
+  } catch (err) {
+    logger.warn('reconcile installed bundles failed', err)
+  }
+}
+
+/**
+ * 卸载后清理悬空 bundle 条目：依赖已被 pnpm 移除（deps 无引用）且 node_modules 已不存在的
+ * bundles 成员（防下次启动按名加载失败）。内核侧 bundle（@deepseek-ai/dsh-base 等）在
+ * profile node_modules 存在 relink 链接，不会被误删。
+ */
+function pruneDanglingBundleEntries(): void {
+  try {
+    const dir = profileDir()
+    const pkgPath = path.join(dir, 'package.json')
+    if (!fs.existsSync(pkgPath)) return
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    const bundles: string[] = pkg?.dsh?.profile?.bundles ?? []
+    const deps: Record<string, string> = pkg?.dependencies ?? {}
+    const dangling = bundles.filter(
+      (b) => deps[b] === undefined && !fs.existsSync(path.join(nodeModulesDir(), b))
+    )
+    if (dangling.length === 0) return
+    pkg.dsh = pkg.dsh ?? {}
+    pkg.dsh.profile = pkg.dsh.profile ?? {}
+    pkg.dsh.profile.bundles = bundles.filter((b) => !dangling.includes(b))
+    const tmp = pkgPath + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(pkg, null, 2) + '\n', 'utf-8')
+    fs.renameSync(tmp, pkgPath)
+    logger.info('pruned dangling bundle entries', { removed: dangling })
+  } catch (err) {
+    logger.warn('prune dangling bundle entries failed', err)
+  }
+}
+
 /** 安装插件：自动备份 → 冲突预检 → dsh plugin add（R-10: 互斥锁防并发写坏 profile） */
 export async function installPlugin(pkg: string): Promise<PluginActionResult> {
   if (pluginOpBusy) return { ok: false, error: '插件操作进行中，请稍候' }
@@ -297,9 +442,14 @@ export async function installPlugin(pkg: string): Promise<PluginActionResult> {
     const snap = await backupManager.autoSnapshot('plugin-install:' + target)
     if (!snap) return { ok: false, error: '操作前自动备份失败，已中止' }
     logger.info('installing plugin', { pkg: target })
-    const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'add', target])
+    // ERR_PNPM_IGNORED_BUILDS：依赖已写入但 dsh 以 exit 1 收尾（reconcile 中断、面板误报失败）。
+    // 被拦包先补进 allowBuilds 白名单重试；仍失败时按成功处理并补 bundle 层注册。
+    const r = await execDshWithAllowBuilds(['plugin', '--profile', 'web', 'add', target])
     const output = (r.stdout + '\n' + r.stderr).trim()
-    if (r.code === 0) {
+    if (r.code === 0 || isIgnoredBuilds(r)) {
+      // dsh 在 exit 0 时会自己 reconcile 进 bundles（含 allowBuilds 重试成功后）;
+      // IGNORED_BUILDS 末端兜底统一补齐，避免市场显示「未进入 bundle 层」
+      reconcileInstalledBundles()
       return { ok: true, output }
     }
     return { ok: false, error: '安装失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
@@ -324,9 +474,11 @@ export async function uninstallPlugin(pkg: string): Promise<PluginActionResult> 
     const snap = await backupManager.autoSnapshot('plugin-uninstall:' + target)
     if (!snap) return { ok: false, error: '操作前自动备份失败，已中止' }
     logger.info('uninstalling plugin', { pkg: target })
-    const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'remove', target])
+    const r = await execDshWithAllowBuilds(['plugin', '--profile', 'web', 'remove', target])
     const output = (r.stdout + '\n' + r.stderr).trim()
-    if (r.code === 0) {
+    if (r.code === 0 || isIgnoredBuilds(r)) {
+      // IGNORED_BUILDS 路径 pnpm 已移除依赖但 dsh 可能未清 bundles → 清理悬空条目
+      pruneDanglingBundleEntries()
       return { ok: true, output }
     }
     return { ok: false, error: '卸载失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
@@ -368,9 +520,10 @@ export async function upgradePlugin(name: string, latest?: string): Promise<Plug
     const snap = await backupManager.autoSnapshot('plugin-upgrade:' + target)
     if (!snap) return { ok: false, error: '操作前自动备份失败，已中止' }
     logger.info('upgrading plugin', { pkg: target, spec })
-    const r = await dshManager.execDsh(['plugin', '--profile', 'web', 'add', spec])
+    const r = await execDshWithAllowBuilds(['plugin', '--profile', 'web', 'add', spec])
     const output = (r.stdout + '\n' + r.stderr).trim()
-    if (r.code === 0) {
+    if (r.code === 0 || isIgnoredBuilds(r)) {
+      reconcileInstalledBundles()
       return { ok: true, output }
     }
     return { ok: false, error: '升级失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
