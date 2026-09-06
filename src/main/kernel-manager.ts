@@ -453,20 +453,29 @@ export class KernelManager extends EventEmitter {
       let stdout = ''
       let stderr = ''
       let timedOut = false
+      let settled = false
       child.stdout?.on('data', (c: Buffer) => (stdout += c.toString()))
       child.stderr?.on('data', (c: Buffer) => (stderr += c.toString()))
       const timer = setTimeout(() => {
         timedOut = true
         logger.warn('kernel command timeout, killing process tree', { command, timeoutMs })
         this.killTree(child.pid ?? 0)
+        if (!settled) {
+          settled = true
+          resolvePromise({ code: -1, stdout, stderr: '命令超时（>' + timeoutMs / 1000 + 's），已终止' })
+        }
       }, timeoutMs)
       child.on('close', (code) => {
         clearTimeout(timer)
+        if (settled) return
+        settled = true
         if (timedOut) resolvePromise({ code: -1, stdout, stderr: '命令超时（>' + timeoutMs / 1000 + 's），已终止' })
         else resolvePromise({ code, stdout, stderr })
       })
       child.on('error', (err) => {
         clearTimeout(timer)
+        if (settled) return
+        settled = true
         resolvePromise({ code: -1, stdout: '', stderr: err.message })
       })
     })

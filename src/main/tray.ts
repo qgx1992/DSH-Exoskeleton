@@ -102,10 +102,7 @@ export function rebuildMenu(): void {
         }
         if (kernelInfo.available) {
           buttons.unshift('打开内核面板')
-          actions.unshift(() => {
-            windowManager.show()
-            windowManager.setAdminPanelVisible(true)
-          })
+          actions.unshift(() => windowManager.openPanelTab('kernels'))
         }
         const r = await dialog.showMessageBox(win, {
           type: 'info',

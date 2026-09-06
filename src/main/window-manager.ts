@@ -10,6 +10,7 @@ import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
 import { notificationHub } from './notification-hub'
+import type { DashboardTab } from '../shared/types'
 
 const TITLEBAR_HEIGHT = 36
 /** 管理面板左侧导航宽度（对应 renderer w-44 = 11rem = 176px），网页版视图从它右侧开始 */
@@ -392,6 +393,14 @@ export class WindowManager {
       this.webView.setVisible(false)
     }
     logger.info('web panel visibility', { visible, hasWebView: !!this.webView })
+  }
+
+  /** 主进程侧（托盘等）打开管理面板并定位到指定标签，同时同步渲染层面板状态 */
+  openPanelTab(tab: DashboardTab): void {
+    this.show()
+    this.setWebPanelVisible(false)
+    this.setAdminPanelVisible(true)
+    this.win?.webContents.send('panel:open', tab)
   }
 
   /** 懒创建官方网页版 DeepSeek 视图（独立 WebContentsView，仅创建一次，后续显示/隐藏复用） */

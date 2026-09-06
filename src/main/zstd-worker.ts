@@ -3,7 +3,7 @@
  * （Electron 内置 Node(20) 无 zstd，系统 Node ≥22.4 内置；无系统 Node 时优雅降级）
  */
 import { app } from 'electron'
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process'
+import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -36,16 +36,22 @@ export class ZstdWorkerClient {
   private pending = new Map<number, { resolve: (v: WorkerPayload) => void; timer: NodeJS.Timeout }>()
   private seq = 0
   private buffer = ''
+  /** 并发防护：同一时刻只允许一个 worker 启动流程 */
+  private ensureInFlight: Promise<boolean> | null = null
 
-  private resolveNode(): string | null {
+  private execFileAsync(cmd: string, args: string[], timeoutMs = 6_000): Promise<string | null> {
+    return new Promise((resolvePromise) => {
+      execFile(cmd, args, { windowsHide: true, timeout: timeoutMs, encoding: 'utf-8' }, (err, stdout) => {
+        resolvePromise(err ? null : stdout)
+      })
+    })
+  }
+
+  private async resolveNode(): Promise<string | null> {
     if (process.env.DSH_NODE && fs.existsSync(process.env.DSH_NODE)) return process.env.DSH_NODE
-    try {
-      const out = execFileSync('where', ['node'], { windowsHide: true, timeout: 6_000, encoding: 'utf-8' })
-      const p = out.trim().split(/\r?\n/)[0]
-      if (p && fs.existsSync(p) && fs.statSync(p).size > 0) return p
-    } catch {
-      /* noop */
-    }
+    const out = await this.execFileAsync('where', ['node'])
+    const p = out?.trim().split(/\r?\n/)[0]
+    if (p && fs.existsSync(p) && fs.statSync(p).size > 0) return p
     return null
   }
 
@@ -63,10 +69,20 @@ export class ZstdWorkerClient {
     return candidates[candidates.length - 1]
   }
 
-  private ensure(): boolean {
-    if (this.proc && !this.proc.killed) return true
-    const node = this.resolveNode()
+  private ensure(): Promise<boolean> {
+    if (this.proc && !this.proc.killed) return Promise.resolve(true)
+    if (!this.ensureInFlight) {
+      this.ensureInFlight = this.spawnWorker().finally(() => {
+        this.ensureInFlight = null
+      })
+    }
+    return this.ensureInFlight
+  }
+
+  private async spawnWorker(): Promise<boolean> {
+    const node = await this.resolveNode()
     if (!node) return false
+    if (this.proc && !this.proc.killed) return true
     try {
       this.proc = spawn(node, [this.workerPath()], {
         stdio: ['pipe', 'pipe', 'inherit'],
@@ -113,12 +129,11 @@ export class ZstdWorkerClient {
     }
   }
 
-  request(cmd: string, payload: Record<string, unknown> = {}): Promise<WorkerPayload> {
+  async request(cmd: string, payload: Record<string, unknown> = {}): Promise<WorkerPayload> {
+    if (!(await this.ensure())) {
+      return { ok: false, error: '未找到支持 zstd 的系统 Node' }
+    }
     return new Promise((resolvePromise) => {
-      if (!this.ensure()) {
-        resolvePromise({ ok: false, error: '未找到支持 zstd 的系统 Node' })
-        return
-      }
       const proc = this.proc
       if (!proc) {
         resolvePromise({ ok: false, error: 'worker not ready' })
@@ -153,6 +168,11 @@ export class ZstdWorkerClient {
     } catch {
       /* noop */
     }
+    for (const [, entry] of this.pending) {
+      clearTimeout(entry.timer)
+      entry.resolve({ ok: false, error: 'worker closed' })
+    }
+    this.pending.clear()
     this.proc = null
   }
 }

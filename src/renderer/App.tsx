@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { TitleBar } from './components/TitleBar'
 import { Dashboard } from './components/Dashboard'
 import { OnboardingWizard } from './components/OnboardingWizard'
-import type { DSHState, SetupStatus } from '../shared/types'
+import type { DSHState, SetupStatus, DashboardTab } from '../shared/types'
 
 const api = window.dshDesktop
 
@@ -15,7 +15,7 @@ export default function App(): React.JSX.Element {
   /** 管理面板（Dashboard）是否打开：打开时主进程隐藏 DSH Web UI 视图 */
   const [adminPanel, setAdminPanel] = useState(false)
   /** 管理面板当前激活标签（提升到 App：标题栏「网页版」按钮需能直接切到该标签） */
-  const [dashboardTab, setDashboardTab] = useState<'overview' | 'web' | 'status' | 'sessions' | 'settings' | 'kernels' | 'profiles' | 'plugins' | 'backup' | 'logs' | 'update'>('overview')
+  const [dashboardTab, setDashboardTab] = useState<DashboardTab>('overview')
 
   useEffect(() => {
     void api.app.getVersion().then(setAppVersion)
@@ -32,10 +32,15 @@ export default function App(): React.JSX.Element {
     //       状态更新由主进程推送驱动，挂载时已有一次 getState 兜底
     const offStatus = api.dsh.onStateChange(setDshState)
     const offMax = api.window.onMaximizeChange(setMaximized)
+    const offOpenPanel = api.window.onOpenPanel((tab) => {
+      setAdminPanel(true)
+      setDashboardTab(tab)
+    })
     void api.window.isMaximized().then(setMaximized)
     return () => {
       offStatus()
       offMax()
+      offOpenPanel()
     }
   }, [])
 

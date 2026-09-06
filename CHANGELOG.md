@@ -6,6 +6,13 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.9.0] - 2026-09-06
+
+### 🐛 Bug 修复
+- **托盘「打开内核面板」打不开面板**：托盘「发现更新」对话框里的「打开内核面板」之前只改了主进程的面板显隐，渲染层状态未同步，服务运行中会显示空白区域。现在新增 `panel:open` 主进程 → 渲染层同步通道（`DashboardTab` 统一类型 + preload `onOpenPanel`），点击后唤起窗口、打开管理面板并直接定位到「内核」标签。
+- **zstd worker 同步阻塞主进程**：系统 Node 探测由 `execFileSync` 改为异步 `execFile`（含并发启动防护），避免首次会话扫描时卡住主进程最多 6 秒；`close()` 时立即结算所有 pending 请求，不再空等 15 秒超时。
+- **子进程超时可能永久挂起**：内核依赖安装与 `dsh` 子命令超时后立即结算 Promise（返回 `-1` 超时错误），不再依赖 `taskkill` 后的 `close` 事件，避免失败进程不退出时面板操作一直转圈。
+
 ## [0.8.9] - 2026-09-06
 
 ### 🐛 Bug 修复
