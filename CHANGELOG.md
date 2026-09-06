@@ -6,6 +6,16 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.8.9] - 2026-09-06
+
+### 🐛 Bug 修复
+- **插件安装失败（exit 1）根治**：`dsh plugin` 内部裸调 `pnpm`，缺少 pnpm 的环境（零门槛装机）下所有插件安装/卸载/升级都失败。桌面端现在自愈：用嵌入式 Node 运行时的 npm 把 pnpm 预置到 `userData/pnpm` 隔离前缀（一次性联网，之后离线可用，复用内核镜像源配置），并注入 `dsh plugin` 子进程 PATH。
+- **「装完成功但提示安装失败（exit 1）」**：pnpm 10+/12 默认拦截依赖 build script（`ERR_PNPM_IGNORED_BUILDS`），pnpm 以 exit 1 收尾、依赖其实已写入。现在按成功处理（与内核安装 `isIgnoredBuilds` 同语义），并把被拦包自动写入 profile `pnpm-workspace.yaml` 的 `allowBuilds` 白名单（含 pnpm 自写的占位值）后重试一次，让构建脚本真正执行、dsh 正常完成 bundle reconcile。
+- **市场页「未声明 dsh.bundle，不会进入 profile bundle 层」**：IGNORED_BUILDS 使 `dsh plugin add` 中断了 bundle 注册，已装插件不在 `dsh.profile.bundles` 里。现在安装/升级后自动补注册（仅针对声明 `dsh.bundle` 的插件），并新增 `reconcileInstalledBundles()` 在服务就绪时修复历史欠账；卸载时清理悬空 bundle 条目。
+
+### 🧹 维护
+- 环境依赖提示：GitHub 来源插件（`github:owner/repo`）需要本机安装 Git（pnpm 用 git 解析仓库），npm 来源插件不受影响。
+
 ## [0.8.8] - 2026-09-04
 
 ### ✨ 新功能
