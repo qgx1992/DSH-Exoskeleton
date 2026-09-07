@@ -403,6 +403,36 @@ export function reconcileInstalledBundles(): void {
  * bundles 成员（防下次启动按名加载失败）。内核侧 bundle（@deepseek-ai/dsh-base 等）在
  * profile node_modules 存在 relink 链接，不会被误删。
  */
+/**
+ * web profile 官方基础 bundle（提供 tools/web/webServer/sessions 等基础 services；
+ * 内核自带、不在 profile dependencies 中）。`dsh plugin remove` 重写 bundles 时只保留
+ * deps 有名的条目，会把这里的 base 挤掉 → 基础 services 层不加载 → 全部插件 pending →
+ * dsh web 启动失败（plugin tree failed to load）。卸载后兑底补回首位，幂等。
+ */
+const BASE_BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']
+
+/** 确保官方 base bundles 恒在 dsh.profile.bundles 首位（R-3: 原子写） */
+function ensureBaseBundles(): void {
+  try {
+    const dir = profileDir()
+    const pkgPath = path.join(dir, 'package.json')
+    if (!fs.existsSync(pkgPath)) return
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'))
+    const bundles: string[] = pkg?.dsh?.profile?.bundles ?? []
+    const missing = BASE_BUNDLES.filter((b) => !bundles.includes(b))
+    if (missing.length === 0) return
+    pkg.dsh = pkg.dsh ?? {}
+    pkg.dsh.profile = pkg.dsh.profile ?? {}
+    pkg.dsh.profile.bundles = [...BASE_BUNDLES, ...bundles.filter((b) => !BASE_BUNDLES.includes(b))]
+    const tmp = pkgPath + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify(pkg, null, 2) + '\n', 'utf-8')
+    fs.renameSync(tmp, pkgPath)
+    logger.info('ensured base bundles', { added: missing })
+  } catch (err) {
+    logger.warn('ensure base bundles failed', err)
+  }
+}
+
 function pruneDanglingBundleEntries(): void {
   try {
     const dir = profileDir()
@@ -450,6 +480,8 @@ export async function installPlugin(pkg: string): Promise<PluginActionResult> {
       // dsh 在 exit 0 时会自己 reconcile 进 bundles（含 allowBuilds 重试成功后）;
       // IGNORED_BUILDS 末端兜底统一补齐，避免市场显示「未进入 bundle 层」
       reconcileInstalledBundles()
+      // dsh plugin add 的 reconcile 偶尔不保留官方 base bundles，兜底补回（见 ensureBaseBundles）
+      ensureBaseBundles()
       return { ok: true, output }
     }
     return { ok: false, error: '安装失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
@@ -479,6 +511,9 @@ export async function uninstallPlugin(pkg: string): Promise<PluginActionResult> 
     if (r.code === 0 || isIgnoredBuilds(r)) {
       // IGNORED_BUILDS 路径 pnpm 已移除依赖但 dsh 可能未清 bundles → 清理悬空条目
       pruneDanglingBundleEntries()
+      // dsh plugin remove 重写 bundles 时会挤掉官方 base（不在 deps），导致基础 services 层
+      // 缺失、所有插件 pending、服务起不来——卸载后兜底补回（见 ensureBaseBundles）
+      ensureBaseBundles()
       return { ok: true, output }
     }
     return { ok: false, error: '卸载失败（exit ' + r.code + '）', output: output.slice(0, 2000) }
@@ -524,6 +559,7 @@ export async function upgradePlugin(name: string, latest?: string): Promise<Plug
     const output = (r.stdout + '\n' + r.stderr).trim()
     if (r.code === 0 || isIgnoredBuilds(r)) {
       reconcileInstalledBundles()
+      ensureBaseBundles()
       return { ok: true, output }
     }
     return { ok: false, error: '升级失败（exit ' + r.code + '）', output: output.slice(0, 2000) }

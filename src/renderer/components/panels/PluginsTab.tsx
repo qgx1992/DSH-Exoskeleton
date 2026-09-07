@@ -78,7 +78,10 @@ export function PluginsTab(): React.JSX.Element {
   }, [loadCatalog, refreshCustomRecs, refreshInstalled])
 
   const isInstalled = (pkg: string): boolean => installed.some((i) => i.name === pkg)
-  const isRecommendedInstalled = (p: RecommendedPlugin): boolean => installed.some((i) => i.name === p.name)
+  // GitHub 源推荐的 name（展示名）与安装后的 deps key（installTarget，如 github:owner/repo）
+  // 不一致，需两者都匹配，否则已装插件永远显示「安装」
+  const isRecommendedInstalled = (p: RecommendedPlugin): boolean =>
+    installed.some((i) => i.name === p.name || i.name === p.installTarget)
 
   /** 推荐区数据源 = 内置精选 + 用户自定义（按 name 去重，内置优先） */
   const allRecommended: RecommendedPlugin[] = [

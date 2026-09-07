@@ -234,6 +234,24 @@ export class DSHManager extends EventEmitter {
     })
   }
 
+  /**
+   * 探测 git 可执行文件所在目录（pnpm 解析 github: 源需要裸 `git`）。
+   * 优先 `where git`，探测失败时兑底常见安装目录；找不到返回 null（不阻断安装尝试）。
+   */
+  private async resolveGitBinDir(): Promise<string | null> {
+    try {
+      const found = await this.execCapture('where', ['git'])
+      const first = found?.trim().split(/\r?\n/)[0]?.trim()
+      if (first) return path.dirname(first)
+    } catch {
+      /* noop */
+    }
+    for (const p of ['C:\\Program Files\\Git\\cmd', 'C:\\Program Files\\Git\\mingw64\\bin']) {
+      if (fs.existsSync(p)) return p
+    }
+    return null
+  }
+
   /** 并发防护入口：进行中的 start() 复用同一实例（H2） */
   async start(): Promise<void> {
     if (this.startInFlight) {
@@ -597,12 +615,25 @@ export class DSHManager extends EventEmitter {
     // 注入其目录到子进程 PATH，让 dsh 能找到裸命令 pnpm。
     const pnpm = await ensurePnpm(exe.command)
     const env: NodeJS.ProcessEnv = { ...process.env, DSH_HOME: dshHome }
+    const sep = path.delimiter
+    const cur = env.PATH || ''
+    const parts = cur.split(sep)
+    // 注入内置 Node 运行时目录到 PATH 前端：托管内核模式下 dsh 由 node.exe 直接
+    // 启动（exe.command 指向 runtimes/node/node.exe），该目录不在 PATH 上。
+    // `dsh plugin add` 内部 pnpm 重装依赖树时会执行 node-pty 等原生模块的 install
+    // 脚本（`node scripts/prebuild.js`），脚本 shell 按 PATH 找裸 `node`，缺失即报
+    // 「'node' 不是内部或外部命令」→ ERR_PNPM_EXECUTOR_LIFECYCLE_SCRIPT_FAILED →
+    // dsh exit 1 → 面板「升级失败（exit 1）」。注入后 dsh→pnpm→lifecycle 全链可寻 node。
+    const nodeDir = path.dirname(exe.command)
+    if (nodeDir && !parts.includes(nodeDir)) env.PATH = nodeDir + sep + cur
     if (pnpm.pnpmDir) {
-      const sep = path.delimiter
-      const cur = env.PATH || ''
-      const parts = cur.split(sep)
-      if (!parts.includes(pnpm.pnpmDir)) env.PATH = pnpm.pnpmDir + sep + cur
+      if (!parts.includes(pnpm.pnpmDir)) env.PATH = pnpm.pnpmDir + sep + env.PATH
     }
+    // 注入 git bin 目录：pnpm 解析 github: 源依赖裸 `git`（git ls-remote），桌面端
+    // 子进程 PATH 不完整时（与 node 同源问题）会报 ERR_PNPM_GIT_RESOLVE_FAILED:
+    // git executable not found on PATH → 面板「安装失败（exit 1）」。
+    const gitDir = await this.resolveGitBinDir()
+    if (gitDir && !parts.includes(gitDir)) env.PATH = gitDir + sep + env.PATH
     return new Promise((resolvePromise) => {
       const child = spawn(exe.command, [...exe.args, ...args], {
         env,
