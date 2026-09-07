@@ -58,11 +58,11 @@ export const RECOMMENDED_PLUGINS: RecommendedPlugin[] = [
     url: 'https://github.com/omdsh-dev/DSH-better-sidebar'
   },
   {
-    installTarget: '@wenbin_wb/dsh-bridge',
-    name: '@wenbin_wb/dsh-bridge',
-    description: '手机扫码远程访问：局域网 + 公网隧道 + 多 IM Bot',
+    installTarget: 'dsh-pocket',
+    name: 'dsh-pocket',
+    description: '手机扫码即同步访问电脑上的 DSH：局域网 + 公网，实时同屏（一个设置页搞定）',
     source: 'npm',
-    url: 'https://www.npmjs.com/package/@wenbin_wb/dsh-bridge'
+    url: 'https://github.com/shaobeichen/dsh-pocket'
   },
   {
     installTarget: 'github:baihejiangnan/dsh-session-context-menu',
