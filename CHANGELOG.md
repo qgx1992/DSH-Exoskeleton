@@ -6,6 +6,17 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [0.9.1] - 2026-09-07
+
+### 🐛 Bug 修复
+- **插件升级失败（exit 1）**：`dsh plugin add` 重装依赖树时执行 node-pty 等原生模块的 install 脚本，脚本按 PATH 找裸 `node` 失败（桌面端用内置 Node 运行时直接启动 dsh，该目录不在 PATH）→ `ERR_PNPM_EXECUTOR_LIFECYCLE_SCRIPT_FAILED`。现在把内置 Node 运行时目录注入 `dsh plugin` 子进程 PATH（与 pnpm 注入同源），升级不再被原生依赖卡住。
+- **GitHub 源插件装不上（exit 1）**：pnpm 解析 `github:owner/repo` 依赖裸调 `git ls-remote`，桌面端子进程 PATH 缺 git → `ERR_PNPM_GIT_RESOLVE_FAILED: git executable not found on PATH`。现在注入 git bin 目录（`where git` 探测 + 常见路径兑底）。
+- **卸载插件后服务起不来**：`dsh plugin remove` 重写 `dsh.profile.bundles` 时可能把官方基础 bundle（`@deepseek-ai/dsh-base`、`@deepseek-ai/dsh-web-app`）挤掉（不在 profile dependencies 中），基础 services 层（tools/web/webServer/sessions 等）缺失 → 所有插件 pending → `plugin tree failed to load` → 崩溃重启循环。现在安装/卸载/升级后 `ensureBaseBundles` 兑底补回，幂等。
+- **GitHub 源推荐插件「已安装」判断**：推荐条目的已安装判断兼容 `installTarget` 匹配，避免 name 与 deps key 不一致时已装插件仍显示「安装」。
+
+### ✨ 新功能
+- **推荐插件调整**：移除 `@wenbin_wb/dsh-bridge`，新增 `dsh-pocket`（手机扫码同步访问 DSH）。
+
 ## [0.9.0] - 2026-09-06
 
 ### 🐛 Bug 修复
