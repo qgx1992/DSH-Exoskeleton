@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LogEntry } from '../../../shared/types'
 import { Button } from '../ui/Button'
+import { Notice } from '../ui/Card'
 import { IconSearch } from '../ui/icons'
 
 /** 显示上限（截断旧日志，控制 DOM 规模） */
@@ -32,6 +33,9 @@ export function LogsTab(): React.JSX.Element {
   const timerRef = useRef<number | null>(null)
   /** R-5: 竞态防护——只接受最新一次请求的响应（丢弃乱序旧响应） */
   const reqRef = useRef(0)
+  /** 清除日志：进行中标志 + 结果提示（4s 自动消失） */
+  const [clearing, setClearing] = useState(false)
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
 
   useEffect(() => {
     const refresh = (): void => {
@@ -81,14 +85,48 @@ export function LogsTab(): React.JSX.Element {
     setFollow(box.scrollTop + box.clientHeight >= box.scrollHeight - 24)
   }
 
+  // 结果提示自动消失（避免长期占位）
+  useEffect(() => {
+    if (!msg) return
+    const t = window.setTimeout(() => setMsg(null), 4000)
+    return () => window.clearTimeout(t)
+  }, [msg])
+
+  /** 清除日志：删除日志文件（含 .1 轮转备份）+ 清空当前视图，属不可恢复操作 → 先弹确认 */
+  const clearLogs = async (): Promise<void> => {
+    if (!window.confirm('清除运行日志？\n\n· 删除日志文件及轮转备份（dsh-desktop.log、dsh-desktop.log.1）\n· 当前面板内容同时清空\n· 之后新产生的日志会继续记录\n\n确认清除？')) return
+    setClearing(true)
+    const r = await window.dshDesktop.logs.clear()
+    setClearing(false)
+    setMsg(r.ok ? { type: 'ok', text: '日志已清除' } : { type: 'err', text: r.error ?? '清除失败' })
+    if (r.ok) setLogs([])
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-ink">运行日志</h2>
-        <Button variant="secondary" size="sm" onClick={() => void window.dshDesktop.logs.openDir()}>
-          打开日志目录
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="danger"
+            size="sm"
+            loading={clearing}
+            disabled={clearing}
+            onClick={() => void clearLogs()}
+          >
+            {clearing ? '清除中…' : '清除日志'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void window.dshDesktop.logs.openDir()}>
+            打开日志目录
+          </Button>
+        </div>
       </div>
+
+      {msg && (
+        <div className="mb-2">
+          <Notice tone={msg.type}>{msg.text}</Notice>
+        </div>
+      )}
 
       {/* 过滤工具条 */}
       <div className="mb-2 flex flex-wrap items-center gap-1.5">

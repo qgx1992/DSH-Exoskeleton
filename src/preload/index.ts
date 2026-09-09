@@ -102,7 +102,8 @@ const api: DesktopApi = {
   },
   logs: {
     list: (limit) => ipcRenderer.invoke('logs:list', limit),
-    openDir: () => ipcRenderer.invoke('logs:openDir')
+    openDir: () => ipcRenderer.invoke('logs:openDir'),
+    clear: () => ipcRenderer.invoke('logs:clear')
   },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),

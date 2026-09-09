@@ -492,6 +492,8 @@ export interface DesktopApi {
   logs: {
     list: (limit?: number) => Promise<LogEntry[]>
     openDir: () => Promise<void>
+    /** 清空运行日志：内存缓冲 + 日志文件（含 .1 轮转备份） */
+    clear: () => Promise<SaveResult>
   }
   app: {
     getVersion: () => Promise<string>

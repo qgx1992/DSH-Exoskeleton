@@ -290,6 +290,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('logs:openDir', () => {
     void shell.showItemInFolder(logger.getFile())
   })
+  ipcMain.handle('logs:clear', () => logger.clear())
 
   // ---------- 应用 ----------
   ipcMain.handle('app:getVersion', () => app.getVersion())

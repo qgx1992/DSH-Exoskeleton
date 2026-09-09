@@ -21,6 +21,8 @@ class Logger {
   private pendingLines: string[] = []
   /** R-14: 轮转进行中标志（防止并发触发） */
   private rotating = false
+  /** 清空操作代号：clear() 自增后，进行中的轮转回调据此放弃（否则会把已删除的旧文件又改名回来） */
+  private generation = 0
 
   init(): void {
     try {
@@ -82,10 +84,16 @@ class Logger {
   /** R-14: 运行期轮转：关闭旧流 → 改名 .1 → 重建流 → 补写暂存行 */
   private rotate(): void {
     this.rotating = true
+    const gen = this.generation
     const old = this.stream
     this.stream = null
     if (old) {
       old.end(() => {
+        // clear() 已介入：旧文件已被删除，本次轮转作废（pendingLines 交给 clear 补写）
+        if (gen !== this.generation) {
+          this.rotating = false
+          return
+        }
         try {
           if (fs.existsSync(this.filePath)) fs.renameSync(this.filePath, this.filePath + '.1')
           this.stream = fs.createWriteStream(this.filePath, { flags: 'a' })
@@ -128,6 +136,42 @@ class Logger {
 
   list(limit = 200): LogEntry[] {
     return this.memory.slice(-limit)
+  }
+
+  /**
+   * 清空日志：内存缓冲 + 日志文件（含 .1 轮转备份）。
+   * 顺序讲究：先清内存（面板立即空白）→ 关流 → 删文件 → 重建流并补写期间产生的日志，
+   * 这样清空过程中新产生的日志既不丢文件也不丢视图；Windows 下先关流再删更稳。
+   */
+  async clear(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.filePath) return { ok: false, error: '日志尚未初始化' }
+    this.generation++
+    this.memory = []
+    const old = this.stream
+    this.stream = null
+    await new Promise<void>((resolve) => {
+      if (!old) return resolve()
+      old.end(() => resolve())
+    })
+    try {
+      for (const p of [this.filePath, this.filePath + '.1']) {
+        try {
+          fs.rmSync(p, { force: true })
+        } catch {
+          /* 单文件删除失败（如被外部编辑器占用）不阻断整体清空 */
+        }
+      }
+      this.bytesWritten = 0
+      const pending = this.pendingLines
+      this.pendingLines = []
+      this.stream = fs.createWriteStream(this.filePath, { flags: 'a' })
+      for (const l of pending) this.stream.write(l)
+      this.bytesWritten += pending.reduce((n, l) => n + Buffer.byteLength(l), 0)
+      this.rotating = false
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   getFile(): string {
