@@ -50,3 +50,21 @@ export function compareVersions(a: string, b: string): number {
   }
   return 0
 }
+
+/**
+ * 是否 rc 通道版本（v0.x.y-rc.N）。
+ * 内核「推荐 / 可升级」口径统一为 rc（正式发布通道）：alpha/next 等预览版一律不推。
+ */
+export function isRcVersion(v: string): boolean {
+  return /^\d+\.\d+\.\d+-rc\.\d+$/.test(v.trim())
+}
+
+/** 从版本列表中挑出「推荐」版本：rc 通道里版本号最大者；无 rc 时返回 null（不标推荐） */
+export function pickLatestRcVersion(versions: Iterable<string>): string | null {
+  let best: string | null = null
+  for (const v of versions) {
+    if (!isRcVersion(v)) continue
+    if (best === null || compareVersions(v, best) > 0) best = v
+  }
+  return best
+}

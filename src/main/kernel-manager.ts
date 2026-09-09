@@ -14,7 +14,7 @@ import { spawn, execFile } from 'node:child_process'
 import { logger } from './logger'
 import { configStore } from './config'
 import { runtimeManager } from './runtime-manager'
-import { compareVersions } from '../shared/version'
+import { compareVersions, isRcVersion } from '../shared/version'
 import type { KernelBootHealth, KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
@@ -698,7 +698,12 @@ export class KernelManager extends EventEmitter {
     return null
   }
 
-  /** 内核更新检测（阶段 B：综合 dist-tags 各通道取真实最新版） */
+  /**
+   * 内核更新检测（阶段 B）
+   * 口径：只认 rc（正式发布通道）版本，alpha/next 预览版不推（与「安装新版本」的「推荐」一致）。
+   * 不能只看 dist-tags.latest：@deepseek-ai/dsh 的 latest 会长期停在旧版（如 0.1.1-rc.2），
+   * 新版走 rc/next 通道发布；取所有通道里版本最大的 rc 作为「可升级最新版」。
+   */
   async checkUpdate(): Promise<KernelUpdateInfo> {
     const cfg = configStore.get()
     const current = cfg.kernelMode === 'managed' ? cfg.defaultKernelVersion : null
@@ -720,14 +725,19 @@ export class KernelManager extends EventEmitter {
       if (!res.ok) throw new Error('registry ' + res.status)
       const data = (await res.json()) as { 'dist-tags'?: Record<string, string> }
       const tags = data['dist-tags'] ?? {}
-      // 不能只看 dist-tags.latest：@deepseek-ai/dsh 的 latest 会长期停在旧稳定版（如 0.1.1-rc.2），
-      // 新版本走 alpha/next 通道发布。取全部通道里的最大版本作为“可升级最新版”，
-      // 否则会把比当前更旧的 tag 当成新版本（误报升级 + 漏报真新版）。
+      // 同版本被多个 tag 指向时（如 latest 与 next 都指 0.1.2-rc.1），按 tag 语义取更“正式”的那个
+      const tagPriority = (t: string): number => (t === 'latest' ? 0 : t === 'rc' ? 1 : t === 'next' ? 2 : 3)
       let latest: string | null = null
       let latestTag: string | null = null
       for (const [tag, ver] of Object.entries(tags)) {
-        if (typeof ver !== 'string' || !KernelManager.isValidVersion(ver)) continue
-        if (latest === null || compareVersions(ver, latest) > 0) {
+        if (typeof ver !== 'string' || !isRcVersion(ver)) continue
+        if (latest === null) {
+          latest = ver
+          latestTag = tag
+          continue
+        }
+        const cmp = compareVersions(ver, latest)
+        if (cmp > 0 || (cmp === 0 && latestTag !== null && tagPriority(tag) < tagPriority(latestTag))) {
           latest = ver
           latestTag = tag
         }

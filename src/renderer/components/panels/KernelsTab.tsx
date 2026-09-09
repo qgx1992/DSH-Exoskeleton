@@ -8,7 +8,7 @@ import type {
   KernelUpdateInfo,
   RuntimeInfo
 } from '../../../shared/types'
-import { DEFAULT_KERNEL_VERSION } from '../../../shared/kernel-defaults'
+import { pickLatestRcVersion } from '../../../shared/version'
 import { Button } from '../ui/Button'
 import { RowNotice, type RowMessage } from '../ui/RowNotice'
 import { Badge } from '../ui/Badge'
@@ -249,6 +249,8 @@ export function KernelsTab(): React.JSX.Element {
 
   const activeVersion = cfg?.kernelMode === 'managed' ? cfg.defaultKernelVersion : null
   const rtBusy = runtime?.busy !== undefined && runtime.busy !== 'idle'
+  /** 推荐口径：只推 rc（正式发布通道）最新版，alpha 预览版不标推荐（与内核更新检测同一口径） */
+  const recommended = pickLatestRcVersion(available.map((v) => v.version))
 
   return (
     <div className="flex flex-col gap-6">
@@ -480,7 +482,7 @@ export function KernelsTab(): React.JSX.Element {
                 v{v.version}
                 {installed.some((i) => i.version === v.version)
                   ? '（已安装）'
-                  : v.version === DEFAULT_KERNEL_VERSION
+                  : v.version === recommended
                     ? '（推荐）'
                     : ''}
               </option>
