@@ -153,18 +153,17 @@ export function ProfilesTab(): React.JSX.Element {
         </div>
 
         <div className="mt-4 flex gap-2">
-          <div className="flex-1">
-            <Input
-              mono={false}
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void create()
-              }}
-              placeholder="新档案名称，例如：实验项目A"
-            />
-          </div>
+          <Input
+            mono={false}
+            wrapperClassName="flex-1"
+            type="text"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void create()
+            }}
+            placeholder="新档案名称，例如：实验项目A"
+          />
           <Button
             variant="primary"
             loading={busy === '__create__'}

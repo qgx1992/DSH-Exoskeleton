@@ -133,7 +133,8 @@ export function SettingsTab(): React.JSX.Element {
                 if (n !== cfg.port) void save({ port: n })
               }}
               error={portError || undefined}
-              className="w-28 text-right"
+              wrapperClassName="w-28 shrink-0"
+              className="text-right"
             />
           </div>
 
@@ -161,8 +162,9 @@ export function SettingsTab(): React.JSX.Element {
                 if (v !== cfg.dshHome) void save({ dshHome: v })
               }}
               error={dshHomeError || undefined}
-              placeholder="例如 C:\\Users\\you\\.dsh"
-              className="w-72 text-xs"
+              placeholder="例如 C:\Users\you\.dsh"
+              wrapperClassName="w-64 shrink-0"
+              className="text-xs"
             />
           </div>
 
@@ -199,16 +201,23 @@ export function SettingsTab(): React.JSX.Element {
             />
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
               <div className="text-ink">会话完成通知</div>
-              <div className="mt-0.5 text-xs text-ink-3">Agent 会话结束后发送 Windows 通知</div>
+              <div className="mt-0.5 text-xs text-ink-3">
+                每轮 = 每次会话结束都提醒；聚合 = 同一会话在窗口内的多轮合并为一条
+              </div>
             </div>
-            <Toggle
-              checked={cfg.notifySessionDone !== 'off'}
-              onChange={(v) => void save({ notifySessionDone: v ? 'per-turn' : 'off' })}
-              aria-label="会话完成通知"
-            />
+            {/* 三态选择：旧版是 Toggle，只能表达 per-turn/off，aggregate 在界面上不可达（死配置） */}
+            <Select
+              value={cfg.notifySessionDone}
+              onChange={(e) => void save({ notifySessionDone: e.target.value as AppConfig['notifySessionDone'] })}
+              className="w-52 shrink-0"
+            >
+              <option value="off">关闭</option>
+              <option value="per-turn">每轮都通知</option>
+              <option value="aggregate">聚合（同会话合并）</option>
+            </Select>
           </div>
 
           <div className="flex items-center justify-between">
@@ -239,10 +248,14 @@ export function SettingsTab(): React.JSX.Element {
             </Select>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div>
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
               <div className="text-ink">通知聚合窗口（毫秒）</div>
-              <div className="mt-0.5 text-xs text-ink-3">「聚合」模式下同一会话多轮合并为一条；默认 5000</div>
+              <div className="mt-0.5 text-xs text-ink-3">
+                {cfg.notifySessionDone === 'aggregate'
+                  ? '同一会话在该窗口内的多轮合并为一条；默认 5000'
+                  : '仅在「聚合」模式下生效（当前未启用）'}
+              </div>
             </div>
             <Input
               type="number"
@@ -255,7 +268,9 @@ export function SettingsTab(): React.JSX.Element {
               }}
               onBlur={() => void saveAggWindow()}
               error={aggError || undefined}
-              className="w-28 text-right"
+              disabled={cfg.notifySessionDone !== 'aggregate'}
+              wrapperClassName="w-28 shrink-0"
+              className="text-right"
             />
           </div>
 
@@ -314,7 +329,7 @@ export function SettingsTab(): React.JSX.Element {
               if (e.key === 'Enter') void saveKey()
             }}
             placeholder="输入新的 API Key（sk-...）"
-            className="flex-1"
+            wrapperClassName="min-w-0 flex-1"
           />
           <Button variant="primary" loading={keyBusy} disabled={!keyInput.trim() || keyBusy} onClick={() => void saveKey()}>
             {keyBusy ? '保存中…' : '保存'}

@@ -118,18 +118,17 @@ export function BackupTab(): React.JSX.Element {
         </p>
 
         <div className="mt-4 flex gap-2">
-          <div className="flex-1">
-            <Input
-              mono={false}
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void create()
-              }}
-              placeholder="存档名称（可选，默认 manual）"
-            />
-          </div>
+          <Input
+            mono={false}
+            wrapperClassName="flex-1"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void create()
+            }}
+            placeholder="存档名称（可选，默认 manual）"
+          />
           <Button variant="primary" loading={creating} disabled={creating} onClick={() => void create()}>
             {creating ? '创建中…' : '创建存档'}
           </Button>

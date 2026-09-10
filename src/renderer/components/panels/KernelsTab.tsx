@@ -485,7 +485,8 @@ export function KernelsTab(): React.JSX.Element {
                 }}
                 onBlur={() => void saveQuota()}
                 error={quotaError || undefined}
-                className="w-20 text-right"
+                wrapperClassName="w-20 shrink-0"
+                className="text-right"
               />
               <span>MB（0 = 不限）</span>
             </div>
