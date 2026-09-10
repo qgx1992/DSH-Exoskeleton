@@ -442,7 +442,11 @@ export class DSHManager extends EventEmitter {
       this.healthTimer = null
     }
     const wasStopping = this.stopping
-    logger.warn('dsh process exited', { code, signal, stopping: wasStopping })
+    // 分级：主动停止（stop()/重启换内核）是正常流程 → INFO；只有非预期退出才是 WARN，
+    // 否则总览「日志告警」会被每次重启刷成假告警（stopping:true 的 SIGTERM 属正常）
+    const exitDetail = { code, signal, stopping: wasStopping }
+    if (wasStopping) logger.info('dsh process exited (stopped)', exitDetail)
+    else logger.warn('dsh process exited', exitDetail)
 
     if (wasStopping) {
       this.stopping = false

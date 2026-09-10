@@ -244,7 +244,9 @@ export class WindowManager {
         void viewSession.cookies.remove(`http://${c.domain}${c.path ?? '/'}`, c.name).catch(() => {})
       }
       if (auth.length > 2) {
-        logger.warn('dsh view stale auth cookies cleared', { cleared: auth.length - 2 })
+        // 正常维护动作（仅保留最近 2 个 dsh-auth cookie，防请求头超 16KB 上限），
+        // 不是异常——记 INFO，避免总览「日志告警」被每次内核重启刷成假告警
+        logger.info('dsh view stale auth cookies cleared', { cleared: auth.length - 2 })
       }
     }).catch(() => {})
     this.view.webContents.loadURL(url)
