@@ -44,7 +44,15 @@ red=危险/错误，gray=中性。**服务「运行中」用 success 呼吸光�
 - Secondary · surface-2 底 + rule 边 · 同圆角
 - Ghost · 透明，hover 浮出白 5% 底
 - Danger · 红字 ghost，hover 红底 10%；窗口关闭钮例外（hover 红实底）
+- Danger·solid · 红实底 + 白字，仅用于确认弹层里的破坏性主操作（如删除/恢复/卸载），页面上禁止使用
 - Accent（soft）· 金 15% 底 + 金字，用于行内「激活/设为默认」类操作
+
+## Variants
+
+- `Modal`（`components/ui/Modal.tsx`）· 应用内弹层唯一原语：遮罩 `overlay-in` + 内容 `modal-in`、Esc/遮罩关闭、焦点锁定与归还。
+  `confirm()` 场景用 `useConfirm()`（`components/ui/Confirm.tsx`）取代 `window.confirm`；页面内不得再自绘遮罩。
+- `Input`（`components/ui/Field.tsx`）· `mono` 默认 true（数据/密钥/端口用等宽）；名称、搜索等自然语言文本传 `mono={false}`。
+- `SearchInput`（`components/ui/Field.tsx`）· 带放大镜图标的搜索框统一实现，禁止在各页复制粘贴 input + 图标。
 
 ## Motion
 

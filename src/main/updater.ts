@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { windowManager } from './window-manager'
 import { notificationHub } from './notification-hub'
+import { compareVersions } from '../shared/version'
 import type { UpdateInfo } from '../shared/types'
 
 const REPO = 'qgx1992/DSH-Exoskeleton'
@@ -23,9 +24,29 @@ class Updater extends EventEmitter {
   /** R-19: 进度广播节流（下载进度事件可能每秒数十次，避免高频 IPC） */
   private lastProgressEmit = 0
 
-  /** 仅打包版初始化 electron-updater */
+  /**
+   * 便携版：electron-builder 在运行时注入 PORTABLE_EXECUTABLE_DIR。
+   * 注意便携版的 app.isPackaged 同样为 true，但 exe 无法被 electron-updater 就地替换
+   * （上游不支持 portable 目标）——必须与开发版一样走「跳转下载页」分支，
+   * 否则用户点「立即重启安装」会调 quitAndInstall 而行为未定义。
+   */
+  private get isPortable(): boolean {
+    return !!process.env.PORTABLE_EXECUTABLE_DIR
+  }
+
+  /** 能不能走 electron-updater 静默更新：仅安装版（NSIS）支持 */
+  private get canAutoUpdate(): boolean {
+    return app.isPackaged && !this.isPortable
+  }
+
+  /** 仅安装版初始化 electron-updater */
   init(): void {
-    if (!app.isPackaged || this.initialized) return
+    if (!this.canAutoUpdate) {
+      // 便携版/开发版：没有可用的静默更新通道，记一条供日志页排查
+      if (this.isPortable) logger.info('updater: 便携版（PORTABLE_EXECUTABLE_DIR）→ 走下载页引导，不启用 electron-updater')
+      return
+    }
+    if (this.initialized) return
     this.initialized = true
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
@@ -113,13 +134,13 @@ class Updater extends EventEmitter {
     if (this.cache && !force && !this.cache.error) return this.cache
     this.init()
 
-    if (app.isPackaged) {
+    if (this.canAutoUpdate) {
       const base = this.base()
       try {
         const result = await autoUpdater.checkForUpdates()
         const version = result?.updateInfo?.version
         base.latest = version ?? null
-        base.available = !!version && version !== app.getVersion()
+        base.available = !!version && this.needsUpdate(base.current, version)
         base.url = RELEASES_URL
         base.checkedAt = Date.now()
         logger.info('update check done (electron-updater)', { current: base.current, latest: version })
@@ -132,7 +153,7 @@ class Updater extends EventEmitter {
       return base
     }
 
-    // 开发版：GitHub API 占位（便携版同样提示手动下载）
+    // 开发版 / 便携版：GitHub API 查最新 Release，引导手动下载替换
     const base = this.base()
     try {
       const ctrl = new AbortController()
@@ -159,10 +180,10 @@ class Updater extends EventEmitter {
     return base
   }
 
-  /** 安装更新：打包版调 quitAndInstall；开发/便携版打开下载页 */
+  /** 安装更新：安装版调 quitAndInstall；便携版/开发版打开下载页 */
   install(): void {
     if (this.installing) return
-    if (app.isPackaged) {
+    if (this.canAutoUpdate) {
       this.installing = true
       this.cache = { ...(this.cache ?? this.base()), installing: true }
       this.emitStatus()
@@ -175,17 +196,14 @@ class Updater extends EventEmitter {
     })
   }
 
+  /**
+   * 版本比较：统一走 shared/version 的 compareVersions（支持 -rc.N / -beta.N 预发布后缀）。
+   * 旧实现只取 x.y.z 数字段 → 0.9.2-beta.1 与 0.9.2 被判为相等，
+   * 结果 beta 测试用户收不到「回正式版」的升级提示。
+   */
   private needsUpdate(current: string, latest: string): boolean {
-    const cv = this.parseVersion(current)
-    const lv = this.parseVersion(latest)
-    if (!cv || !lv) return false
-    return lv > cv
-  }
-
-  private parseVersion(v: string): number[] | null {
-    const m = v.match(/(\d+)\.(\d+)\.(\d+)/)
-    if (!m) return null
-    return [Number(m[1]), Number(m[2]), Number(m[3])]
+    if (!current || !latest) return false
+    return compareVersions(latest, current) > 0
   }
 }
 

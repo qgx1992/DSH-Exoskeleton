@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { LogEntry } from '../../../shared/types'
 import { Button } from '../ui/Button'
 import { Notice } from '../ui/Card'
-import { IconSearch } from '../ui/icons'
+import { useConfirm } from '../ui/Confirm'
+import { SearchInput } from '../ui/Field'
 
 /** 显示上限（截断旧日志，控制 DOM 规模） */
 const DISPLAY_LIMIT = 200
@@ -36,6 +37,7 @@ export function LogsTab(): React.JSX.Element {
   /** 清除日志：进行中标志 + 结果提示（4s 自动消失） */
   const [clearing, setClearing] = useState(false)
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const confirm = useConfirm()
 
   useEffect(() => {
     const refresh = (): void => {
@@ -94,7 +96,13 @@ export function LogsTab(): React.JSX.Element {
 
   /** 清除日志：删除日志文件（含 .1 轮转备份）+ 清空当前视图，属不可恢复操作 → 先弹确认 */
   const clearLogs = async (): Promise<void> => {
-    if (!window.confirm('清除运行日志？\n\n· 删除日志文件及轮转备份（dsh-desktop.log、dsh-desktop.log.1）\n· 当前面板内容同时清空\n· 之后新产生的日志会继续记录\n\n确认清除？')) return
+    const ok = await confirm({
+      title: '清除运行日志？',
+      body: '· 删除日志文件及轮转备份（dsh-desktop.log、dsh-desktop.log.1）\n· 当前面板内容同时清空\n· 之后新产生的日志会继续记录',
+      confirmText: '清除',
+      danger: true
+    })
+    if (!ok) return
     setClearing(true)
     const r = await window.dshDesktop.logs.clear()
     setClearing(false)
@@ -143,16 +151,12 @@ export function LogsTab(): React.JSX.Element {
             {f.label}
           </button>
         ))}
-        <div className="relative ml-auto">
-          <IconSearch size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索日志…"
-            className="w-56 rounded-control border border-rule bg-surface-2 py-1 pl-7 pr-2 text-xs text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60"
-          />
-        </div>
+        <SearchInput
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索日志…"
+          className="ml-auto w-56"
+        />
       </div>
 
       {/* 日志区：可选中复制 */}

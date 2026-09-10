@@ -6,6 +6,8 @@ import { Badge } from '../ui/Badge'
 import { Card, Notice } from '../ui/Card'
 import { RowNotice, type RowMessage } from '../ui/RowNotice'
 import { EmptyState } from '../ui/EmptyState'
+import { useConfirm } from '../ui/Confirm'
+import { SearchInput } from '../ui/Field'
 import { IconSearch } from '../ui/icons'
 
 export function PluginsTab(): React.JSX.Element {
@@ -17,6 +19,7 @@ export function PluginsTab(): React.JSX.Element {
   const [installingAll, setInstallingAll] = useState(false)
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [message, setMessage] = useState<RowMessage | null>(null)
+  const confirm = useConfirm()
   /** 行内结果提示（key = 插件 name / installTarget）：操作结果跟随触发它的插件行，
    *  而非页面顶/底横幅（长列表里看不到反馈）；顶部全量操作（检查更新/一键安装）仍用 message */
   const [rowMsg, setRowMsg] = useState<Record<string, RowMessage | null>>({})
@@ -155,7 +158,13 @@ export function PluginsTab(): React.JSX.Element {
   }
 
   const uninstall = async (name: string): Promise<void> => {
-    if (!window.confirm('卸载插件「' + name + '」？卸载前会自动创建备份快照。')) return
+    const ok = await confirm({
+      title: `卸载插件「${name}」？`,
+      body: '卸载前会自动创建备份快照。',
+      confirmText: '卸载',
+      danger: true
+    })
+    if (!ok) return
     setBusyName(name)
     setRow(name, null)
     try {
@@ -181,6 +190,12 @@ export function PluginsTab(): React.JSX.Element {
   }
 
   const pendingCount = allRecommended.filter((p) => !isRecommendedInstalled(p)).length
+  /**
+   * 全局忙锁：任一插件操作在跑（含一键安装全部）时，其它行的安装/升级/卸载与「检查更新」全部禁用。
+   * dsh plugin 会重写同一份依赖树，并发执行会互相踩；旧实现每行只禁用自己（busyName === p.name），
+   * A 行在跑时 B 行照样能点，等于没锁。
+   */
+  const pluginBusy = busyName !== null || installingAll
 
   return (
     <div className="flex flex-col gap-4">
@@ -194,7 +209,7 @@ export function PluginsTab(): React.JSX.Element {
             variant="secondary"
             size="sm"
             loading={checkingUpdates}
-            disabled={checkingUpdates || installed.length === 0}
+            disabled={checkingUpdates || pluginBusy || installed.length === 0}
             onClick={() => void checkUpdates()}
           >
             {checkingUpdates ? '检查中…' : '检查更新'}
@@ -237,7 +252,7 @@ export function PluginsTab(): React.JSX.Element {
                       variant="primary"
                       size="sm"
                       loading={busyName === p.name}
-                      disabled={busyName === p.name}
+                      disabled={pluginBusy}
                       onClick={() => void upgrade(p.name, upd?.latest ?? undefined)}
                     >
                       {busyName === p.name ? '升级中…' : '升级'}
@@ -248,13 +263,13 @@ export function PluginsTab(): React.JSX.Element {
                     variant="secondary"
                     size="sm"
                     loading={recBusy === p.name}
-                    disabled={recBusy !== null || busyName === p.name || isRecommendedAnywhere(p.name)}
+                    disabled={recBusy !== null || pluginBusy || isRecommendedAnywhere(p.name)}
                     onClick={() => void addRecommend(p.name)}
                     title={isRecommendedAnywhere(p.name) ? '已在推荐列表中' : '加入推荐列表，展示在下方「推荐插件」区'}
                   >
                     {recBusy === p.name ? '加入中…' : isRecommendedAnywhere(p.name) ? '已推荐' : '加入推荐'}
                   </Button>
-                  <Button variant="danger" size="sm" disabled={busyName === p.name} onClick={() => void uninstall(p.name)}>
+                  <Button variant="danger" size="sm" disabled={pluginBusy} onClick={() => void uninstall(p.name)}>
                     {busyName === p.name ? '处理中…' : '卸载'}
                   </Button>
                   </div>
@@ -274,7 +289,7 @@ export function PluginsTab(): React.JSX.Element {
             variant="primary"
             size="sm"
             loading={installingAll}
-            disabled={pendingCount === 0 || installingAll}
+            disabled={pendingCount === 0 || pluginBusy}
             onClick={() => void installAllRecommended()}
           >
             {installingAll ? '安装中…' : pendingCount === 0 ? '全部已安装' : '一键安装全部（' + pendingCount + '）'}
@@ -307,7 +322,7 @@ export function PluginsTab(): React.JSX.Element {
                   variant="primary"
                   size="sm"
                   loading={busy}
-                  disabled={done || busy || installingAll}
+                  disabled={done || pluginBusy}
                   onClick={() => void install(p.installTarget)}
                 >
                   {busy ? '安装中…' : done ? '已安装' : '安装'}
@@ -318,7 +333,7 @@ export function PluginsTab(): React.JSX.Element {
                     variant="danger"
                     size="sm"
                     loading={recBusy === p.name}
-                    disabled={recBusy !== null}
+                    disabled={recBusy !== null || pluginBusy}
                     onClick={() => void removeRecommend(p)}
                     title="从推荐列表移除（不会卸载插件）"
                   >
@@ -338,19 +353,15 @@ export function PluginsTab(): React.JSX.Element {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-semibold tracking-wider text-ink-2">社区插件</h3>
           <div className="flex gap-2">
-            <div className="relative">
-              <IconSearch size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void loadCatalog(query)
-                }}
-                placeholder="搜索 dsh-plugin…"
-                className="w-56 rounded-control border border-rule bg-surface-2 py-1.5 pl-7 pr-2.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void loadCatalog(query)
+              }}
+              placeholder="搜索 dsh-plugin…"
+              className="w-56"
+            />
             <Button variant="secondary" size="sm" loading={loadingCatalog} disabled={loadingCatalog} onClick={() => void loadCatalog(query)}>
               {loadingCatalog ? '搜索中…' : '搜索'}
             </Button>
@@ -392,7 +403,7 @@ export function PluginsTab(): React.JSX.Element {
                 variant="primary"
                 size="sm"
                 loading={busyName === p.packageName}
-                disabled={isInstalled(p.packageName) || busyName === p.packageName}
+                disabled={isInstalled(p.packageName) || pluginBusy}
                 onClick={() => void install(p.packageName)}
               >
                 {busyName === p.packageName ? '安装中…' : isInstalled(p.packageName) ? '已安装' : '安装'}

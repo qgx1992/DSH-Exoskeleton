@@ -16,7 +16,7 @@ import { kernelManager } from './kernel-manager'
 import { runtimeManager } from './runtime-manager'
 import { trialBootManagedKernel, compatPatchPathFor } from './kernel-compat'
 import { listProfiles, createProfile, deleteProfile, activateProfile, setProfileKernel } from './profiles'
-import { listSessions, openSession, removeSession, exportSession, showSessionInFolder, isSessionId } from './sessions'
+import { listSessions, countSessions, openSession, removeSession, exportSession, showSessionInFolder, isSessionId } from './sessions'
 import { notify } from './notify'
 import type { AppConfig } from '../shared/types'
 
@@ -198,6 +198,8 @@ export function registerIpcHandlers(): void {
 
   // ---------- 会话管理（P0：总览/会话页）----------
   ipcMain.handle('sessions:list', (_e, limit?: number) => listSessions(typeof limit === 'number' ? limit : undefined))
+  // 统计专用：只扫目录不解压（总览页的「会话总数」不能拿列表长度充当）
+  ipcMain.handle('sessions:count', () => countSessions())
   ipcMain.handle('sessions:open', async (_e, uuid: string) => {
     if (!isSessionId(uuid)) return { ok: false, error: '非法会话 ID' }
     return openSession(uuid)

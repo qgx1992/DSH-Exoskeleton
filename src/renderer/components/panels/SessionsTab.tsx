@@ -3,8 +3,9 @@ import type { SessionInfo } from '../../../shared/types'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, Notice } from '../ui/Card'
+import { useConfirm } from '../ui/Confirm'
+import { SearchInput } from '../ui/Field'
 import { EmptyState } from '../ui/EmptyState'
-import { IconSearch } from '../ui/icons'
 
 interface Props {
   /** 关闭管理面板，回到 DSH Web UI（打开会话后自动切回） */
@@ -28,6 +29,7 @@ export function SessionsTab({ onOpenWebUI }: Props): React.JSX.Element {
   const [loading, setLoading] = useState(false)
   const [busyUuid, setBusyUuid] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const confirm = useConfirm()
 
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true)
@@ -86,7 +88,13 @@ export function SessionsTab({ onOpenWebUI }: Props): React.JSX.Element {
   }
 
   const remove = async (s: SessionInfo): Promise<void> => {
-    if (!window.confirm(`删除会话「${s.title}」？\n\n将删除目录 ${s.sessionDir}，此操作不可恢复。`)) return
+    const ok = await confirm({
+      title: `删除会话「${s.title}」？`,
+      body: `将删除目录 ${s.sessionDir}，此操作不可恢复。`,
+      confirmText: '删除',
+      danger: true
+    })
+    if (!ok) return
     setBusyUuid(s.uuid)
     setMessage(null)
     try {
@@ -109,16 +117,12 @@ export function SessionsTab({ onOpenWebUI }: Props): React.JSX.Element {
             </p>
           </div>
           <div className="flex gap-2">
-            <div className="relative">
-              <IconSearch size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-3" />
-              <input
-                type="text"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="搜索标题 / 项目 / 内容…"
-                className="w-64 rounded-control border border-rule bg-surface-2 py-1.5 pl-7 pr-2.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60"
-              />
-            </div>
+            <SearchInput
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="搜索标题 / 项目 / 内容…"
+              className="w-64"
+            />
             <Button variant="secondary" loading={loading} disabled={loading} onClick={() => void refresh()}>
               {loading ? '刷新中…' : '刷新'}
             </Button>

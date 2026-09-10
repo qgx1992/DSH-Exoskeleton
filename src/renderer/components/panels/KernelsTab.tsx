@@ -12,8 +12,9 @@ import { pickLatestRcVersion } from '../../../shared/version'
 import { Button } from '../ui/Button'
 import { RowNotice, type RowMessage } from '../ui/RowNotice'
 import { Badge } from '../ui/Badge'
-import { Select } from '../ui/Field'
+import { Input, Select } from '../ui/Field'
 import { Card, Notice } from '../ui/Card'
+import { useConfirm } from '../ui/Confirm'
 import { EmptyState } from '../ui/EmptyState'
 import { IconBox } from '../ui/icons'
 
@@ -42,6 +43,8 @@ export function KernelsTab(): React.JSX.Element {
   const setRow = (key: string, m: RowMessage | null): void => {
     setRowMsg((prev) => ({ ...prev, [key]: m }))
   }
+  /** 应用内确认弹窗（替代 window.confirm）：换内核 / 切模式 / 卸载等需知情操作 */
+  const confirm = useConfirm()
 
   // 阶段 B：内置 Node 运行时
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
@@ -51,6 +54,8 @@ export function KernelsTab(): React.JSX.Element {
   // 阶段 C：磁盘配额
   const [quota, setQuota] = useState<KernelQuota | null>(null)
   const [quotaInput, setQuotaInput] = useState('')
+  /** 配额输入的校验提示（非法值不再静默回滚） */
+  const [quotaError, setQuotaError] = useState('')
   // #5：内核安装源（空 = 官方 npmjs）
   const [registry, setRegistry] = useState('')
   // R-7: 运行时进度收尾定时器（卸载时清理）
@@ -132,12 +137,14 @@ export function KernelsTab(): React.JSX.Element {
 
   const setDefault = async (v: string | null): Promise<void> => {
     // 切换默认会直接换内核并重启服务（Web UI 短暂中断），属于需知情操作 → 先弹确认
-    const tip = v
-      ? '设为默认内核 v' +
-        v +
-        ' 将：\n\n· 立即改用该内核，若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据存盘不丢失）\n· 该内核尚未「检测」通过时，会先做试启动检测，不通过则不切换\n· 随时可切回其他已安装内核\n\n确认切换？'
-      : '取消托管内核默认，改用系统 dsh？\n\n· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）\n\n确认？'
-    if (!window.confirm(tip)) return
+    const ok = await confirm({
+      title: v ? `设为默认内核 v${v}？` : '取消托管内核，改用系统 dsh？',
+      body: v
+        ? '· 立即改用该内核；若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据存盘不丢失）\n· 该内核尚未「检测」通过时，会先做试启动检测，不通过则不切换\n· 随时可切回其他已安装内核'
+        : '· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）',
+      confirmText: '切换'
+    })
+    if (!ok) return
     setBusyVersion(v ?? '(none)')
     if (v) setRow(v, null)
     const r = await window.dshDesktop.kernels.setDefault(v)
@@ -153,7 +160,13 @@ export function KernelsTab(): React.JSX.Element {
       setMessage({ type: 'err', text: '「' + k.version + '」是当前默认内核，请先切换默认后再卸载' })
       return
     }
-    if (!window.confirm('卸载内核 v' + k.version + '？相关目录将被删除（不会影响 ~/.dsh 数据）。')) return
+    if (!(await confirm({
+      title: `卸载内核 v${k.version}？`,
+      body: '相关目录将被删除（不会影响 ~/.dsh 数据）。',
+      confirmText: '卸载',
+      danger: true
+    })))
+      return
     setBusyVersion(k.version)
     const r = await window.dshDesktop.kernels.uninstall(k.version)
     setBusyVersion(null)
@@ -179,7 +192,17 @@ export function KernelsTab(): React.JSX.Element {
     await refresh()
   }
 
+  /** 切换内核模式会重启服务（Web UI 短暂中断）→ 与「设为默认」同一确认口径 */
   const setMode = async (mode: 'managed' | 'system'): Promise<void> => {
+    const ok = await confirm({
+      title: mode === 'system' ? '切换到「始终使用系统 dsh」？' : '切换到「托管内核优先」？',
+      body:
+        mode === 'system'
+          ? '· 不再使用托管内核，改用系统 PATH 中的 dsh\n· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）'
+          : '· 启用托管内核（未安装任何托管内核时仍回退系统 dsh）\n· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）',
+      confirmText: '切换'
+    })
+    if (!ok) return
     const r = await window.dshDesktop.kernels.setMode(mode)
     setMessage(r.ok ? { type: 'ok', text: '内核模式已切换为「' + (mode === 'managed' ? '托管内核优先' : '始终使用系统 dsh') + '」' } : { type: 'err', text: r.error ?? '切换失败' })
     await refresh()
@@ -230,7 +253,13 @@ export function KernelsTab(): React.JSX.Element {
   }
 
   const removeRuntime = async (): Promise<void> => {
-    if (!window.confirm('删除内置 Node 运行时？托管内核将回退使用系统 Node。')) return
+    const ok = await confirm({
+      title: '删除内置 Node 运行时？',
+      body: '托管内核将回退使用系统 Node。',
+      confirmText: '删除',
+      danger: true
+    })
+    if (!ok) return
     const r = await window.dshDesktop.runtime.remove()
     setMessage(r.ok ? { type: 'ok', text: '内置运行时已删除' } : { type: 'err', text: r.error ?? '删除失败' })
     await refresh()
@@ -240,9 +269,11 @@ export function KernelsTab(): React.JSX.Element {
   const saveQuota = async (): Promise<void> => {
     const n = parseInt(quotaInput, 10)
     if (Number.isNaN(n) || n < 0) {
+      setQuotaError('配额需为 ≥ 0 的整数（0 = 不限）')
       setQuotaInput(String(cfg?.kernelsQuotaMB ?? 1024))
       return
     }
+    setQuotaError('')
     await window.dshDesktop.config.set({ kernelsQuotaMB: n })
     await refresh()
   }
@@ -444,13 +475,17 @@ export function KernelsTab(): React.JSX.Element {
           <div className="rounded-control bg-canvas/50 px-3 py-2">
             <div className="text-2xs text-ink-3">配额上限</div>
             <div className="mt-0.5 flex items-center gap-1">
-              <input
+              <Input
                 type="number"
                 min={0}
                 value={quotaInput || String(cfg?.kernelsQuotaMB ?? 1024)}
-                onChange={(e) => setQuotaInput(e.target.value)}
+                onChange={(e) => {
+                  setQuotaInput(e.target.value)
+                  if (quotaError) setQuotaError('')
+                }}
                 onBlur={() => void saveQuota()}
-                className="w-20 rounded border border-rule bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-ink outline-none transition-colors hover:border-rule-strong focus:border-accent/60"
+                error={quotaError || undefined}
+                className="w-20 text-right"
               />
               <span>MB（0 = 不限）</span>
             </div>

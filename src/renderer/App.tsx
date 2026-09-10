@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { TitleBar } from './components/TitleBar'
 import { Dashboard } from './components/Dashboard'
 import { OnboardingWizard } from './components/OnboardingWizard'
+import { ConfirmProvider } from './components/ui/Confirm'
 import type { DSHState, SetupStatus, DashboardTab } from '../shared/types'
 
 const api = window.dshDesktop
@@ -93,39 +94,42 @@ export default function App(): React.JSX.Element {
   const running = dshState?.status === 'running'
 
   return (
-    <div className="flex h-screen flex-col bg-canvas">
-      <TitleBar
-        status={dshState?.status ?? 'starting'}
-        port={dshState?.port ?? null}
-        version={dshState?.version ?? null}
-        appVersion={appVersion}
-        maximized={maximized}
-        adminPanel={adminPanel}
-        onToggleAdminPanel={handleToggleAdminPanel}
-        webPanel={adminPanel && dashboardTab === 'web'}
-        onToggleWebPanel={handleToggleWebPanel}
-      />
-      {/* 服务运行中时，此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖；
-          管理面板打开时主进程会隐藏该视图，露出 Dashboard */}
-      <div className="min-h-0 flex-1">
-        {!running || adminPanel ? (
-          <Dashboard
-            state={dshState}
-            activeTab={dashboardTab}
-            onTabChange={setDashboardTab}
-            onStart={handleStart}
-            onStop={handleStop}
-            onRestart={handleRestart}
-            onOpenWebUI={handleOpenWebUI}
-          />
-        ) : (
-          <div className="h-full w-full bg-canvas" />
+    // ConfirmProvider 包在最外层：各面板用 useConfirm() 弹应用内确认，不再用 window.confirm
+    <ConfirmProvider>
+      <div className="flex h-screen flex-col bg-canvas">
+        <TitleBar
+          status={dshState?.status ?? 'starting'}
+          port={dshState?.port ?? null}
+          version={dshState?.version ?? null}
+          appVersion={appVersion}
+          maximized={maximized}
+          adminPanel={adminPanel}
+          onToggleAdminPanel={handleToggleAdminPanel}
+          webPanel={adminPanel && dashboardTab === 'web'}
+          onToggleWebPanel={handleToggleWebPanel}
+        />
+        {/* 服务运行中时，此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖；
+            管理面板打开时主进程会隐藏该视图，露出 Dashboard */}
+        <div className="min-h-0 flex-1">
+          {!running || adminPanel ? (
+            <Dashboard
+              state={dshState}
+              activeTab={dashboardTab}
+              onTabChange={setDashboardTab}
+              onStart={handleStart}
+              onStop={handleStop}
+              onRestart={handleRestart}
+              onOpenWebUI={handleOpenWebUI}
+            />
+          ) : (
+            <div className="h-full w-full bg-canvas" />
+          )}
+        </div>
+
+        {showOnboarding && setupStatus && (
+          <OnboardingWizard status={setupStatus} onDone={handleOnboardingDone} />
         )}
       </div>
-
-      {showOnboarding && setupStatus && (
-        <OnboardingWizard status={setupStatus} onDone={handleOnboardingDone} />
-      )}
-    </div>
+    </ConfirmProvider>
   )
 }

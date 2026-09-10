@@ -52,6 +52,8 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
   const [backups, setBackups] = useState<BackupInfo[]>([])
   const [logs, setLogs] = useState<LogEntry[]>([])
   const [sessions, setSessions] = useState<SessionInfo[]>([])
+  /** 会话总数（sessions:count，只扫目录）：不能用 list(6).length 充数 */
+  const [sessionTotal, setSessionTotal] = useState(0)
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -66,7 +68,8 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
       window.dshDesktop.backup.list(),
       window.dshDesktop.logs.list(300),
       window.dshDesktop.sessions.list(6),
-      window.dshDesktop.runtime.status()
+      window.dshDesktop.runtime.status(),
+      window.dshDesktop.sessions.count()
     ])
     const val = <T,>(i: number): T | null => (results[i]?.status === 'fulfilled' ? (results[i] as PromiseFulfilledResult<T>).value : null)
     setCfg(val<AppConfig>(0))
@@ -78,6 +81,7 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
     setLogs(val<LogEntry[]>(6) ?? [])
     setSessions(val<SessionInfo[]>(7) ?? [])
     setRuntime(val<RuntimeInfo>(8))
+    setSessionTotal(val<number>(9) ?? 0)
   }, [])
 
   useEffect(() => {
@@ -87,6 +91,8 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
   const running = state?.status === 'running'
   const starting = state?.status === 'starting'
   const updatablePlugins = plugins.filter((p) => p.update?.available).length
+  /** 是否真的做过插件更新检测（update === null = 尚未检测，不能断言「全部最新」） */
+  const pluginsChecked = plugins.some((p) => p.update !== null)
   const errorLogs = logs.filter((l) => l.level === 'error').length
   const webUrl = state?.webUrl ?? (state?.port ? `http://127.0.0.1:${state.port}` : null)
 
@@ -189,7 +195,7 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
           label="已装插件"
           value={String(plugins.length)}
           unit="个"
-          sub={updatablePlugins > 0 ? `${updatablePlugins} 个可升级` : '全部最新'}
+          sub={updatablePlugins > 0 ? `${updatablePlugins} 个可升级` : pluginsChecked ? '全部最新' : '未检查更新'}
           badge={updatablePlugins > 0 ? { text: `${updatablePlugins} 可升级`, tone: 'amber' } : undefined}
         />
         <StatCard
@@ -200,7 +206,7 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
         />
         <StatCard
           label="会话"
-          value={String(sessions.length)}
+          value={String(sessionTotal)}
           unit="个"
           sub={sessions.length > 0 ? `最近 ${fmtRelative(sessions[0].modifiedAt)}` : '暂无会话'}
         />

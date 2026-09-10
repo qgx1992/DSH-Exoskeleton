@@ -4,6 +4,8 @@ import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Card, Notice } from '../ui/Card'
 import { EmptyState } from '../ui/EmptyState'
+import { useConfirm } from '../ui/Confirm'
+import { Input } from '../ui/Field'
 import { IconShield } from '../ui/icons'
 
 function fmtSize(bytes: number): string {
@@ -27,6 +29,7 @@ export function BackupTab(): React.JSX.Element {
   const [picking, setPicking] = useState<BackupInfo | null>(null)
   /** 任选恢复勾选条目 */
   const [selected, setSelected] = useState<string[]>([])
+  const confirm = useConfirm()
 
   const refresh = useCallback(async () => {
     const list = await window.dshDesktop.backup.list()
@@ -72,10 +75,13 @@ export function BackupTab(): React.JSX.Element {
   const doRestore = async (b: BackupInfo, entries: string[]): Promise<void> => {
     if (entries.length === 0) return
     const label = entries.length === b.entries.length ? '全部项目' : '所选 ' + entries.length + ' 项'
-    if (
-      !window.confirm(`确定恢复到「${b.name}」？\n\n将把${label}合并回 ~/.dsh（同名文件被覆盖）。\n恢复前会自动创建一个保护快照。`)
-    )
-      return
+    const ok = await confirm({
+      title: `恢复到「${b.name}」？`,
+      body: `将把${label}合并回 ~/.dsh（同名文件被覆盖）。\n恢复前会自动创建一个保护快照；若 DSH 服务正在运行，建议恢复后重启服务。`,
+      confirmText: '恢复',
+      danger: true
+    })
+    if (!ok) return
     setBusyId(b.id)
     setMessage(null)
     try {
@@ -90,7 +96,13 @@ export function BackupTab(): React.JSX.Element {
   }
 
   const remove = async (b: BackupInfo): Promise<void> => {
-    if (!window.confirm(`删除快照「${b.name}」？此操作不可恢复。`)) return
+    const ok = await confirm({
+      title: `删除快照「${b.name}」？`,
+      body: '此操作不可恢复。',
+      confirmText: '删除',
+      danger: true
+    })
+    if (!ok) return
     const r = await window.dshDesktop.backup.delete(b.id)
     if (r.ok) await refresh()
     else setMessage({ type: 'err', text: r.error ?? '删除失败' })
@@ -106,16 +118,18 @@ export function BackupTab(): React.JSX.Element {
         </p>
 
         <div className="mt-4 flex gap-2">
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void create()
-            }}
-            placeholder="存档名称（可选，默认 manual）"
-            className="min-w-0 flex-1 rounded-control border border-rule bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60 focus:ring-[3px] focus:ring-accent/15"
-          />
+          <div className="flex-1">
+            <Input
+              mono={false}
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void create()
+              }}
+              placeholder="存档名称（可选，默认 manual）"
+            />
+          </div>
           <Button variant="primary" loading={creating} disabled={creating} onClick={() => void create()}>
             {creating ? '创建中…' : '创建存档'}
           </Button>

@@ -92,6 +92,7 @@ const api: DesktopApi = {
   },
   sessions: {
     list: (limit) => ipcRenderer.invoke('sessions:list', limit),
+    count: () => ipcRenderer.invoke('sessions:count'),
     open: (uuid) => ipcRenderer.invoke('sessions:open', uuid),
     remove: (uuid) => ipcRenderer.invoke('sessions:remove', uuid),
     export: (uuid) => ipcRenderer.invoke('sessions:export', uuid),

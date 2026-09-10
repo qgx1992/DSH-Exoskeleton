@@ -476,6 +476,8 @@ export interface DesktopApi {
   sessions: {
     /** 列出 ~/.dsh/sessions 下会话摘要（按修改时间倒序） */
     list: (limit?: number) => Promise<SessionInfo[]>
+    /** 会话总数（只扫目录不解压，供面板统计；不受 list 的 limit 截断影响） */
+    count: () => Promise<number>
     /** 在 DSH Web UI 中打开会话（唤起窗口并定位） */
     open: (uuid: string) => Promise<SaveResult>
     /** 删除会话目录（含 session.jsonl.zstd） */

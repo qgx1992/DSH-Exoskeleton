@@ -5,6 +5,7 @@ import { Badge } from '../ui/Badge'
 import { Toggle } from '../ui/Toggle'
 import { Input, Select } from '../ui/Field'
 import { Card, Notice } from '../ui/Card'
+import { useConfirm } from '../ui/Confirm'
 
 export function SettingsTab(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
@@ -13,11 +14,16 @@ export function SettingsTab(): React.JSX.Element {
   const [dshHomeInput, setDshHomeInput] = useState('')
   const [aggInput, setAggInput] = useState('')
   const [notifyMsg, setNotifyMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  /** 输入校验提示：非法值不再静默回滚（用户会以为「改了没生效」），而是就地在字段下方说明原因 */
+  const [portError, setPortError] = useState('')
+  const [dshHomeError, setDshHomeError] = useState('')
+  const [aggError, setAggError] = useState('')
   // API Key 管理
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
   const [keyInput, setKeyInput] = useState('')
   const [keyBusy, setKeyBusy] = useState(false)
   const [keyMsg, setKeyMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const confirm = useConfirm()
 
   useEffect(() => {
     void window.dshDesktop.config.get().then((c) => {
@@ -53,7 +59,13 @@ export function SettingsTab(): React.JSX.Element {
   }
 
   const clearKey = async (): Promise<void> => {
-    if (!window.confirm('清除已保存的 API Key？')) return
+    const ok = await confirm({
+      title: '清除已保存的 API Key？',
+      body: '清除后 DSH 服务将无法再调用 DeepSeek API，直到重新填入 Key。',
+      confirmText: '清除',
+      danger: true
+    })
+    if (!ok) return
     setKeyBusy(true)
     setKeyMsg(null)
     const r = await window.dshDesktop.setup.clear()
@@ -63,11 +75,13 @@ export function SettingsTab(): React.JSX.Element {
   }
 
   const saveAggWindow = async (): Promise<void> => {
-    const n = parseInt(aggInput, 10)
+    const n = parseInt(aggInput.trim(), 10)
     if (Number.isNaN(n) || n < 500) {
+      setAggError('需为 ≥ 500 的整数（毫秒，上限 60000）')
       setAggInput(String(cfg?.notifyAggregateWindowMs ?? 5000))
       return
     }
+    setAggError('')
     if (n !== cfg?.notifyAggregateWindowMs) {
       await save({ notifyAggregateWindowMs: Math.min(60000, n) })
       setAggInput(String(Math.min(60000, n)))
@@ -104,15 +118,21 @@ export function SettingsTab(): React.JSX.Element {
               min={0}
               max={65535}
               value={portInput}
-              onChange={(e) => setPortInput(e.target.value)}
-              onBlur={() => {
-                const n = parseInt(portInput || '0', 10)
-                if (!Number.isNaN(n) && n >= 0 && n <= 65535 && n !== cfg.port) {
-                  void save({ port: n })
-                } else {
-                  setPortInput(String(cfg.port))
-                }
+              onChange={(e) => {
+                setPortInput(e.target.value)
+                if (portError) setPortError('')
               }}
+              onBlur={() => {
+                const n = parseInt(portInput.trim() || '0', 10)
+                if (Number.isNaN(n) || n < 0 || n > 65535) {
+                  setPortError('端口需为 0–65535 的整数（0 = 自动选择）')
+                  setPortInput(String(cfg.port))
+                  return
+                }
+                setPortError('')
+                if (n !== cfg.port) void save({ port: n })
+              }}
+              error={portError || undefined}
               className="w-28 text-right"
             />
           </div>
@@ -121,16 +141,27 @@ export function SettingsTab(): React.JSX.Element {
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="text-ink">DSH Home 目录</div>
-              <div className="mt-0.5 text-xs text-ink-3">留空则遵循官方规则（DSH_HOME 或 ~/.dsh）</div>
+              <div className="mt-0.5 text-xs text-ink-3">留空则遵循官方规则（DSH_HOME 或 ~/.dsh）；修改后需重启 DSH 服务生效</div>
             </div>
             <Input
               type="text"
               value={dshHomeInput}
-              onChange={(e) => setDshHomeInput(e.target.value)}
-              onBlur={() => {
-                if (dshHomeInput !== cfg.dshHome) void save({ dshHome: dshHomeInput.trim() })
+              onChange={(e) => {
+                setDshHomeInput(e.target.value)
+                if (dshHomeError) setDshHomeError('')
               }}
-              placeholder="例如 C:\Users\you\.dsh"
+              onBlur={() => {
+                const v = dshHomeInput.trim()
+                // 相对路径会被主进程按 cwd 解析，落到意想不到的位置 → 只接受绝对路径
+                if (v && !/^([A-Za-z]:[\\/]|\\\\|\/)/.test(v)) {
+                  setDshHomeError('请填写绝对路径（如 C:\\Users\\you\\.dsh），留空则用官方默认')
+                  return
+                }
+                setDshHomeError('')
+                if (v !== cfg.dshHome) void save({ dshHome: v })
+              }}
+              error={dshHomeError || undefined}
+              placeholder="例如 C:\\Users\\you\\.dsh"
               className="w-72 text-xs"
             />
           </div>
@@ -218,8 +249,12 @@ export function SettingsTab(): React.JSX.Element {
               min={500}
               max={60000}
               value={aggInput}
-              onChange={(e) => setAggInput(e.target.value)}
+              onChange={(e) => {
+                setAggInput(e.target.value)
+                if (aggError) setAggError('')
+              }}
               onBlur={() => void saveAggWindow()}
+              error={aggError || undefined}
               className="w-28 text-right"
             />
           </div>

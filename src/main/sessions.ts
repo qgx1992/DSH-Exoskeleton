@@ -44,7 +44,7 @@ interface Candidate {
 }
 
 /** 扫描全部会话目录（只做 readdir + stat，不做解压），返回按修改时间倒序的候选 */
-async function scanCandidates(limit?: number, uuidFilter?: string): Promise<Candidate[]> {
+async function scanCandidates(limit?: number, uuidFilter?: string, noLimit = false): Promise<Candidate[]> {
   const root = sessionsRoot()
   const candidates: Candidate[] = []
   let workspaceDirs: string[] = []
@@ -88,6 +88,8 @@ async function scanCandidates(limit?: number, uuidFilter?: string): Promise<Cand
   candidates.sort((a, b) => b.modifiedAt - a.modifiedAt)
   // uuid 精确查找时不做 limit 截断（匹配项本就唯一，避免排序后把目标切掉）
   if (uuidFilter) return candidates.slice(0, MAX_LIST)
+  // 统计口径（noLimit）：不截断，面板的「会话总数」才不会被 MAX_LIST 压平
+  if (noLimit) return candidates
   if (typeof limit === 'number' && limit > 0) return candidates.slice(0, Math.min(limit, MAX_LIST))
   return candidates.slice(0, MAX_LIST)
 }
@@ -134,6 +136,15 @@ async function hydrate(candidates: Candidate[]): Promise<SessionInfo[]> {
 export async function listSessions(limit?: number): Promise<SessionInfo[]> {
   const candidates = await scanCandidates(limit)
   return hydrate(candidates)
+}
+
+/**
+ * 会话总数（只 readdir + stat，不做 zstd 解压）。
+ * 专供面板统计：不能复用 listSessions 的长度——那是被 MAX_LIST/limit 截断后的条数，
+ * 总览页曾用 list(6).length 当总数，直接把「会话 6 个」写死在面板上。
+ */
+export async function countSessions(): Promise<number> {
+  return (await scanCandidates(undefined, undefined, true)).length
 }
 
 /** 按 uuid 精确查找单个会话 */

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AppConfig, DshProfile, KernelInfo } from '../../../shared/types'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
-import { Select } from '../ui/Field'
+import { Input, Select } from '../ui/Field'
 import { Card, Notice } from '../ui/Card'
+import { useConfirm } from '../ui/Confirm'
 
 export function ProfilesTab(): React.JSX.Element {
   const [cfg, setCfg] = useState<AppConfig | null>(null)
@@ -12,6 +13,7 @@ export function ProfilesTab(): React.JSX.Element {
   const [newName, setNewName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [message, setMessage] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const confirm = useConfirm()
 
   const refresh = useCallback(async () => {
     const [ps, ks, c] = await Promise.all([
@@ -42,7 +44,15 @@ export function ProfilesTab(): React.JSX.Element {
     }
   }
 
+  /** 激活档案会换内核并重启服务（Web UI 短暂中断）→ 与「设为默认内核」同一确认口径 */
   const activate = async (id: string): Promise<void> => {
+    const p = profiles.find((x) => x.id === id)
+    const ok = await confirm({
+      title: `激活档案「${p?.name ?? id}」？`,
+      body: '· 启用该档案绑定的内核（未绑定则跟随全局默认）\n· 若 DSH 服务正在运行会自动重启（Web UI 短暂中断，会话数据不丢失）',
+      confirmText: '激活'
+    })
+    if (!ok) return
     setBusy(id)
     setMessage(null)
     const r = await window.dshDesktop.profiles.activate(id)
@@ -52,7 +62,13 @@ export function ProfilesTab(): React.JSX.Element {
   }
 
   const remove = async (p: DshProfile): Promise<void> => {
-    if (!window.confirm('删除档案「' + p.name + '」？仅删除档案配置，不影响 ~/.dsh 数据。')) return
+    const ok = await confirm({
+      title: `删除档案「${p.name}」？`,
+      body: '仅删除档案配置，不影响 ~/.dsh 数据。',
+      confirmText: '删除',
+      danger: true
+    })
+    if (!ok) return
     setBusy(p.id)
     setMessage(null)
     const r = await window.dshDesktop.profiles.delete(p.id)
@@ -137,16 +153,18 @@ export function ProfilesTab(): React.JSX.Element {
         </div>
 
         <div className="mt-4 flex gap-2">
-          <input
-            type="text"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void create()
-            }}
-            placeholder="新档案名称，例如：实验项目A"
-            className="min-w-0 flex-1 rounded-control border border-rule bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none transition-colors duration-150 placeholder:text-ink-3 hover:border-rule-strong focus:border-accent/60 focus:ring-[3px] focus:ring-accent/15"
-          />
+          <div className="flex-1">
+            <Input
+              mono={false}
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void create()
+              }}
+              placeholder="新档案名称，例如：实验项目A"
+            />
+          </div>
           <Button
             variant="primary"
             loading={busy === '__create__'}
