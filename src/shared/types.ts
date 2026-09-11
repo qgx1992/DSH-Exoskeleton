@@ -150,8 +150,19 @@ export type KernelBootHealth = 'untested' | 'ok' | 'failed'
 export interface KernelInfo {
   version: string
   dir: string
-  status: 'installed' | 'downloading' | 'verifying' | 'installing' | 'error'
+  /**
+   * broken：目录不完整、内核不可用（但磁盘上仍占着空间），面板需显式标出并允许卸载。
+   * 两类来源：① 索引登记为 installed，但 bin.js 已缺失——卸载走到一半被 Windows
+   * 拒绝删除（EPERM/EBUSY，原生模块被运行中的内核进程映射）→ rmSync 抛错中断，
+   * 索引项没被清掉，留下半个目录仍显示「已安装」；② 安装被中断的残留
+   * （status 停在 installing/downloading 但目录还在，既不在已安装列表里、又占着盘）。
+   */
+  status: 'installed' | 'downloading' | 'verifying' | 'installing' | 'error' | 'broken'
   installedAt: number | null
+  /**
+   * 占用字节。健康内核 = 安装时实测值；broken 项 = 启动对账时重测的**实际残留**大小
+   * （索引里的旧值会与实际严重不符，故对账时改写）。
+   */
   size: number
   integrity: string | null
   error: string | null
@@ -243,12 +254,14 @@ export interface KernelUpdateInfo {
 export interface KernelQuota {
   /** 配额上限（MB；0 = 不限制） */
   quotaMB: number
-  /** 已安装内核总占用（MB） */
+  /** 已安装内核总占用（MB）——按磁盘实测，不用索引缓存值 */
   usedMB: number
   /** 内置 Node 运行时占用（MB） */
   runtimeMB: number
   /** 磁盘剩余空间（MB） */
   diskFreeMB: number
+  /** 待回收占用（MB）：卸载已生效但目录仍被占用、等待下次启动清理的 .deleting 残留 */
+  pendingRemovalMB?: number
 }
 
 /** 日志条目 */

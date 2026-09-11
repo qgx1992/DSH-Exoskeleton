@@ -47,9 +47,10 @@ export function activateProfile(id: string): { ok: boolean; error?: string } {
   const profile = (cfg.profiles ?? []).find((p) => p.id === id)
   if (!profile) return { ok: false, error: '档案不存在' }
   if (cfg.activeProfileId === id) return { ok: true }
-  // R-23: 校验绑定内核已安装（未安装则拒绝切换，避免静默回退 system dsh）
-  if (profile.kernelVersion !== null && !kernelManager.listInstalled().some((k) => k.version === profile.kernelVersion)) {
-    return { ok: false, error: '档案绑定的内核 v' + profile.kernelVersion + ' 未安装，请先在内核面板安装或解除绑定' }
+  // R-23: 校验绑定内核已安装（用 listUsable：broken 内核文件不完整，不能当作可启动目标）；
+  // 未安装/不完整则拒绝切换，避免静默回退 system dsh
+  if (profile.kernelVersion !== null && !kernelManager.listUsable().some((k) => k.version === profile.kernelVersion)) {
+    return { ok: false, error: '档案绑定的内核 v' + profile.kernelVersion + ' 未安装或文件不完整，请先在内核面板安装或解除绑定' }
   }
   configStore.set({ activeProfileId: id })
   return { ok: true }
@@ -60,8 +61,8 @@ export function setProfileKernel(id: string, version: string | null): { ok: bool
   const profiles = cfg.profiles ?? []
   const idx = profiles.findIndex((p) => p.id === id)
   if (idx < 0) return { ok: false, error: '档案不存在' }
-  if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
-    return { ok: false, error: '内核 v' + version + ' 未安装，请先在内核面板安装' }
+  if (version !== null && !kernelManager.listUsable().some((k) => k.version === version)) {
+    return { ok: false, error: '内核 v' + version + ' 未安装或文件不完整，请先在内核面板安装' }
   }
   const next = [...profiles]
   next[idx] = { ...next[idx], kernelVersion: version }

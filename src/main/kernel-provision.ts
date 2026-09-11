@@ -55,7 +55,9 @@ async function ensureNodeRuntime(): Promise<boolean> {
 export async function provisionDefaultKernel(): Promise<void> {
   try {
     kernelManager.init()
-    const installed = kernelManager.listInstalled().map((k) => k.version)
+    // 用 listUsable：只把真正完整的 installed 内核算作「已装」，
+    // 否则一个 broken 残留（安装中断的半成品）会让预置认为「用户已经有内核可用」而跳过安装。
+    const installed = kernelManager.listUsable().map((k) => k.version)
     const cfg = configStore.get()
 
     if (needsDefaultKernelProvision(cfg, installed)) {

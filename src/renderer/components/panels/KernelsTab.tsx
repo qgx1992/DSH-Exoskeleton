@@ -156,23 +156,35 @@ export function KernelsTab(): React.JSX.Element {
   }
 
   const uninstall = async (k: KernelInfo): Promise<void> => {
-    if (cfg?.defaultKernelVersion === k.version) {
+    const broken = k.status === 'broken'
+    if (!broken && cfg?.defaultKernelVersion === k.version) {
       setMessage({ type: 'err', text: '「' + k.version + '」是当前默认内核，请先切换默认后再卸载' })
       return
     }
     if (!(await confirm({
       title: `卸载内核 v${k.version}？`,
-      body: '相关目录将被删除（不会影响 ~/.dsh 数据）。',
-      confirmText: '卸载',
+      // 损坏内核说明不同：目标不是「删掉一个可用内核」，而是清掉占盘的残骸
+      body: broken
+        ? '该内核文件已不完整（无法启动），本次将清理它占用的磁盘空间（' + fmtSize(k.size) + '）。\n· 不会影响 ~/.dsh 数据\n· 若文件正被运行中的服务占用，会在下次启动时自动完成清理'
+        : '相关目录将被删除（不会影响 ~/.dsh 数据）。',
+      confirmText: broken ? '清理' : '卸载',
       danger: true
     })))
       return
     setBusyVersion(k.version)
     const r = await window.dshDesktop.kernels.uninstall(k.version)
     setBusyVersion(null)
-    // 成功：行会消失，提示只能走全局横幅；失败：留在该版本行内
-    if (r.ok) setMessage({ type: 'ok', text: '已卸载 v' + k.version })
-    else setRow(k.version, { type: 'err', text: r.error ?? '卸载失败' })
+    // 成功：行会消失，提示只能走全局横幅（卸载已即时生效，物理删除在后台/下次启动完成）；
+    // 失败：留在该版本行内，附带原因（占用类错误已由主进程译为中文）
+    if (r.ok) {
+      setRow(k.version, null)
+      setMessage({
+        type: 'ok',
+        text: broken ? '已清理 v' + k.version + ' 的残留' : '已卸载 v' + k.version
+      })
+    } else {
+      setRow(k.version, { type: 'err', text: r.error ?? '卸载失败' })
+    }
     await refresh()
   }
 
@@ -280,6 +292,10 @@ export function KernelsTab(): React.JSX.Element {
 
   const activeVersion = cfg?.kernelMode === 'managed' ? cfg.defaultKernelVersion : null
   const rtBusy = runtime?.busy !== undefined && runtime.busy !== 'idle'
+  /** 损坏（半个）内核数量：为 0 时不显示任何额外提示，避免正常用户被打扰 */
+  const brokenCount = installed.filter((k) => k.status === 'broken').length
+  /** 待回收占用（MB）：卸载已生效但文件仍被占用，等待下次启动自动清理 */
+  const pendingMB = quota?.pendingRemovalMB ?? 0
   /** 推荐口径：只推 rc（正式发布通道）最新版，alpha 预览版不标推荐（与内核更新检测同一口径） */
   const recommended = pickLatestRcVersion(available.map((v) => v.version))
 
@@ -385,7 +401,14 @@ export function KernelsTab(): React.JSX.Element {
 
       {/* 已安装版本 */}
       <Card>
-        <h3 className="text-xs font-semibold tracking-wider text-ink-2">已安装（{installed.length}）</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-semibold tracking-wider text-ink-2">已安装（{installed.length}）</h3>
+          {brokenCount > 0 && (
+            <span className="text-2xs text-danger">
+              {brokenCount} 个内核文件不完整（不可启动），建议清理以释放磁盘
+            </span>
+          )}
+        </div>
         {installed.length === 0 ? (
           <EmptyState
             className="px-0 py-6"
@@ -402,6 +425,11 @@ export function KernelsTab(): React.JSX.Element {
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm font-medium text-ink">v{k.version}</span>
                     {activeVersion === k.version && <Badge tone="cyan">● 当前默认</Badge>}
+                    {k.status === 'broken' && (
+                      <Badge tone="red" title={(k.error ?? '内核文件不完整') + '；可能是上一次卸载/安装被中断，清理后可释放磁盘' }>
+                        已损坏
+                      </Badge>
+                    )}
                     {k.status === 'error' && <Badge tone="red">安装异常</Badge>}
                     {k.bootHealth === 'failed' && (
                       <Badge tone="red" title={k.failReason ?? '试启动失败，已拦截设为默认'}>
@@ -416,10 +444,12 @@ export function KernelsTab(): React.JSX.Element {
                   </div>
                   <div className="mt-0.5 font-mono text-2xs text-ink-3">
                     {fmtSize(k.size)} · {k.installedAt ? new Date(k.installedAt).toLocaleString() : '-'}
-                    {k.bootHealth === 'failed' && k.failReason ? ' · ' + k.failReason.slice(0, 120) : ''}
+                    {k.status === 'broken' ? ' · ' + (k.error ?? '文件不完整').slice(0, 120) : ''}
+                    {k.status === 'broken' && k.bootHealth === 'failed' && k.failReason ? ' · ' + k.failReason.slice(0, 120) : ''}
                   </div>
                 </div>
-                {activeVersion !== k.version && k.status !== 'error' && (
+                {/* 损坏内核不可作为启动目标：不提供「设为默认」「检测」 */}
+                {k.status !== 'broken' && activeVersion !== k.version && k.status !== 'error' && (
                   <Button
                     variant="accent"
                     size="sm"
@@ -430,23 +460,25 @@ export function KernelsTab(): React.JSX.Element {
                     {busyVersion === k.version ? '切换中…' : '设为默认'}
                   </Button>
                 )}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  loading={trialVersion === k.version}
-                  disabled={trialVersion !== null || busyVersion === k.version}
-                  onClick={() => void trialBoot(k)}
-                  title="试启动检测（与「设为默认」门禁同路径，不切换默认）"
-                >
-                  {trialVersion === k.version ? '检测中…' : '检测'}
-                </Button>
+                {k.status !== 'broken' && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={trialVersion === k.version}
+                    disabled={trialVersion !== null || busyVersion === k.version}
+                    onClick={() => void trialBoot(k)}
+                    title="试启动检测（与「设为默认」门禁同路径，不切换默认）"
+                  >
+                    {trialVersion === k.version ? '检测中…' : '检测'}
+                  </Button>
+                )}
                 <Button
                   variant="danger"
                   size="sm"
-                  disabled={busyVersion === k.version || activeVersion === k.version}
+                  disabled={busyVersion === k.version || (k.status !== 'broken' && activeVersion === k.version)}
                   onClick={() => void uninstall(k)}
                 >
-                  卸载
+                  {k.status === 'broken' ? '清理' : '卸载'}
                 </Button>
               </div>
               <RowNotice msg={rowMsg[k.version]} />
@@ -472,6 +504,12 @@ export function KernelsTab(): React.JSX.Element {
             <div className="text-2xs text-ink-3">磁盘剩余</div>
             <div className="mt-0.5 font-mono text-ink">{(quota?.diskFreeMB ?? 0).toFixed(0)} MB</div>
           </div>
+          {pendingMB > 0 && (
+            <div className="rounded-control bg-canvas/50 px-3 py-2" title="已卸载的内核文件仍被运行中的服务占用，将在下次启动应用时自动清理">
+              <div className="text-2xs text-warning">待回收</div>
+              <div className="mt-0.5 font-mono text-warning">{pendingMB} MB</div>
+            </div>
+          )}
           <div className="rounded-control bg-canvas/50 px-3 py-2">
             <div className="text-2xs text-ink-3">配额上限</div>
             <div className="mt-0.5 flex items-center gap-1">

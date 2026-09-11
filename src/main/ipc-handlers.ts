@@ -29,7 +29,7 @@ export function registerIpcHandlers(): void {
       const bad = info.version ?? cfg.defaultKernelVersion
       if (!bad || cfg.defaultKernelVersion !== bad) return
       const prev = cfg.previousKernelVersion
-      if (!prev || prev === bad || !kernelManager.listInstalled().some((k) => k.version === prev)) return
+      if (!prev || prev === bad || !kernelManager.listUsable().some((k) => k.version === prev)) return
       if (kernelManager.bootHealthOf(prev) === 'failed') {
         logger.warn('kernel auto-rollback skipped: previous default known-unhealthy', { prev })
         return
@@ -78,11 +78,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('kernels:installed', () => kernelManager.listInstalled())
   ipcMain.handle('kernels:available', () => kernelManager.listAvailable())
   ipcMain.handle('kernels:install', (_e, version: string, registry?: string) => kernelManager.install(version, registry))
-  ipcMain.handle('kernels:uninstall', (_e, version: string) => kernelManager.uninstall(version))
+  // 卸载：broken（半个内核）跳过档案引用保护——那种项不可能被绑定（绑定门禁只接受已安装）
+  ipcMain.handle('kernels:uninstall', (_e, version: string) => {
+    const broken = kernelManager.listInstalled().some((k) => k.version === version && k.status === 'broken')
+    return kernelManager.uninstall(version, { skipRefCheck: broken })
+  })
   ipcMain.handle('kernels:setDefault', async (_e, version: string | null) => {
-    // R-1: 设置前校验版本已安装（默认内核不允许指向未安装版本）
-    if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
-      return { ok: false, error: '内核 v' + version + ' 未安装，无法设为默认' }
+    // R-1: 设置前校验版本已安装（默认内核不允许指向未安装版本）；
+    // 用 listUsable 排除 broken——半个内核（bin.js 已丢）绝不能当默认内核。
+    if (version !== null && !kernelManager.listUsable().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装或文件不完整，无法设为默认' }
     }
     const oldVersion = configStore.get().kernelMode === 'managed' ? configStore.get().defaultKernelVersion : null
     if (version === oldVersion) return { ok: true }
@@ -121,7 +126,7 @@ export function registerIpcHandlers(): void {
     if (dshManager.getState().status === 'running') {
       await dshManager.restart()
     }
-    const patched = version !== null && kernelManager.bootHealthOf(version) === 'ok' && !!kernelManager.listInstalled().find((k) => k.version === version)?.compatPatch
+    const patched = version !== null && kernelManager.bootHealthOf(version) === 'ok' && !!kernelManager.listUsable().find((k) => k.version === version)?.compatPatch
     return {
       ok: cfg.defaultKernelVersion === version,
       warning: patched ? '当前内核需通过兼容补丁启动（官方修复版发布前，部分 UI 特性暂缺）' : undefined
@@ -140,8 +145,8 @@ export function registerIpcHandlers(): void {
    * 不切换默认、不改 config，只把结果写入 bootHealth 供面板展示。
    */
   ipcMain.handle('kernels:trial', async (_e, version: string) => {
-    if (!kernelManager.listInstalled().some((k) => k.version === version)) {
-      return { ok: false, error: '内核 v' + version + ' 未安装' }
+    if (!kernelManager.listUsable().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装或文件不完整' }
     }
     const t0 = Date.now()
     const trial = await trialBootManagedKernel(version, dshManager.resolveDshHome(), { timeoutMs: 60_000 })
@@ -170,9 +175,9 @@ export function registerIpcHandlers(): void {
     return r
   })
   ipcMain.handle('profiles:setKernel', async (_e, id: string, version: string | null) => {
-    // R-23: 绑定前校验目标内核已安装
-    if (version !== null && !kernelManager.listInstalled().some((k) => k.version === version)) {
-      return { ok: false, error: '内核 v' + version + ' 未安装，无法绑定' }
+    // R-23: 绑定前校验目标内核已安装（用 listUsable：不能绑定一个文件不完整的 broken 内核）
+    if (version !== null && !kernelManager.listUsable().some((k) => k.version === version)) {
+      return { ok: false, error: '内核 v' + version + ' 未安装或文件不完整，无法绑定' }
     }
     // R-24: 绑定「当前激活档案」的投递内核 → 试启动门禁（失败不生效；spawn 仍按注册表注入补丁）
     const bindingActive = configStore.get().activeProfileId === id

@@ -15,13 +15,19 @@ import { logger } from './logger'
 import { configStore } from './config'
 import { runtimeManager } from './runtime-manager'
 import { compareVersions, isRcVersion } from '../shared/version'
-import type { KernelBootHealth, KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo } from '../shared/types'
+import type { KernelBootHealth, KernelInfo, KernelProgress, KernelQuota, KernelRemoteVersion, KernelUpdateInfo, SaveResult } from '../shared/types'
 
 const REGISTRY_URL = 'https://registry.npmjs.org/@deepseek-ai/dsh'
 /** registry 根（install --registry 参数需要根 URL，不是包元数据 URL） */
 const REGISTRY_ROOT = 'https://registry.npmjs.org'
 const PACKAGE = '@deepseek-ai/dsh'
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/
+/**
+ * 卸载回收站后缀：卸载先「改名」再「删除」（见 uninstall）。
+ * Windows 上被进程映射的 DLL 会拒绝 unlink（EPERM/EBUSY），但**不阻止父目录改名**，
+ * 改名因此能把「卸载」这个用户动作与「删除文件」这个可能失败的物理操作解耦。
+ */
+const TRASH_SUFFIX = '.deleting'
 
 interface KernelMeta {
   version: string
@@ -47,8 +53,14 @@ export class KernelManager extends EventEmitter {
   private nodeExe: string | null = null
   /** H4: 正在安装/下载中的版本（并发防护：同一版本禁止并发 install） */
   private busyVersions = new Set<string>()
+  /** 正在后台清理的 .deleting 目录（避免对同一目录重复触发删除） */
+  private purging = new Set<string>()
   /** R-15: 内置运行时目录大小缓存（30s TTL，避免 quota() 每次全量同步扫描） */
   private runtimeSizeCache: { at: number; mb: number } | null = null
+  /** 待回收（.deleting）目录占用缓存（30s TTL，同 runtimeSizeCache 理由） */
+  private trashSizeCache: { at: number; mb: number } | null = null
+  /** 回收站占用后台测量进行中标志（防止面板反复拉取时并发重扫） */
+  private trashMeasuring = false
 
   init(): void {
     this.kernelsDir = path.join(app.getPath('userData'), 'kernels')
@@ -112,11 +124,28 @@ export class KernelManager extends EventEmitter {
     return null
   }
 
+  /**
+   * 已安装内核列表（面板主数据源）。
+   * 包含 broken 项：它们不是可用内核，但占着磁盘、且是用户「卸载不了」的直接受害者，
+   * 必须列出来并提供卸载入口（否则界面上看不见、磁盘上删不掉 = 永远泄漏）。
+   * 可用性判定仍以 status === 'installed' 为准（getActiveVersion 与各处 setDefault/trial
+   * 门禁都不接受 broken）。
+   */
   listInstalled(): KernelInfo[] {
     return Object.values(this.index.kernels)
-      .filter((k) => k.status === 'installed')
+      .filter((k) => k.status === 'installed' || k.status === 'broken')
       .map((k) => this.toInfo(k))
-      .sort((a, b) => (b.installedAt ?? 0) - (a.installedAt ?? 0))
+      .sort((a, b) => {
+        // 可用内核在前，损坏的排到最后，避免脏项抢视线
+        const bad = (k: KernelInfo): number => (k.status === 'broken' ? 1 : 0)
+        if (bad(a) !== bad(b)) return bad(a) - bad(b)
+        return (b.installedAt ?? 0) - (a.installedAt ?? 0)
+      })
+  }
+
+  /** 可用内核版本（排除 broken）——门禁类判断用这个，避免把半个内核当作可用 */
+  listUsable(): KernelInfo[] {
+    return this.listInstalled().filter((k) => k.status === 'installed')
   }
 
   private toInfo(k: KernelMeta): KernelInfo {
@@ -505,6 +534,31 @@ export class KernelManager extends EventEmitter {
     if (this.index.kernels[version]?.status === 'installed') {
       return { ok: false, error: `内核 v${version} 已安装` }
     }
+    // broken 残留（安装中断 / 卸载中断留下的半个目录）：先清干净再装，
+    // 否则 pnpm 会在残留 node_modules 上叠加，把损坏状态带进新安装
+    if (this.index.kernels[version]?.status === 'broken') {
+      // H4: 并发防护先于落盘动作——正在安装中就不碰目录，避免与进行中的安装相撞
+      if (this.busyVersions.has(version)) {
+        return { ok: false, error: '内核 v' + version + ' 正在安装中，请稍候' }
+      }
+      const stale = path.join(this.kernelsDir, KernelManager.safeDirName(version))
+      try {
+        if (fs.existsSync(stale)) {
+          // 用 trashPathFor 而非拼固定后缀：上一次卸载的回收站可能还占着同名目录，
+          // 而 Windows 上 rename 到已存在目录会直接失败（EPERM）
+          const trash = this.trashPathFor(stale)
+          fs.renameSync(stale, trash)
+          this.purgeDirAsync(trash)
+        }
+      } catch (err) {
+        // 残留目录被占用到连改名都不行：不能硬删（会删一半），直接报错让用户先停服务
+        const code = (err as NodeJS.ErrnoException).code
+        logger.warn('kernel install: cannot clear broken leftover', { version, code })
+        return { ok: false, error: this.explainDeleteError(code, version) }
+      }
+      delete this.index.kernels[version]
+      this.persistIndex()
+    }
     // 磁盘空间 + 配额检查（阶段 C）
     const spaceErr = this.checkDiskSpace()
     if (spaceErr) return { ok: false, error: spaceErr }
@@ -591,7 +645,7 @@ export class KernelManager extends EventEmitter {
 
       meta.status = 'installed'
       meta.installedAt = Date.now()
-      meta.size = dirSizeSync(kernelDir)
+      meta.size = await dirSizeAsync(kernelDir)
       meta.error = null
       this.persistIndex()
       // 新内核就绪即重建第一锚点官方包链接（指向本内核），后续切换默认/绑定档案时不再版本混杂
@@ -618,40 +672,300 @@ export class KernelManager extends EventEmitter {
     }
   }
 
-  /** 卸载内核（阶段 C：引用保护——默认版本或任一 Profile 绑定的版本不可卸载） */
-  uninstall(version: string): { ok: boolean; error?: string } {
+  /**
+   * 卸载内核。
+   *
+   * 关键设计：**改名优先、删除兜底**。
+   * 背景（实测于 Windows）：内核的 sharp / node-pty / koffi 等原生模块在多个内核版本之间
+   * 是 pnpm 硬链接共享的**同一个文件对象**；当某个版本正在运行时，其 DLL 被进程映射，
+   * 此时删除另一个版本里指向同一文件对象的硬链接会被系统拒绝（EPERM/EBUSY）。
+   * 裸用 fs.rmSync(target, {recursive,force}) 遇到第一个这样的文件就抛异常中断，
+   * 且不重试不回滚 → 目录被删掉一半、连 bin.js 都没了（内核实际已损坏），
+   * 而索引项仍留在 kernels.json 里显示「已安装」，用户只能反复点卸载、每次再破坏一次。
+   *
+   * 实测：目标目录里有被映射的 DLL 时，**rename 父目录仍然可用**（只有删文件被拒）。
+   * 因此这里先把目录 rename 成 `<version>.deleting`（瞬时、不遍历子项、不会被锁阻），
+   * 立刻清掉索引项并把该版本还给用户（旧目录已被移出 kernels/<version>，
+   * binJsFor 立刻失效 → 不再可能被当作可用内核启动），再去后台尽力删除。
+   * 后台删不掉也没有关系：它已经不在内核仓库任何有效位置上，留给下次启动回收。
+   *
+   * @param opts.skipRefCheck 跳过「默认内核 / 档案绑定」引用保护（供清理已损坏内核使用）
+   *
+   * 注意：故意保持**同步**签名（无 await）——卸载的核心动作（rename + 清索引）本来就是瞬时的，
+   * 真正耗时的物理删除已转交 purgeDirAsync。IPC 层用 ipcRenderer.invoke 天然返回 Promise，
+   * 而测试与其他调用点依赖同步拿到 SaveResult，不必要地改成 async 会破坏该契约。
+   */
+  uninstall(version: string, opts: { skipRefCheck?: boolean } = {}): SaveResult {
     this.init()
     const meta = this.index.kernels[version]
     if (!meta) return { ok: false, error: '内核 v' + version + ' 未安装' }
     const cfg = configStore.get()
-    if (cfg.kernelMode === 'managed' && cfg.defaultKernelVersion === version) {
+    // 引用保护。broken 项是例外：它不是「能用的内核」，留着只会占盘；面板也不允许把它
+    // 设为默认/绑定档案，所以不存在「正在被使用」的语义，但仍挡一道默认内核才安全。
+    if (!opts.skipRefCheck && cfg.kernelMode === 'managed' && cfg.defaultKernelVersion === version) {
       return { ok: false, error: 'v' + version + ' 是当前默认内核，请先切换默认版本后再卸载' }
     }
-    const refProfiles = (cfg.profiles ?? []).filter((p) => p.kernelVersion === version)
+    const refProfiles = opts.skipRefCheck
+      ? []
+      : (cfg.profiles ?? []).filter((p) => p.kernelVersion === version)
     if (refProfiles.length > 0) {
       return {
         ok: false,
         error: 'v' + version + ' 被配置档案「' + refProfiles.map((p) => p.name).join('、') + '」绑定，请先解除绑定'
       }
     }
-    try {
-      const target = path.join(this.kernelsDir, KernelManager.safeDirName(version))
-      if (!target.startsWith(this.kernelsDir)) return { ok: false, error: '非法路径' }
-      fs.rmSync(target, { recursive: true, force: true })
-      delete this.index.kernels[version]
-      this.persistIndex()
-      logger.info('kernel uninstalled', { version })
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    const target = path.join(this.kernelsDir, KernelManager.safeDirName(version))
+    if (!target.startsWith(this.kernelsDir)) return { ok: false, error: '非法路径' }
+
+    // ① 先把目录移出有效位置（改名），成功即视为卸载生效
+    const trash = this.trashPathFor(target)
+    let moved = false
+    if (fs.existsSync(target)) {
+      try {
+        fs.renameSync(target, trash)
+        moved = true
+      } catch (err) {
+        // 改名也失败（极少见）：目录被占用到连改名都不行，此时**绝不**删索引、
+        // 也绝不尝试 rmSync——否则就是旧的「删一半」惨案。如实报错并保留可重试状态。
+        const code = (err as NodeJS.ErrnoException).code
+        logger.warn('kernel uninstall: rename to trash failed', { version, code })
+        return { ok: false, error: this.explainDeleteError(code, version) }
+      }
     }
+
+    // ② 索引项立即清掉（卸载已生效，不再当作已安装内核）
+    delete this.index.kernels[version]
+    this.persistIndex()
+    this.trashSizeCache = null
+    logger.info('kernel uninstalled', { version, movedToTrash: moved })
+
+    // ③ 后台尽力删除回收站（不阻塞 IPC）；删不掉留待下次启动回收
+    if (moved) this.purgeDirAsync(trash)
+    return { ok: true }
+  }
+
+  /**
+   * 回收站路径。**必须保证不与已存在的目录撞名**：
+   * Windows 上 rename 到一个已存在的目录会直接失败（EPERM），而不是覆盖，
+   * 因此不能简单地固定用 `<version>.deleting`——上一次卸载删不掉时它就还在那里，
+   * 下一次卸载会因为这个残留而改名失败、永远卸不掉。
+   * 撞名则追加时间戳，保证改名一定成功。
+   */
+  private trashPathFor(target: string): string {
+    const base = target + TRASH_SUFFIX
+    if (!fs.existsSync(base)) return base
+    return base + '-' + Date.now().toString(36)
+  }
+
+  /**
+   * 后台删除回收站目录，失败不抛错（留给启动回收）。
+   * maxRetries/retryDelay：被占用通常是**瞬时**的（DSH 进程正在退出/句柄正在释放），
+   * Windows 上等几百毫秒往往就能删掉，故给几轮退避重试。
+   */
+  private purgeDirAsync(dir: string): void {
+    if (this.purging.has(dir)) return
+    this.purging.add(dir)
+    fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }, (err) => {
+      this.purging.delete(dir)
+      this.trashSizeCache = null
+      if (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        // 删不掉不是错误：目录已不在任何有效内核路径上，下次启动/下次卸载会再试
+        logger.warn('kernel trash purge deferred (will retry on next startup)', { dir, code })
+        return
+      }
+      // 回收站空了就顺手删掉父目录里已不存在的索引残留（无操作，仅日志）
+      logger.info('kernel trash purged', { dir })
+    })
+  }
+
+  /**
+   * 把所有回收站（名字含 `.deleting`，含带时间戳后缀的）再尝试删一次（启动时调用）。
+   * 启动场景下上一个进程的临时占用通常已经释放，因此这一轮往往能真正回收磁盘。
+   */
+  purgeTrash(): void {
+    this.init()
+    let names: string[] = []
+    try {
+      names = fs.readdirSync(this.kernelsDir).filter((n) => n.includes(TRASH_SUFFIX))
+    } catch {
+      return
+    }
+    if (names.length === 0) return
+    logger.info('kernel trash found on startup, purging', { count: names.length })
+    for (const n of names) this.purgeDirAsync(path.join(this.kernelsDir, n))
+  }
+
+  /**
+   * 启动对账：修正 kernels.json 与实际磁盘的不一致。
+   * 处理三类历史遗留（均由「裸 rmSync 删除中断 / 安装中断」产生）：
+   * ① installed 但 bin.js 缺失 → 标 broken（内核不可用，但磁盘仍占用，面板可卸载）
+   * ② downloading/verifying/installing 但目录还在 → 安装残留，标 broken 供卸载
+   *    （这类项 listInstalled 不返回，界面上完全看不见却占着数百 MB，会一直泄漏）
+   * ③ 索引有项但目录已不存在 → 直接清掉索引项
+   * 对 broken 项重测实际占用写回 size，保证配额统计贴合磁盘真实情况。
+   * 返回变更摘要供日志与测试断言。
+   */
+  reconcile(): { broken: string[]; orphaned: string[] } {
+    this.init()
+    const broken: string[] = []
+    const orphaned: string[] = []
+    /** broken 项待后台重测占用的版本（启动不应被大目录扫描阻塞） */
+    const needsResize: string[] = []
+    let changed = false
+    for (const [version, meta] of Object.entries(this.index.kernels)) {
+      const dir = path.join(this.kernelsDir, KernelManager.safeDirName(version))
+      if (!fs.existsSync(dir)) {
+        // ③ 目录已不在（历史上删除成功但索引未清干净，或用户手动删了目录）
+        delete this.index.kernels[version]
+        orphaned.push(version)
+        changed = true
+        continue
+      }
+      const hasBin = this.binJsFor(version) !== null
+      if (meta.status === 'installed' && !hasBin) {
+        // ① 半个内核：不完整、绝不能被启动，但占盘 → 标 broken
+        meta.status = 'broken'
+        meta.error = meta.error ?? '内核文件不完整（bin.js 缺失），可能由上一次卸载中断导致'
+        broken.push(version)
+        changed = true
+      } else if (meta.status !== 'installed' && meta.status !== 'broken') {
+        // ② 安装/下载中断残留，以及目录仍旧存在但安装已失败的 error 项：
+        // 它们界面上都看不见（listInstalled 只认 installed/broken）却占着盘，会一直泄漏
+        meta.status = 'broken'
+        meta.error = meta.error ?? '安装被中断，内核文件不完整'
+        broken.push(version)
+        changed = true
+      }
+      if (meta.status === 'broken') {
+        // broken 项的 size 通常失真（索引记的是安装时的值，实际已被删掉一部分）→ 需重测。
+        // 但**不在启动同步路径上测**：实测单目录（150MB/1.7 万文件）同步扫描要 3.6s，
+        // 两个 broken 项就是 ~7s 主进程冻结（启动卡死）。改为后台异步测量，见 remeasureBrokenAsync。
+        needsResize.push(version)
+      }
+    }
+    if (changed) this.persistIndex()
+    // 后台异步重测 broken 项占用（不阻塞启动；完成后自行落盘）
+    if (needsResize.length > 0) void this.remeasureBrokenAsync(needsResize)
+    // 默认内核自身损坏：getActiveVersion 会因 status != installed 而静默回退系统 dsh，
+    // 但 config 里仍指着它，面板会显示「当前默认」且卸载被引用保护拦住 = 死锁。
+    // 这里把默认指针清掉（与运行时的实际行为对齐），用户可重新选一个可用内核。
+    const cfg = configStore.get()
+    if (cfg.defaultKernelVersion && this.index.kernels[cfg.defaultKernelVersion]?.status === 'broken') {
+      logger.warn('default kernel is broken, clearing default pointer', { version: cfg.defaultKernelVersion })
+      configStore.set({ defaultKernelVersion: null })
+    }
+    // 回滚指针（previousKernelVersion = 崩溃自动回滚目标）指向已不可用的内核 → 清掉悬空值。
+    // 回滚前会校验 listUsable 并跳过，所以不会引发故障，但配置里留着一个已卸载的版本号，
+    // 会让「回滚」这张安全网事实上失效却看不出来（用户以为有兼底，实际没有）。
+    // get() 返回的是快照，故在上一次 set 之后重新读取。
+    const afterDefault = configStore.get()
+    if (
+      afterDefault.previousKernelVersion &&
+      !this.listUsable().some((k) => k.version === afterDefault.previousKernelVersion)
+    ) {
+      logger.warn('previous kernel no longer usable, clearing rollback pointer', {
+        version: afterDefault.previousKernelVersion
+      })
+      configStore.set({ previousKernelVersion: null })
+    }
+    if (broken.length || orphaned.length) {
+      logger.warn('kernel reconcile found inconsistencies', { broken, orphaned })
+    }
+    return { broken, orphaned }
+  }
+
+  /**
+   * 后台重测 broken 项的磁盘占用并写回索引（异步，不阻塞启动）。
+   * 目的：配额/面板显示贴磁盘真实值（卸载中断后索引里的旧 size 会明显偏大），
+   * 但数百 MB ÷ 上万文件的同步扫描会冻结主进程，因此只能放到后台慢慢做。
+   */
+  private async remeasureBrokenAsync(versions: string[]): Promise<void> {
+    let changed = false
+    for (const version of versions) {
+      const meta = this.index.kernels[version]
+      if (!meta || meta.status !== 'broken') continue
+      const dir = path.join(this.kernelsDir, KernelManager.safeDirName(version))
+      if (!fs.existsSync(dir)) continue
+      try {
+        const actual = await dirSizeAsync(dir)
+        const cur = this.index.kernels[version]
+        if (cur && cur.status === 'broken' && actual !== cur.size) {
+          cur.size = actual
+          changed = true
+          logger.info('kernel broken size remeasured', { version, size: actual })
+        }
+      } catch (err) {
+        logger.warn('kernel broken size remeasure failed', { version, err: String(err) })
+      }
+    }
+    if (changed) this.persistIndex()
+  }
+
+  /** 删除类系统错误 → 面向用户的中文说明（Windows 上 EPERM/EBUSY 含义容易被误解为权限问题） */
+  private explainDeleteError(code: string | undefined, version: string): string {
+    if (code === 'EPERM' || code === 'EBUSY' || code === 'EACCES') {
+      return (
+        '内核 v' + version + ' 的文件正被占用，无法删除（通常是 DSH 服务正在运行，' +
+        '其原生模块 sharp/koffi 被进程加载后 Windows 会拒绝删除）。' +
+        '请先停止服务后重试。'
+      )
+    }
+    if (code === 'ENOTEMPTY') {
+      return '内核 v' + version + ' 目录非空，可能有文件仍被占用，请稍后重试。'
+    }
+    return '卸载 v' + version + ' 失败' + (code ? '（' + code + '）' : '')
   }
 
   /** 内核仓库总占用（字节） */
+  /**
+   * 内核仓库总占用（字节）。
+   * 取值口径：已安装内核用安装时的实测快照；broken 项的 size 已在启动对账
+   * （reconcile）里按磁盘实际残留重测写回——因为索引里的旧值会与实际严重不符
+   * （实测：某内核索引记 223MB，删掉一半后实际只剩 179MB）。
+   * 不在这里做全量扫描：4 份内核 × 250MB 每次开面板都扫一遍会让 UI 卡顿，
+   * 全量重测统一放到启动对账一次性完成。
+   */
   totalSizeBytes(): number {
     return Object.values(this.index.kernels)
-      .filter((k) => k.status === 'installed')
+      .filter((k) => k.status === 'installed' || k.status === 'broken')
       .reduce((sum, k) => sum + (k.size || 0), 0)
+  }
+
+  /**
+   * 待回收（.deleting）目录总占用（字节）。
+   * **永不在同步路径上扫描**：回收站可能是整个内核（数百 MB / 上万文件），
+   * 同步扫会把主进程冻结数秒（实测 150MB → 3.6s）。这里只回缓存值，
+   * 缓存过期时触发一次后台测量，下一次读取（面板轮询/重新打开）即为实测值。
+   */
+  trashSizeBytes(): number {
+    this.init()
+    const now = Date.now()
+    if (!this.trashSizeCache || now - this.trashSizeCache.at >= 30_000) {
+      this.scheduleTrashMeasure()
+    }
+    return this.trashSizeCache ? this.trashSizeCache.mb * 1024 * 1024 : 0
+  }
+
+  /** 后台测量回收站占用（带去重，避免面板反复拉取时并发狂扫） */
+  private scheduleTrashMeasure(): void {
+    if (this.trashMeasuring) return
+    this.trashMeasuring = true
+    void (async () => {
+      try {
+        let bytes = 0
+        for (const n of fs.readdirSync(this.kernelsDir)) {
+          if (!n.includes(TRASH_SUFFIX)) continue
+          bytes += await dirSizeAsync(path.join(this.kernelsDir, n))
+        }
+        this.trashSizeCache = { at: Date.now(), mb: Math.round(bytes / (1024 * 1024)) }
+      } catch {
+        // 测量失败不抛错：下次读取再试（缓存留空会再触发）
+        this.trashSizeCache = { at: Date.now(), mb: 0 }
+      } finally {
+        this.trashMeasuring = false
+      }
+    })()
   }
 
   /** 存储统计（配额，阶段 C） */
@@ -676,7 +990,9 @@ export class KernelManager extends EventEmitter {
       quotaMB: cfg.kernelsQuotaMB ?? 1024,
       usedMB: Math.round(this.totalSizeBytes() / (1024 * 1024)),
       runtimeMB,
-      diskFreeMB: runtimeManager.diskFreeMB()
+      diskFreeMB: runtimeManager.diskFreeMB(),
+      // 待回收占用单独报出：用户看到「已卸载但磁盘没降」时，这里给出解释
+      pendingRemovalMB: Math.round(this.trashSizeBytes() / (1024 * 1024))
     }
   }
 
@@ -770,6 +1086,44 @@ function dirSizeSync(dir: string): number {
     }
   } catch {
     /* noop */
+  }
+  return s
+}
+
+/**
+ * 异步目录大小（不阻塞主进程）。
+ * 为何需要异步版：实测 150MB / 1.7 万文件的目录**同步**扫描耗时 3.6s，
+ * 放在启动对账或面板轮询里会把主进程冻结数秒（窗口/托盘全部无响应）。
+ * 策略：同一目录内用 Promise.all 批量 stat，跨目录用栈串行 —— 既不会开启过多句柄，
+ * 也不占用事件循环（每个 await 都让出）。
+ */
+async function dirSizeAsync(dir: string): Promise<number> {
+  let s = 0
+  const stack = [dir]
+  while (stack.length) {
+    const cur = stack.pop()
+    if (!cur) continue
+    let ents: fs.Dirent[]
+    try {
+      ents = await fs.promises.readdir(cur, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    const sizes = await Promise.all(
+      ents.map(async (e) => {
+        const p = path.join(cur, e.name)
+        if (e.isDirectory()) {
+          stack.push(p)
+          return 0
+        }
+        try {
+          return (await fs.promises.stat(p)).size
+        } catch {
+          return 0
+        }
+      })
+    )
+    for (const n of sizes) s += n
   }
   return s
 }

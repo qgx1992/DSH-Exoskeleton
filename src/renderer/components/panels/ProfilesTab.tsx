@@ -124,7 +124,8 @@ export function ProfilesTab(): React.JSX.Element {
                   className="w-40 font-mono text-xs"
                 >
                   <option value="">（跟随默认）</option>
-                  {kernels.map((k) => (
+                  {/* broken（文件不完整）不能作为绑定目标：绑定门禁会拒，故不列出来避免误导 */}
+                  {kernels.filter((k) => k.status === 'installed').map((k) => (
                     <option key={k.version} value={k.version}>
                       v{k.version}
                     </option>

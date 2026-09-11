@@ -67,6 +67,13 @@ async function bootstrap(): Promise<void> {
   logger.init()
   configStore.init()
   kernelManager.init()
+  // 启动对账：修正「卸载/安装被中断」留下的脏账（installed 但 bin.js 已丢 → 标 broken；
+  // 安装残留 → 标 broken 供卸载；目录已不在 → 清索引），并重测 broken 项占用。
+  // 必须在任何 listInstalled()（如预置判断、面板首次拉取）之前跑，否则脏项会被当作不可见泄漏。
+  kernelManager.reconcile()
+  // 回收上一次卸载留下的 .deleting 目录（当时文件被运行中的内核进程映射，删不掉）：
+  // 此刻上一个进程已退出，占用通常已释放，这一轮往往能真正把磁盘收回。
+  kernelManager.purgeTrash()
   runtimeManager.init()
 
   // v0.8.2：注册 dsh-exo:// 协议（原生 toast 协议激活的前置；幂等，每次启动重设）

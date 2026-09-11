@@ -90,6 +90,9 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
 
   const running = state?.status === 'running'
   const starting = state?.status === 'starting'
+  /** 损坏内核（文件不完整）不计入「已装内核」数：那是待清理的残骸，不是可用内核 */
+  const brokenKernels = kernels.filter((k) => k.status === 'broken')
+  const usableKernels = kernels.filter((k) => k.status !== 'broken')
   const updatablePlugins = plugins.filter((p) => p.update?.available).length
   /** 是否真的做过插件更新检测（update === null = 尚未检测，不能断言「全部最新」） */
   const pluginsChecked = plugins.some((p) => p.update !== null)
@@ -182,13 +185,15 @@ export function OverviewTab({ state, onStart, onStop, onRestart, onOpenWebUI }: 
       <section className="grid grid-cols-2 gap-2.5 md:grid-cols-3">
         <StatCard
           label="DSH 内核"
-          value={kernels.length > 0 ? String(kernels.length) : '未安装'}
-          unit={kernels.length > 0 ? '个' : undefined}
+          value={usableKernels.length > 0 ? String(usableKernels.length) : '未安装'}
+          unit={usableKernels.length > 0 ? '个' : undefined}
           sub={cfg?.defaultKernelVersion ? `默认 v${cfg.defaultKernelVersion}` : '使用系统 dsh'}
           badge={
-            kernelUpdate?.available && kernelUpdate.latest
-              ? { text: `可升级 v${kernelUpdate.latest}`, tone: 'amber' }
-              : undefined
+            brokenKernels.length > 0
+              ? { text: `${brokenKernels.length} 个已损坏`, tone: 'red' }
+              : kernelUpdate?.available && kernelUpdate.latest
+                ? { text: `可升级 v${kernelUpdate.latest}`, tone: 'amber' }
+                : undefined
           }
         />
         <StatCard
