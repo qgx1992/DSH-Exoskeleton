@@ -7,6 +7,15 @@
 A lightweight, clean, feature-complete DSH desktop shell: wraps the official `dsh web` into a **double-click-to-run** Windows desktop app.
 Following the **shell-kernel separation** principle — **no changes to the DSH core**, seamless tracking of official upgrades; by default shares `~/.dsh`, so existing configs require zero migration.
 
+## Latest Release Highlights (v0.9.3)
+
+> [Release notes](https://github.com/qgx1992/DSH-Exoskeleton/releases/tag/v0.9.3) · Full history in the [changelog](CHANGELOG.md)
+
+- **Fixed “kernel cannot be uninstalled”**: kernel native modules (sharp / koffi) are hard-linked across kernel versions (the **same file object**), and once the running kernel process maps them, Windows refuses to delete them. The old implementation aborted halfway, leaving the kernel corrupted while it was still listed as “installed” — and every retry damaged it further. Uninstall is now **rename-first, deletion as a fallback**: the uninstall takes effect immediately, physical deletion is retried in the background, and if it still fails nothing is corrupted — cleanup happens on the next launch.
+- **New startup reconciliation**: kernels whose files are damaged or whose install was interrupted are detected and marked “damaged”, with one-click cleanup — previously such leftovers were invisible in the UI while still occupying disk (252MB observed leaked). Pointers to dead kernels (default kernel, crash-rollback target) are cleared as well.
+- **More actionable feedback**: occupancy errors (`EPERM` / `EBUSY`) are translated into plain language with a suggested fix; kernel disk usage is measured from disk and “pending reclaim” is reported separately.
+- **Startup is no longer blocked by reconciliation**: re-measuring damaged kernels now runs asynchronously in the background (a synchronous full scan used to freeze startup for seconds).
+
 ## Features
 
 | Module | Description |
@@ -21,7 +30,7 @@ Following the **shell-kernel separation** principle — **no changes to the DSH 
 | Backup & rollback | Manual archive + automatic snapshots (before plugin install/uninstall, before restore) + one-click rollback; snapshots stored in `userData\backups` |
 | Plugin management | GitHub topic `dsh-plugin` + npm dual-source catalogs, one-click install/uninstall (reuses `dsh plugin`), conflict pre-check + automatic backup before operations |
 | Auto-update | NSIS installers use electron-updater silent download → notify → one-click restart & install; the portable build guides a manual download |
-| Kernel management (Phase A/B/C/D) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + first-launch default kernel provisioning + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota + **compat-patch auto-injection for buggy alpha kernels (R-24: trial-boot gate + crash auto-rollback)** |
+| Kernel management (Phase A/B/C/D) | DSH multi-version coexistence: install / default routing / uninstall + built-in Node runtime (zero barrier) + first-launch default kernel provisioning + kernel update detection & one-click upgrade + multi-Profile kernel binding + disk quota + **reliable uninstall (rename-first: a failed delete never corrupts files) + startup reconciliation (detect & one-click clean damaged kernels)** + **compat-patch auto-injection for buggy alpha kernels (R-24: trial-boot gate + crash auto-rollback)** |
 | Data reuse | `DSH_HOME` environment variable takes priority, otherwise `%USERPROFILE%\.dsh` |
 | Security isolation | Listens only on `127.0.0.1`, renderer sandbox, `contextIsolation`, Node integration disabled |
 
@@ -132,7 +141,7 @@ Stored in `%APPDATA%\DSH-Exoskeleton\config.json`:
 
 ## Kernel Management (Phase B/C/D shipped)
 
-- **First-launch default kernel provisioning (Phase D)**: on a fresh install, the default kernel (currently `0.1.2-alpha.5`, see `src/shared/kernel-defaults.ts`) is installed automatically on first launch and set as the default — machines without Node download the built-in runtime first; upgrading users are skipped automatically, and failures retry on the next launch.
+- **First-launch default kernel provisioning (Phase D)**: on a fresh install, the default kernel (currently `0.1.5-rc.1`, see `src/shared/kernel-defaults.ts`) is installed automatically on first launch and set as the default — machines without Node download the built-in runtime first; upgrading users are skipped automatically, and failures retry on the next launch.
 - **Built-in Node runtime**: one-click download from the kernel panel (~30MB, nodejs.org; switchable to the npmmirror mirror via `DSH_NODE_DIST`). No system Node needed afterwards (truly zero barrier).
 - Install goes through the npm registry (switchable to the npmmirror mirror to accelerate domestic networks, see `docs/KERNEL-MANAGER-DESIGN.md`).
 - The dependency tree is large (a single kernel is ~50MB+), so the first install time depends on the network; the kernel store has disk quota protection (`kernelsQuotaMB`, default 1GB).
