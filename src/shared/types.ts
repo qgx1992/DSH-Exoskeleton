@@ -10,7 +10,6 @@ export type DSHStatus = 'starting' | 'running' | 'stopped' | 'error'
 /** 管理面板可定位的视图标签 */
 export type DashboardTab =
   | 'overview'
-  | 'web'
   | 'status'
   | 'sessions'
   | 'settings'
@@ -469,17 +468,10 @@ export interface DesktopApi {
     hide: () => Promise<void>
   }
   window: {
-    minimize: () => Promise<void>
-    toggleMaximize: () => Promise<void>
-    close: () => Promise<void>
-    isMaximized: () => Promise<boolean>
-    onMaximizeChange: (callback: (maximized: boolean) => void) => () => void
-    /** 主进程请求打开管理面板并定位到标签（托盘「检查更新」等入口） */
+    /** 主进程请求打开管理面板并定位到标签（托盘菜单入口） */
     onOpenPanel: (callback: (tab: DashboardTab) => void) => () => void
     /** 显示/隐藏管理面板（隐藏时恢复显示 DSH Web UI 视图） */
     setAdminPanelVisible: (visible: boolean) => Promise<void>
-    /** 显示/隐藏管理面板「网页版 DeepSeek」原生视图（独立 WebContentsView，登录态本机保留） */
-    setWebPanelVisible: (visible: boolean) => Promise<void>
   }
   updater: {
     check: () => Promise<UpdateInfo>

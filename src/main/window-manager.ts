@@ -1,7 +1,9 @@
 /**
  * 窗口管理（文档 §4.1.2）
- * - 无边框窗口 + 自绘标题栏（renderer）
- * - DSH Web UI 以 WebContentsView 嵌入标题栏下方
+ * - 无系统标题栏（titleBarStyle: 'hidden' + titleBarOverlay）：内容从 y=0 起，
+ *   右上角为系统原生最小/最大/关闭按钮（叠加在内容之上，不占布局）
+ * - DSH Web UI 以 WebContentsView 铺满整个内容区（顶部即 DSH 自己的侧边栏品牌行）
+ * - 网页版 DeepSeek 入口由注入 DSH 左侧边栏提供（见 web-sidebar-entry）
  * - 单实例、关闭隐藏到托盘
  */
 import { BrowserWindow, WebContentsView, app, shell, screen } from 'electron'
@@ -10,13 +12,24 @@ import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
 import { notificationHub } from './notification-hub'
+import { buildSidebarEntryScript, setSidebarEntryActiveScript, measureSidebarWidthScript, buildTopDragRegionCss, DEEPSEEK_WEB_URL, WEBPANEL_TOGGLE_CHANNEL } from './web-sidebar-entry'
+import {
+  SHELL_CANVAS_COLOR,
+  DSH_TOP_COLOR_DARK,
+  DSH_TOP_COLOR_LIGHT,
+  THEME_CHANGED_CHANNEL,
+  buildTopColorProbeScript,
+  buildThemeWatchScript,
+  normalizeCssColor,
+  pickSymbolColor
+} from './titlebar-overlay'
 import type { DashboardTab } from '../shared/types'
 
-const TITLEBAR_HEIGHT = 36
-/** 管理面板左侧导航宽度（对应 renderer w-44 = 11rem = 176px），网页版视图从它右侧开始 */
-const NAV_WIDTH = 176
-/** 官方网页版 DeepSeek（管理面板「网页版」标签，独立 WebContentsView 承载） */
-const DEEPSEEK_WEB_URL = 'https://chat.deepseek.com'
+/** 原生窗口按钮叠加层高度（与 DSH 侧边栏品牌行同高，视觉上连成一条） */
+export const TITLEBAR_OVERLAY_HEIGHT = 36
+/** 侧边栏宽度回退值（实测不到时使用；实测值见 measureSidebarWidth） */
+const DEFAULT_SIDEBAR_WIDTH = 280
+/** 官方网页版 DeepSeek（独立 WebContentsView 承载，入口在 DSH Web UI 左侧边栏） */
 const DEFAULT_WIDTH = 1200
 const DEFAULT_HEIGHT = 800
 const MIN_WIDTH = 900
@@ -34,6 +47,8 @@ const DSH_VIEW_HEALTH_CHECK_MS = 1200
 /** 启动初期内核 bundle 组合可持续变化约 30-60 秒（第三方插件异步激活 + compatPatch），
  *  重试间隔 2s 起步指数递增（×2、×3…封顶 10s），最多 30 次 ≈ 覆盖 3 分钟稳定期 */
 const DSH_VIEW_RETRY_MAX = 30
+/** 顶栏取色重试上限：页面顶栏可能比 did-finish-load 晚铺满，有限次重试后保持兜底色 */
+const DSH_TOPBAR_PROBE_MAX = 6
 
 export class WindowManager {
   private win: BrowserWindow | null = null
@@ -43,13 +58,21 @@ export class WindowManager {
   private geometryTimer: NodeJS.Timeout | null = null
   /** 管理面板是否打开（打开时隐藏 DSH Web UI 视图） */
   private adminPanelVisible = false
-  /** 「网页版 DeepSeek」原生视图（独立 WebContentsView，懒创建；管理面板内显示） */
+  /** 「网页版 DeepSeek」原生视图（独立 WebContentsView，懒创建；由 DSH 侧边栏入口控制） */
   private webView: WebContentsView | null = null
-  /** 网页版视图是否显示（管理面板打开且「网页版」标签激活） */
+  /** 网页版视图是否显示 */
   private webPanelVisible = false
+  /** DSH Web UI 左侧边栏实测宽度（网页版视图贴它右侧显示） */
+  private sidebarWidth = DEFAULT_SIDEBAR_WIDTH
   /** DSH 页面插件加载失败的自动重载计数与定时器（启动竞态自愈） */
   private dshViewRetryCount = 0
   private dshViewHealthTimer: NodeJS.Timeout | null = null
+  /** 当前已应用到原生窗口按钮叠加层的底色（同值不重复下发，避免抖动） */
+  private titleBarColor: string | null = null
+  /** DSH Web UI 当前是否暗色主题（默认暗色，与 DSH 默认主题一致） */
+  private dshDarkTheme = true
+  /** 顶栏取色重试计数（启动期页面尚未铺满顶栏时多试几次） */
+  private topColorProbeAttempts = 0
 
   getWindow(): BrowserWindow | null {
     return this.win
@@ -100,9 +123,20 @@ export class WindowManager {
       ...(restored ? { x: restored.x, y: restored.y } : {}),
       minWidth: MIN_WIDTH,
       minHeight: MIN_HEIGHT,
-      frame: false,
+      // 无系统标题栏：内容从 y=0 起；右上角由系统原生按钮叠加（titleBarOverlay）
+      // 不用 frame:false 的原因：那样没有任何原生窗口控件，得自己画三个按钮；
+      // titleBarStyle:'hidden' + overlay 则既有原生按钮、又不占内容空间。
+      // 底色用壳画布色起步（启动瞬间窗口被 DSH 视图覆盖前的底色），随后由
+      // syncTitleBarOverlay 按「当前在上的表面 + 该页面主题」同步，避免右上角
+      // 三个按钮压在另一种颜色上（实测旧值 #0b0f17 vs DSH 顶栏 #151517）。
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        color: SHELL_CANVAS_COLOR,
+        symbolColor: pickSymbolColor(SHELL_CANVAS_COLOR),
+        height: TITLEBAR_OVERLAY_HEIGHT
+      },
       title: 'DSH-Exoskeleton',
-      backgroundColor: '#0b0f17',
+      backgroundColor: SHELL_CANVAS_COLOR,
       show: false,
       webPreferences: {
         preload: path.join(__dirname, '../preload/index.js'),
@@ -134,14 +168,8 @@ export class WindowManager {
         this.win?.hide()
       }
     })
-    this.win.on('maximize', () => {
-      this.win?.webContents.send('window:maximizeChange', true)
-      this.persistGeometry()
-    })
-    this.win.on('unmaximize', () => {
-      this.win?.webContents.send('window:maximizeChange', false)
-      this.schedulePersist()
-    })
+    this.win.on('maximize', () => this.persistGeometry())
+    this.win.on('unmaximize', () => this.schedulePersist())
     this.win.on('resize', () => {
       this.layoutView()
       this.schedulePersist()
@@ -149,6 +177,8 @@ export class WindowManager {
     this.win.on('move', () => this.schedulePersist())
     this.win.once('ready-to-show', () => {
       this.win?.show()
+      // 叠加层底色与初始表面（壳画布）对齐
+      this.syncTitleBarOverlay()
       // 恢复最大化状态（先 show 再最大化，确保布局正常）
       if (configStore.get().windowMaximized) {
         this.win?.maximize()
@@ -164,7 +194,7 @@ export class WindowManager {
     // 页面内 toast；失焦/最小化/隐藏/管理面板打开（webview 被隐藏）→ 原生通知，防漏看
     notificationHub.setWindowActive(() => this.isWindowActive())
 
-    // 状态变化时通知 renderer（仪表盘/标题栏状态点）
+    // 状态变化时通知 renderer（仪表盘状态点/版本信息）
     dshManager.on('statusChange', (state) => {
       this.win?.webContents.send('dsh:statusChange', state)
     })
@@ -182,7 +212,7 @@ export class WindowManager {
     win.webContents.on('did-finish-load', () => this.layoutView())
   }
 
-  /** 在标题栏下方区域挂载 DSH Web UI */
+  /** 在内容区挂载 DSH Web UI */
   attachDshView(url: string): void {
     if (!this.win) return
     if (this.view) {
@@ -216,6 +246,18 @@ export class WindowManager {
     // 页面 → 壳（作用域限定该 view，不污染 ipcMain 全局通道；R-27）
     this.view.webContents.on('ipc-message', (_event, channel, ...args) => {
       if (channel !== 'dsh-exo') return
+      // 侧边栏「网页版 DeepSeek」入口的点击（注入按钮→ __dshExo.send）
+      if (String(args[0]) === WEBPANEL_TOGGLE_CHANNEL) {
+        this.toggleWebPanel()
+        return
+      }
+      // DSH 主题切换（页面观察 body[data-ds-dark-theme] 后回壳）→ 跟随换叠加层底色
+      if (String(args[0]) === THEME_CHANGED_CHANNEL) {
+        const p = args[1] as { dark?: boolean } | undefined
+        if (typeof p?.dark === 'boolean') this.dshDarkTheme = p.dark
+        this.syncTitleBarOverlay()
+        return
+      }
       notificationHub.handleViewMessage(String(args[0]), args[1])
     })
     // 每次加载/重载开始时复位握手，等页面 __dshExo.ready() 重新握手。
@@ -250,8 +292,9 @@ export class WindowManager {
       }
     }).catch(() => {})
     this.view.webContents.loadURL(url)
-    // 加载完成（含自动重载）后调度健康检查
+    // 加载完成（含自动重载）后：注入侧边栏入口 + 调度健康检查
     this.view.webContents.on('did-finish-load', () => {
+      this.injectSidebarEntry()
       this.scheduleDshViewHealthCheck(DSH_VIEW_HEALTH_CHECK_MS)
     })
     // 主 frame 加载失败（如内核瞬时未就绪）也走健康检查重试；-3 = ERR_ABORTED 正常中断，忽略
@@ -344,18 +387,165 @@ export class WindowManager {
     }, delayMs)
   }
 
+  /**
+   * 同步原生窗口按钮叠加层（titleBarOverlay）底色，消除右上角色缝。
+   *
+   * 为什么必须同步：`titleBarOverlay.color` 是**窗口级**的，而窗口内容区依次承载
+   * 底色不同的表面——壳管理面板（#060B12）、DSH Web UI 顶栏（暗 #151517 / 亮 #FFFFFF）、
+   * 官方网页版（站点自定）。固定一个色必然与其中若干表面错位。
+   *
+   * 调用时机：① 窗口创建（壳画布色）② DSH 视图挂载/取色成功 ③ 网页版视图显隐
+   * ④ 管理面板显隐 ⑤ DSH 主题切换（页面经 __dshExo 回壳）。
+   * 颜色经 normalizeCssColor 归一化，非法值直接忽略（保留上一次正确颜色）。
+   */
+  private applyTitleBarOverlay(color: unknown): void {
+    const win = this.win
+    if (!win || win.isDestroyed()) return
+    const normalized = normalizeCssColor(color)
+    if (!normalized) return
+    if (this.titleBarColor === normalized) return
+    this.titleBarColor = normalized
+    try {
+      // Windows/Linux 支持运行时改；其他平台（macOS 用红绿灯）静默忽略
+      win.setTitleBarOverlay({
+        color: normalized,
+        symbolColor: pickSymbolColor(normalized),
+        height: TITLEBAR_OVERLAY_HEIGHT
+      })
+      logger.debug('titlebar overlay color synced', { color: normalized })
+    } catch (err) {
+      logger.debug('titlebar overlay sync skipped', err)
+    }
+  }
+
+  /** 当前在上的表面决定叠加层底色：网页版 > 管理面板 > DSH Web UI */
+  private currentSurface(): 'web' | 'admin' | 'dsh' {
+    if (this.webPanelVisible) return 'web'
+    if (this.adminPanelVisible) return 'admin'
+    return 'dsh'
+  }
+
+  /**
+   * 按当前在上的表面同步叠加层底色。
+   * - 管理面板 → 壳画布色（固定暗色）
+   * - DSH Web UI → 实测顶栏色，失败回退官方令牌兜底值（按当前主题取暗/亮）
+   * - 网页版 → 取站点自身顶栏色，失败回退当前 DSH 主题色（中性深/浅，不会突兀）
+   */
+  private syncTitleBarOverlay(): void {
+    const surface = this.currentSurface()
+    if (surface === 'admin') {
+      this.applyTitleBarOverlay(SHELL_CANVAS_COLOR)
+      return
+    }
+    if (surface === 'web') {
+      const fallback = this.dshDarkTheme ? DSH_TOP_COLOR_DARK : DSH_TOP_COLOR_LIGHT
+      const view = this.webView
+      if (!view || view.webContents.isDestroyed()) {
+        this.applyTitleBarOverlay(fallback)
+        return
+      }
+      this.probeWebTopColor(view.webContents, fallback)
+      return
+    }
+    // DSH Web UI：先落兜底值（保证任何时刻都不是旧壳色），再异步用实测值纠正
+    const fallback = this.dshDarkTheme ? DSH_TOP_COLOR_DARK : DSH_TOP_COLOR_LIGHT
+    this.applyTitleBarOverlay(fallback)
+    const view = this.view
+    if (!view || view.webContents.isDestroyed()) return
+    this.probeDshTopColor(view.webContents)
+  }
+
+  /** 实测 DSH 顶栏色并应用；取不到就保持兜底色（并有限次重试，覆盖启动期页面未铺满） */
+  private probeDshTopColor(wc: Electron.WebContents): void {
+    wc.executeJavaScript(buildTopColorProbeScript(TITLEBAR_OVERLAY_HEIGHT))
+      .then((r: unknown) => {
+        const state = r as { color?: string | null; source?: string; dark?: boolean } | null
+        if (typeof state?.dark === 'boolean') this.dshDarkTheme = state.dark
+        const color = normalizeCssColor(state?.color)
+        if (color) {
+          this.topColorProbeAttempts = 0
+          this.applyTitleBarOverlay(color)
+          return
+        }
+        // 页面还在骨架/未铺满：有限次重试后保持兜底色。
+        // 重试前重新确认「当前仍在 DSH 表面」——期间用户可能已切到管理面板/网页版，
+        // 那时该由 syncTitleBarOverlay 决定底色，不能被迟到的重试覆盖。
+        if (this.topColorProbeAttempts < DSH_TOPBAR_PROBE_MAX) {
+          this.topColorProbeAttempts += 1
+          setTimeout(() => {
+            const v = this.view
+            if (!v || v.webContents.isDestroyed()) return
+            if (this.currentSurface() !== 'dsh') return
+            this.probeDshTopColor(v.webContents)
+          }, 700)
+        }
+      })
+      .catch(() => { /* 页面不可达：保留兜底色 */ })
+  }
+
+  /** 实测网页版站点顶栏色并应用（登录页/深色站点都能自适应），取不到保持兜底色 */
+  private probeWebTopColor(wc: Electron.WebContents, fallback: string): void {
+    wc.executeJavaScript(buildTopColorProbeScript(TITLEBAR_OVERLAY_HEIGHT))
+      .then((r: unknown) => {
+        const state = r as { color?: string | null } | null
+        this.applyTitleBarOverlay(normalizeCssColor(state?.color) ?? fallback)
+      })
+      .catch(() => this.applyTitleBarOverlay(fallback))
+  }
+
   private layoutView(): void {
     const win = this.win
     if (!win) return
     const [w, h] = win.getContentSize()
-    const y = TITLEBAR_HEIGHT
+    // 无系统标题栏（titleBarOverlay）→ 内容区从 y=0 铺满：
+    // 顶部那一行即 DSH 自己的侧边栏品牌行，右上角由原生窗口按钮叠加覆盖
     if (this.view && !this.view.webContents.isDestroyed()) {
-      this.view.setBounds({ x: 0, y, width: w, height: Math.max(0, h - y) })
+      this.view.setBounds({ x: 0, y: 0, width: w, height: h })
     }
-    // 网页版视图：从左侧导航栏右侧开始（管理面板打开时布局，隐藏时 setVisible(false) 已不占交互）
+    // 网页版视图：贴在 DSH 侧边栏右侧（侧边栏仍可见，便于点入口收起）
     if (this.webView && !this.webView.webContents.isDestroyed()) {
-      this.webView.setBounds({ x: NAV_WIDTH, y, width: Math.max(0, w - NAV_WIDTH), height: Math.max(0, h - y) })
+      const x = Math.min(this.sidebarWidth, w)
+      this.webView.setBounds({ x, y: 0, width: Math.max(0, w - x), height: h })
     }
+  }
+
+  /**
+   * 注入侧边栏「网页版 DeepSeek」入口（幂等，页面重载后重新注入）。
+   * 同时实测侧边栏宽度，供网页版视图定位。
+   */
+  private injectSidebarEntry(): void {
+    const view = this.view
+    if (!view || view.webContents.isDestroyed()) return
+    // 顶部拖拽区：无系统标题栏时，窗口拖动靠 DSH 页面顶部的 logo 行（避开其中的按钮）
+    void view.webContents
+      .insertCSS(buildTopDragRegionCss(TITLEBAR_OVERLAY_HEIGHT), { cssOrigin: 'user' })
+      .catch((err) => logger.debug('drag region css skipped', err))
+    view.webContents.executeJavaScript(buildSidebarEntryScript()).catch((err) => {
+      logger.debug('sidebar entry inject skipped', err)
+    })
+    // 主题观察：DSH 换主题只改 body 属性、不发事件，注入观察器回壳换叠加层底色
+    view.webContents.executeJavaScript(buildThemeWatchScript()).catch((err) => {
+      logger.debug('theme watch inject skipped', err)
+    })
+    // 顶栏底色与叠加层对齐（右上角三个原生按钮底下的颜色）
+    this.syncTitleBarOverlay()
+    view.webContents
+      .executeJavaScript(measureSidebarWidthScript())
+      .then((w: unknown) => {
+        if (typeof w === 'number' && w > 100 && w < 600) {
+          if (Math.abs(w - this.sidebarWidth) > 1) {
+            this.sidebarWidth = w
+            this.layoutView()
+            logger.info('sidebar width measured', { width: w })
+          }
+        }
+      })
+      .catch(() => {})
+  }
+
+  /** 侧边栏入口点击：切网页版视图显隐（点击入口本身即切换） */
+  toggleWebPanel(): void {
+    this.setWebPanelVisible(!this.webPanelVisible)
   }
 
   getViewUrl(): string | null {
@@ -371,29 +561,37 @@ export class WindowManager {
         this.view.webContents.focus()
       }
     }
-    // 网页版视图跟随面板：面板关闭必隐藏（DSH 视图恢复全屏覆盖），打开时按「网页版」标签状态恢复
-    if (this.webView && !this.webView.webContents.isDestroyed()) {
-      this.webView.setVisible(visible && this.webPanelVisible)
-    }
+    // 管理面板打开时收起网页版视图（两者共用主内容区，避免叠层）
+    if (visible) this.setWebPanelVisible(false)
+    // 表面切换 → 叠加层底色跟随（面板=壳画布色，DSH=顶栏实测色）
+    this.syncTitleBarOverlay()
     logger.info('admin panel visibility', { visible, hasDshView: !!this.view, hasWebView: !!this.webView })
   }
 
   /**
-   * 管理面板「网页版」标签：显示/隐藏官方网页版 DeepSeek。
-   * 懒创建独立 WebContentsView（持久化 session 分区，登录态落盘保留），
-   * 从左侧导航栏右侧开始布局，保证面板标签可随时切换。
+   * 显示/隐藏官方网页版 DeepSeek（入口：DSH Web UI 左侧边栏注入按钮）。
+   * 懒创建独立 WebContentsView（持久化分区，登录态落盘保留），
+   * 贴在侧边栏右侧，并回写按钮选中态。
    */
   setWebPanelVisible(visible: boolean): void {
     this.webPanelVisible = visible
     if (!this.win) return
     if (visible) {
+      // 网页版与 DSH 视图争主内容区：先确认 DSH 视图在显示（管理面板关闭态）
+      if (this.adminPanelVisible) this.setAdminPanelVisible(false)
       const view = this.ensureWebView()
       view.setVisible(true)
       this.layoutView()
       view.webContents.focus()
     } else if (this.webView && !this.webView.webContents.isDestroyed()) {
       this.webView.setVisible(false)
+      this.view?.webContents.focus()
     }
+    this.view?.webContents
+      .executeJavaScript(setSidebarEntryActiveScript(visible))
+      .catch(() => {})
+    // 表面切换 → 叠加层底色跟随（网页版=站点顶栏色，DSH=顶栏实测色）
+    this.syncTitleBarOverlay()
     logger.info('web panel visibility', { visible, hasWebView: !!this.webView })
   }
 
@@ -436,6 +634,10 @@ export class WindowManager {
         logger.warn('deepseek web view load failed', { errorCode, errorDescription })
       }
     })
+    // 站点加载/站内导航完成后重新取顶栏色（登录页与主界面底色可能不同）
+    view.webContents.on('did-finish-load', () => {
+      if (this.webPanelVisible) this.syncTitleBarOverlay()
+    })
     view.webContents.loadURL(DEEPSEEK_WEB_URL)
     this.layoutView()
     logger.info('deepseek web view created', { url: DEEPSEEK_WEB_URL })
@@ -453,10 +655,12 @@ export class WindowManager {
     }
   }
 
-  /** 窗口是否对用户激活（前台焦点且未打开管理面板）——通知 auto 路由与会话抑制共用 */
+  /** 窗口是否对用户激活（前台焦点、未开管理面板、未开网页版）——通知 auto 路由与会话抑制共用 */
   isWindowActive(): boolean {
     const w = this.win
-    return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible
+    // 网页版视图显示时 DSH Web UI 被它遮住，此时 webview 通道的 toast 用户也看不到，
+    // 故按「未激活」处理，让通知降级为原生 toast 再点回跳。
+    return !!w && !w.isDestroyed() && w.isFocused() && !this.adminPanelVisible && !this.webPanelVisible
   }
 
   /**
@@ -648,16 +852,7 @@ export class WindowManager {
     this.win?.hide()
   }
 
-  toggleMaximize(): void {
-    if (!this.win) return
-    if (this.win.isMaximized()) this.win.unmaximize()
-    else this.win.maximize()
-  }
-
-  isMaximized(): boolean {
-    return this.win?.isMaximized() ?? false
-  }
-
+  /** 侧边栏入口点击：切网页版视图显隐（点击入口本身即切换） */
   broadcast(channel: string, ...args: unknown[]): void {
     this.win?.webContents.send(channel, ...args)
   }

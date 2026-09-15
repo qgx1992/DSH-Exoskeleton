@@ -76,14 +76,8 @@ const api: DesktopApi = {
     hide: () => ipcRenderer.invoke('tray:hide')
   },
   window: {
-    minimize: () => ipcRenderer.invoke('window:minimize'),
-    toggleMaximize: () => ipcRenderer.invoke('window:toggleMaximize'),
-    close: () => ipcRenderer.invoke('window:close'),
-    isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
-    onMaximizeChange: (callback) => subscribe('window:maximizeChange', callback),
     onOpenPanel: (callback) => subscribe('panel:open', callback),
-    setAdminPanelVisible: (visible) => ipcRenderer.invoke('window:setAdminPanelVisible', visible),
-    setWebPanelVisible: (visible) => ipcRenderer.invoke('window:setWebPanelVisible', visible)
+    setAdminPanelVisible: (visible) => ipcRenderer.invoke('window:setAdminPanelVisible', visible)
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),

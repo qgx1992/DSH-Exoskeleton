@@ -1,6 +1,11 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench (app shell) ·
  * theme: custom 黑金仪表台 (canvas 0.148/258 · accent gold 0.8/87) ·
- * design-system: DESIGN.md · designed-as-app */
+ * design-system: DESIGN.md · designed-as-app
+ *
+ * 注意：--color-canvas 同时是无标题栏窗口的原生底色（titleBarOverlay.color /
+ * backgroundColor），主进程侧同值常量见 src/main/titlebar-overlay.ts 的
+ * SHELL_CANVAS_COLOR（≈ #060B12）。改这里必须同步改那里，否则管理面板态的
+ * 右上角三个原生按钮又会压出另一块颜色。 */
 @import 'tailwindcss';
 
 @theme {
@@ -91,14 +96,6 @@
   ::-webkit-scrollbar-track {
     background: transparent;
   }
-}
-
-/* 自绘标题栏拖拽区 */
-.titlebar-drag {
-  -webkit-app-region: drag;
-}
-.titlebar-no-drag {
-  -webkit-app-region: no-drag;
 }
 
 /* 日志 / 错误信息 / 代码片段等允许选中复制 */

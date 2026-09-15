@@ -273,16 +273,13 @@ export function registerIpcHandlers(): void {
   })
 
   // ---------- 窗口 ----------
-  ipcMain.handle('window:minimize', () => windowManager.getWindow()?.minimize())
-  ipcMain.handle('window:toggleMaximize', () => windowManager.toggleMaximize())
-  ipcMain.handle('window:close', () => windowManager.getWindow()?.hide())
-  ipcMain.handle('window:isMaximized', () => windowManager.isMaximized())
+  // 窗口控制（最小化/最大化/关闭）由系统原生按钮承担（titleBarOverlay），
+  // 渲染层不再需要自绘按钮，故不暴露对应通道；关闭=隐藏到托盘由主进程 close 事件处理。
   ipcMain.handle('window:setAdminPanelVisible', (_e, visible: boolean) => {
     windowManager.setAdminPanelVisible(visible === true)
   })
-  ipcMain.handle('window:setWebPanelVisible', (_e, visible: boolean) => {
-    windowManager.setWebPanelVisible(visible === true)
-  })
+  // 注：网页版 DeepSeek 的显隐不再由渲染层驱动（入口在 DSH Web UI 侧边栏，
+  // 经 webview 桥直达主进程 toggleWebPanel），故此处不再暴露对应通道。
 
   // ---------- 托盘 ----------
   ipcMain.handle('tray:show', () => windowManager.show())

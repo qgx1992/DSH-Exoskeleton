@@ -1,7 +1,8 @@
 /**
  * 系统托盘（文档 §4.1.3）
  * - 单击唤回窗口
- * - 右键菜单：打开主界面 / 启动-停止 DSH / 开机自启 / 打开日志目录 / 检查更新 / 关于 / 退出
+ * - 右键菜单：打开主界面 / 管理面板 / 启动-停止 DSH / 开机自启 / 打开日志目录 / 检查更新 / 关于 / 退出
+ *   （自绘标题栏移除后，「管理面板…」是进入管理页的主入口）
  */
 import { Tray, Menu, app, shell, dialog } from 'electron'
 import path from 'node:path'
@@ -48,6 +49,7 @@ export function rebuildMenu(): void {
 
   const menu = Menu.buildFromTemplate([
     { label: '打开主界面', click: () => windowManager.show() },
+    { label: '管理面板…', click: () => windowManager.openPanelTab('overview') },
     { type: 'separator' },
     serviceItem,
     {

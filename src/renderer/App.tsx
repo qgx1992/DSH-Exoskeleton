@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { TitleBar } from './components/TitleBar'
 import { Dashboard } from './components/Dashboard'
 import { OnboardingWizard } from './components/OnboardingWizard'
 import { ConfirmProvider } from './components/ui/Confirm'
@@ -9,13 +8,13 @@ const api = window.dshDesktop
 
 export default function App(): React.JSX.Element {
   const [dshState, setDshState] = useState<DSHState | null>(null)
-  const [maximized, setMaximized] = useState(false)
   const [appVersion, setAppVersion] = useState('')
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null)
-  /** 管理面板（Dashboard）是否打开：打开时主进程隐藏 DSH Web UI 视图 */
+  /** 管理面板（Dashboard）是否打开：打开时主进程隐藏 DSH Web UI 视图。
+   *  入口：托盘菜单「管理面板…」；面板内可「回到 Web UI」关闭。 */
   const [adminPanel, setAdminPanel] = useState(false)
-  /** 管理面板当前激活标签（提升到 App：标题栏「网页版」按钮需能直接切到该标签） */
+  /** 管理面板当前激活标签 */
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>('overview')
 
   useEffect(() => {
@@ -32,15 +31,13 @@ export default function App(): React.JSX.Element {
     // R-29: 移除 400ms 延迟二次 getState（与 onStateChange 推送构成双数据源，可能旧盖新）；
     //       状态更新由主进程推送驱动，挂载时已有一次 getState 兜底
     const offStatus = api.dsh.onStateChange(setDshState)
-    const offMax = api.window.onMaximizeChange(setMaximized)
+    // 托盘菜单 → 打开管理面板并定位标签
     const offOpenPanel = api.window.onOpenPanel((tab) => {
       setAdminPanel(true)
       setDashboardTab(tab)
     })
-    void api.window.isMaximized().then(setMaximized)
     return () => {
       offStatus()
-      offMax()
       offOpenPanel()
     }
   }, [])
@@ -64,32 +61,11 @@ export default function App(): React.JSX.Element {
   const handleOpenWebUI = useCallback(() => {
     setAdminPanel(false)
   }, [])
-  /** 标题栏「管理面板」按钮：打开时默认落在「总览」标签（避免上次残留的网页版标签自动弹出） */
-  const handleToggleAdminPanel = useCallback(() => {
-    setAdminPanel((v) => {
-      const next = !v
-      if (next) setDashboardTab('overview')
-      return next
-    })
-  }, [])
-  /** 标题栏「网页版」按钮：激活 = 打开管理面板并切到网页版标签；再点 = 关闭面板回到 DSH Web UI */
-  const handleToggleWebPanel = useCallback(() => {
-    if (adminPanel && dashboardTab === 'web') {
-      setAdminPanel(false)
-    } else {
-      setAdminPanel(true)
-      setDashboardTab('web')
-    }
-  }, [adminPanel, dashboardTab])
 
   // 管理面板显隐与主进程同步（隐藏 DSH Web UI 视图）
   useEffect(() => {
     void api.window.setAdminPanelVisible(adminPanel)
   }, [adminPanel])
-  // 网页版原生视图显隐：仅管理面板打开且激活「网页版」标签时显示（「网页版」按钮与标签共用同一状态）
-  useEffect(() => {
-    void api.window.setWebPanelVisible(adminPanel && dashboardTab === 'web')
-  }, [adminPanel, dashboardTab])
 
   const running = dshState?.status === 'running'
 
@@ -97,23 +73,14 @@ export default function App(): React.JSX.Element {
     // ConfirmProvider 包在最外层：各面板用 useConfirm() 弹应用内确认，不再用 window.confirm
     <ConfirmProvider>
       <div className="flex h-screen flex-col bg-canvas">
-        <TitleBar
-          status={dshState?.status ?? 'starting'}
-          port={dshState?.port ?? null}
-          version={dshState?.version ?? null}
-          appVersion={appVersion}
-          maximized={maximized}
-          adminPanel={adminPanel}
-          onToggleAdminPanel={handleToggleAdminPanel}
-          webPanel={adminPanel && dashboardTab === 'web'}
-          onToggleWebPanel={handleToggleWebPanel}
-        />
-        {/* 服务运行中时，此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖；
-            管理面板打开时主进程会隐藏该视图，露出 Dashboard */}
+        {/* 无系统标题栏：内容从 y=0 起，右上角由系统原生窗口按钮叠加（titleBarOverlay）。
+            服务运行中时此区域被主进程挂载的 WebContentsView（DSH Web UI）覆盖，
+            顶部那条即 DSH 自己的侧边栏品牌行；管理面板打开时主进程隐藏该视图。 */}
         <div className="min-h-0 flex-1">
           {!running || adminPanel ? (
             <Dashboard
               state={dshState}
+              appVersion={appVersion}
               activeTab={dashboardTab}
               onTabChange={setDashboardTab}
               onStart={handleStart}

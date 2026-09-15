@@ -4,7 +4,7 @@
  * - 窗口 / 托盘 / IPC 初始化
  * - DSH 子进程自动启动与 WebContentsView 挂载
  */
-import { app } from 'electron'
+import { app, Menu } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { configStore } from './config'
@@ -63,6 +63,13 @@ async function bootstrap(): Promise<void> {
   })
 
   await app.whenReady()
+
+  // 移除 Electron 默认应用菜单（File / Edit / View / Window / Help）：
+  // 带 frame 的窗口会把它画成顶部菜单栏，与「无标题栏」设计冲突；
+  // 实测：不设这一句时 Menu.getApplicationMenu() 返回这 5 项，
+  // 且 frame:true 窗口的「窗口高-内容高」为 39px（即被菜单栏占掉一条）。
+  // 壳自己的功能入口在托盘菜单与管理面板，不依赖应用菜单。
+  Menu.setApplicationMenu(null)
 
   logger.init()
   configStore.init()
