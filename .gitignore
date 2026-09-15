@@ -18,3 +18,5 @@ AGENT.md
 dsh-pet-running-*.png
 # 自研插件源码不在桌面端仓库维护（已独立到各插件自己的 GitHub 仓库，如 qgx1992/dsh-notify）
 plugins/
+# 本地临时实验产物（内核试装、探针脚本、截图等）：体积可达数百 MB，一律不入库
+.tmp*/
