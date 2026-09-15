@@ -102,7 +102,7 @@ dsh-desktop/
 | 模块 | 职责 | 参考实现 |
 | :--- | :--- | :--- |
 | **DSH 进程管理** | 启动/停止 `dsh web` 子进程，健康检查，崩溃自动重启 | kevenxz[reference:22] |
-| **窗口管理** | 无边框/自绘标题栏、窗口状态指示、单实例 | SnowCrescenter[reference:23] |
+| **窗口管理** | 无标题栏窗口（`titleBarStyle:'hidden'` + `titleBarOverlay`，右上角原生窗口按钮）、单实例 | SnowCrescenter[reference:23] |
 | **系统托盘** | 单击唤回、右键菜单（打开/退出/设置/日志） | 全部项目 |
 | **配置管理** | API Key、端口、工作区、开机自启 | csyyywy[reference:24] |
 | **自动更新** | 后台静默检查、下载就绪后通知重启 | SnowCrescenter[reference:25] |
@@ -140,22 +140,34 @@ interface DSHManager {
 
 #### 4.1.2 原生窗口
 
-**功能**：无边框窗口、自绘标题栏、实时状态指示[reference:30]。
+**功能**：无标题栏窗口 + 系统原生窗口按钮叠加（内容从 y=0 起）。
 
 **实现要点**：
-- `frame: false` 移除系统默认边框
-- 36px 自绘标题栏：窗口控制按钮（最小化/最大化/关闭）+ 状态点
-- 状态点颜色：青色 = 服务运行中，灰色 = 启动中，红色 = 出错[reference:31]
-- Windows 11 下窗口圆角由 DWM 原生渲染[reference:32]
+- `titleBarStyle: 'hidden'` + `titleBarOverlay`：内容从 y=0 铺满，右上角为**系统原生**最小化/最大化/关闭（叠加在内容之上、不占布局），无需自绘也不占内容空间
+- `Menu.setApplicationMenu(null)` 移除 Electron 默认应用菜单（File / Edit / View / Window / Help）。实测：不清理时带 frame 的窗口会把它画成菜单栏（窗口高-内容高 = 39px）
+- 顶部那一行直接是 **DSH 自己的侧边栏品牌行**（鲸鱼 logo + deepseek HARNESS），壳不重复绘制品牌
+- 窗口拖动：注入 CSS 给 DSH 顶部 logo 行设 `-webkit-app-region: drag`，行内按钮回设 `no-drag`（logo 本身是「新建会话」按钮）
+- 窗口几何（大小/位置/最大化）仍由壳保存与恢复（`configStore.windowBounds`）
+- **管理面板入口在系统托盘菜单**（「管理面板…」，§4.1.3），面板内可随时「回到 Web UI」
+- **网页版 DeepSeek 入口注入在 DSH Web UI 自己的左侧边栏**（底部「设置」行上方），详见 §4.1.5
+- **叠加层底色跟随当前表面**：`titleBarOverlay.color` 是窗口级的，而内容区依次承载底色不同的表面（壳管理面板 `#060B12`、DSH 顶栏 暗 `#151517` / 亮 `#FFFFFF`、网页版站点自定）。固定一个色必然与其中若干表面错位（旧实现硬编码 `#0b0f17`，实测在 DSH 顶栏上留下 ΔRGB=10 的横向色缝），故由 `main/titlebar-overlay.ts` 探针实测当前顶栏色后 `setTitleBarOverlay` 同步；暗/亮主题切换经 `body[data-ds-dark-theme]` 的 MutationObserver 回壳跟随（详见 §4.1.2.1）
+- 关闭按钮 = 隐藏到托盘（`close` 事件 `preventDefault`），不退出进程[reference:32]
 
 **Electron 配置**：
 ```javascript
-// main/index.ts
+// main/window-manager.ts
 const win = new BrowserWindow({
   width: 1200,
   height: 800,
-  frame: false,
+  // 无标题栏：内容从 y=0 起，右上角叠系统原生窗口按钮（不占布局）
   titleBarStyle: 'hidden',
+  // 起步色 = 壳画布色（与 renderer --color-canvas 同值）；随后由 syncTitleBarOverlay 同步
+  titleBarOverlay: {
+    color: SHELL_CANVAS_COLOR,            // #060B12
+    symbolColor: pickSymbolColor(SHELL_CANVAS_COLOR), // 按底色对比度自动取深/浅
+    height: 36
+  },
+  title: 'DSH-Exoskeleton',
   webPreferences: {
     preload: path.join(__dirname, 'preload.js'),
     sandbox: true,           // 安全隔离[reference:33]
@@ -165,12 +177,55 @@ const win = new BrowserWindow({
 });
 ```
 
+#### 4.1.2.1 叠加层底色同步（titlebar-overlay）
+
+**问题**：`titleBarOverlay.color` 是**窗口级**单值，但同一个窗口的内容区会依次换成底色不同的表面。旧实现硬编码 `#0b0f17`，实测（桌面级截屏取样）在 DSH 顶栏 `#151517` 上形成横贯色缝，边界恰好离右边缘 137px——正是三个按钮底下那块矩形。
+
+**三个表面与色值**：
+
+| 表面 | 暗色 | 亮色 | 取值方式 |
+| --- | --- | --- | --- |
+| 壳管理面板 | `#060B12` | （固定暗色） | 常量 `SHELL_CANVAS_COLOR`，与 `--color-canvas` 同值 |
+| DSH Web UI 顶栏 | `#151517` | `#FFFFFF` | 页面探针实测（`--dsw-alias-bg-base`） |
+| 官方网页版 | 站点自定 | 站点自定 | 同探针实测，失败回退当前 DSH 主题色 |
+
+**取色策略**（`buildTopColorProbeScript`）：在 overlay 带内、靠右边缘取 4 个横向采样点（即按钮压住的区域），每点**沿祖先链向上找第一个不透明背景**（穿透 `rgba(0,0,0,0)` 的中间层），再取众数抗零星功能按钮干扰；元素层全透明时回退官方令牌 `--dsw-alias-bg-base` → `body` 背景 → 主题兜底常量。
+
+**笔画色**：`pickSymbolColor` 按 WCAG 相对亮度在 `#f9fafb`（DSH 暗色文字色）与 `#0f1115`（DSH 亮色文字色）间取对比度更高者，暗/亮实测 17.45 / 18.90，不会出现「白底白按钮」。
+
+**同步时机**：窗口创建（壳画布色）→ DSH 视图挂载（先落主题兜底值再异步纠正）→ 网页版/管理面板显隐 → DSH 主题切换。
+
+**测试**：
+- 单测 `scripts/test/test-titlebar-overlay.cjs`（30 项，`npm test`）：颜色归一化/半透明拒绝、笔画对比度、探针穿透半透明层、令牌回退、主题观察回环、常量一致性
+- 端到端 `scripts/probe/verify-titlebar-overlay.cjs`（9 项）：**桌面级 GDI 截屏**比对按钮簇与其下方页面底色，含「换回旧值必须变色」的对照实验
+- ⚠️ 方法学陷阱：**不能用 `capturePage` 验证此项**——它只抓 WebContents 自身像素，原生 overlay 由系统画在其上、不进 web 图层，比对「带内 vs 带外」等于拿页面比自己，必然 Δ=0 形成假通过
+
+#### 4.1.2.2 会话头部让位（避免被原生按钮遮挡）
+
+**问题**（实测 `scripts/probe/probe-overlap-widths.cjs`）：原生按钮簇占右上角 `x ∈ [W-138, W], y ∈ [0, 36]`；DSH 会话头部 `<header>` 在 `y = 0..86`、`titleRow` 在 `y = 10..42`，于是**每个窗口宽度下都重叠 110×26 = 2860px²**，`headerUtilities`（124×28）约 62%、`headerCorner`（28×28）约 86% 被压在最小化/最大化按钮之下。
+
+**为什么壳必须出手**：`env(titlebar-area-*)` 实测在本应用的 WebContentsView 子视图内全为 `-1px`——Electron 没有把 WCO 变量下发到子视图，DSH 自己无从避让。
+
+**修法**：`header { padding-top: 36px }`（随 overlay 高度参数化），整行下移。
+
+| 决策 | 取值 | 依据 |
+| --- | --- | --- |
+| 锚点 | `header`（语义标签） | CSS module 类名是 hash（`wSkVaW_header`）不可依赖；实测 `<header>` 全页只命中 1 个且正是目标 |
+| 改 padding 而非 margin/位移 | `padding-top` | header 是 grid 行，padding 撑高该行后后续内容（选项卡、会话视图）自动下推，不叠层、不留白 |
+| 附带 `height:auto` + `min-height` | 原 86px + overlay 高 | 防 `box-sizing:border-box` 下固定高度被压缩、以及折叠时塌陷 |
+| 同批注入 | 与拖拽区 CSS 合并 | 一次 `insertCSS` 下发，避免两次注入的先后竞态 |
+
+**验证** `scripts/probe/verify-header-offset.cjs`（22 项）：逐宽度（1440/1280/1200）断言零重叠、header 只命中 1 个、标题行 `top ≥ 36`、页面未被撑出滚动条、选项卡顺序正常；并含两项防自欺：
+- **非空过门禁**：先轮询确认会话头真的渲染（`header` 高度 > 0 且 `titleRow` 存在）再判重叠——空态下「无重叠」是 vacuous pass，第一版脚本就因此假通过
+- **基线对照**：修复前必须实测到重叠（432px²），否则用例无鉴别力
+
 #### 4.1.3 系统托盘
 
 **功能**：程序常驻后台，单击唤回窗口，右键菜单齐全[reference:35]。
 
 **右键菜单**：
 - 打开主界面
+- 管理面板…（打开并定位到总览页）
 - 启动/停止 DSH 服务
 - 开机自启（复选）[reference:36]
 - 打开日志目录[reference:37]
@@ -181,6 +236,26 @@ const win = new BrowserWindow({
 **实现要点**：
 - 关闭窗口时隐藏而非退出（`win.hide()`）[reference:38]
 - 托盘单击唤回窗口（`win.show()`）
+
+#### 4.1.5 网页版 DeepSeek（DSH 左侧边栏入口）
+
+**功能**：DSH Web UI 左侧边栏底部提供一个「网页版 DeepSeek」入口，点击后在侧边栏右侧嵌入官方 chat.deepseek.com，再点收起。
+
+**实现要点**（`src/main/web-sidebar-entry.ts`）：
+- **入口用 DOM 注入**：往官方插槽渲染出的锚点 `[data-slot="sidebar.footer.action"]` 插一个按钮。
+  该标记**不带 hash、跨版本稳定**；CSS module 类名是 hash（实测 `pI_x6G_sidebarCol`）不可依赖。
+  锚点 `display: contents`，按钮自然排进侧边栏底部那一列（与第三方「今日¥」同列，「设置」行上方）。
+- **为何不用官方插槽注册**：`sidebar.*` 插槽是 cordis 客户端插件的注册面，需独立插件包
+  （本仓 `plugins/` 已 gitignore，插件源码在各自仓库），而壳要开箱即用。
+- **点击链路**：注入按钮 → `window.__dshExo.send('webpanel:toggle')`（既有 dsh-view 桥，R-27 白名单不扩大）
+  → 主进程 `ipc-message` 监听 → `windowManager.toggleWebPanel()`。
+- **鲁棒性**：幂等（节点 id + 安装标记判重）、MutationObserver 节流自愈（React 重渲染清掉后补插）、
+  选中态由壳 `executeJavaScript` 回写。
+- **承载方式**：仍用独立 `WebContentsView`（登录态存 `persist:deepseek-web`，重启保留）。
+  **为何不用 iframe**：官方响应头实测 `Content-Security-Policy: frame-ancestors none`，iframe 会被拦截；
+  独立视图是顶级浏览上下文，不受该 CSP 限制。
+- **侧边栏宽度**：实测（约 280px）后把网页版视图定位到它右侧；截图/实测脚本见
+  `scripts/probe/verify-web-sidebar-entry.cjs`（6 项全通过）与 `scripts/probe/verify-shell-top.cjs`（5 项全通过）。
 
 #### 4.1.4 单实例运行
 
@@ -323,7 +398,7 @@ if (!gotTheLock) {
 | 任务 | 说明 |
 | :--- | :--- |
 | 项目脚手架 | Electron + TypeScript + React + Vite |
-| 原生窗口 | 无边框窗口 + 自绘标题栏 + 状态点 |
+| 原生窗口 | 无标题栏（titleBarOverlay，右上角原生窗口按钮）+ 窗口几何记忆 |
 | 系统托盘 | 托盘常驻 + 右键菜单 |
 | 单实例 | 防止重复启动 |
 | DSH 进程管理 | 启动/停止 `dsh web`，健康检查 |

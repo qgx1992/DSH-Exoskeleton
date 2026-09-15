@@ -6,6 +6,25 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [未发布]
+
+### 🐛 Bug 修复
+- **会话头部与右上角原生窗口按钮重叠，右上角那排图标按钮被最小化/最大化盖住**：Windows 下原生按钮簇占据右上角 `x ∈ [W-138, W], y ∈ [0, 36]`，系统画在内容**之上**；而 DSH 会话头部 `<header>` 位于 `y = 0..86`、其 `titleRow` 在 `y = 10..42`，实测**每个窗口宽度下都重叠 110×26 = 2860px²**，`headerUtilities`（124×28）约 62% 被压、`headerCorner`（28×28）约 86% 被压。根因是 `env(titlebar-area-*)` 在本应用的 WebContentsView 子视图里实测全为 `-1px`（Electron 未下发 WCO 变量），DSH 自己无从避让，只能由壳处理。修法：给 `header` 加等于叠加层高度的 `padding-top`，整行（标题 + 选项卡）下移到按钮带下方。锚点用 `<header>` **语义标签**而非 CSS module 类名（实测类名是 hash `wSkVaW_header` 不可依赖；`<header>` 全页只命中 1 个且正是目标，同一探针已验证）；只加 padding 不改高度/外边距，header 作为 grid 行会自然把后续内容下推，无叠层错位。
+- **右上角三个原生窗口按钮底下压着一块对不上的颜色（暗色下一条色缝、亮色下白底压黑块）**：`titleBarOverlay.color` 是**窗口级**的，旧实现把它硬编码成 `#0b0f17` 就再也不变，而窗口内容区依次承载底色互不相同的表面——壳管理面板 `#060B12`、DSH Web UI 顶栏 暗 `#151517` / 亮 `#FFFFFF`、官方网页版站点自定。实测（桌面级截屏取样）旧值在 DSH 顶栏上形成一条横贯的色缝，边界正好落在离右边缘 137px 处（即三个按钮底下那块矩形），`ΔRGB=10`；切到 DSH 亮色主题后恶化为「白底压黑块」`ΔRGB=237`。现在改为**按当前在上的表面 + 该页面当前主题动态同步**：新模块 `src/main/titlebar-overlay.ts` 在页面 overlay 带内多点采样、沿祖先链穿透半透明层取「实际被画出来的」底色（拿不到时回退官方令牌 `--dsw-alias-bg-base` → `body` 背景 → 主题兜底常量），并据此下发 `setTitleBarOverlay`；按钮笔画色按底色亮度在深浅两候选间取对比度更高者（实测暗 17.45 / 亮 18.90，均远超 WCAG AA 4.5）。DSH 换主题只改 `body[data-ds-dark-theme]`、不发事件，故注入 MutationObserver 经既有 `__dshExo` 白名单通道回壳跟随（不扩大 preload 暴露面，遵守 R-27）。顺带修正 `--color-canvas` 同值问题：壳画布色收敛为 `SHELL_CANVAS_COLOR = #060B12`，与 renderer 的 `--color-canvas` 严格同值（新增测试断言二者一致，防止改一处漏一处）。
+
+### ✨ 新功能
+- **网页版 DeepSeek 入口移入 DSH Web UI 自己的左侧边栏**（底部「设置」行上方）：点一下就在侧边栏右侧嵌入官方 chat.deepseek.com，再点收起。实现走 **DOM 注入**——往官方插槽已渲染出的锚点 `[data-slot="sidebar.footer.action"]` 插一个按钮（该标记不带 hash、跨版本稳定；CSS module 类名是 hash 不可依赖），点击经既有 webview 桥 `window.__dshExo` 回壳切视图。按钮带 MutationObserver 自愈（React 重渲染被清掉后自动补插）、幂等、选中态由壳回写。**为何不用官方插槽注册**：`sidebar.*` 插槽是 cordis 客户端插件的注册面，需要独立插件包（本仓 `plugins/` 已 gitignore，插件源码在各自仓库），而壳要开箱即用。**为何不用 iframe**：官方响应头实测 `Content-Security-Policy: frame-ancestors none`，仍用独立 WebContentsView（顶级浏览上下文，登录态存 `persist:deepseek-web` 重启保留）。
+- **去掉标题栏（含系统原生）与默认菜单**：窗口改为 `titleBarStyle: 'hidden'` + `titleBarOverlay` —— 内容从 y=0 起、右上角叠系统原生最小/最大/关闭按钮，顶部那一行直接是 DSH 自己的侧边栏品牌行（鲸鱼 logo + deepseek HARNESS），与参考设计一致。同时 `Menu.setApplicationMenu(null)` 移除 Electron 默认应用菜单（File / Edit / View / Window / Help）——实测该菜单只在带 frame 的窗口才被画出（窗口高-内容高 39px），不清理就会与「无标题栏」冲突。窗口拖动由注入 CSS 给 DSH 顶部 logo 行设 `-webkit-app-region: drag`（行内按钮回设 `no-drag`，保证 logo 的「新建会话」点击不被吞）。
+- **窗口改为「无标题栏 + 右上角原生窗口按钮」**：`titleBarStyle: 'hidden'` + `titleBarOverlay`，内容从 y=0 铺满；不再自绘标题栏，也不再使用系统完整标题栏。
+- **管理面板改从系统托盘进入**：托盘右键菜单新增「管理面板…」，打开即定位到总览页；面板内底部保留「回到 Web UI」。
+
+### 🧹 维护
+- 管理面板移除「网页版」导航标签（入口已改由 DSH 侧边栏承载），`DashboardTab` 同步去掉 `'web'`；移除面板内网页版视图与 `setWebPanelVisible` 的渲染层调用。
+- 删除 `src/renderer/components/TitleBar.tsx` 与 `.titlebar-drag/.titlebar-no-drag` 样式；下线已无引用的窗口控制 IPC（`window:minimize/toggleMaximize/close/isMaximized`、`window:maximizeChange`）。
+- 新增 `src/main/web-sidebar-entry.ts`（侧边栏入口注入 + 顶部拖拽区 CSS）与验证脚本 `scripts/probe/verify-web-sidebar-entry.cjs`（6 项）、`scripts/probe/verify-shell-top.cjs`（5 项）、`scripts/probe/probe-overlay-buttons-shot.cjs`（窗口按钮桌面级截屏取证）。
+- 新增 `src/main/titlebar-overlay.ts`（原生窗口按钮叠加层底色同步：颜色归一化 / 对比度选笔画色 / 顶栏取色探针 / 主题观察），配套单测 `scripts/test/test-titlebar-overlay.cjs`（30 项，已接入 `npm test`）与端到端取证 `scripts/probe/probe-overlay-color.cjs`、`scripts/probe/verify-titlebar-overlay.cjs`（9 项，**桌面级像素**比对 + 旧值对照实验）。
+- 会话头部让位规则并入 `src/main/web-sidebar-entry.ts` 的 `buildTopDragRegionCss`（与拖拽区同一次 insertCSS 下发）；新增取证与验证脚本 `scripts/probe/probe-overlap-widths.cjs`（逐宽度重叠取证）、`scripts/probe/probe-header-selector.cjs`（锚点稳定性勘察，供内核升版时复核选择器）、`scripts/probe/verify-header-offset.cjs`（22 项，含「会话头必须已渲染」的非空过门禁与修复前基线对照）。
+
 ## [0.9.3] - 2026-09-11
 
 ### 🐛 Bug 修复

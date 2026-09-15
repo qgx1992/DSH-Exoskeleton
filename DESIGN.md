@@ -72,6 +72,8 @@ red=危险/错误，gray=中性。**服务「运行中」用 success 呼吸光�
 
 标题栏与侧栏结构、accent 色与放置、字阶与 mono 用法、按钮变体、卡片语言（surface + rule 边 + 12px 圆角）。
 
+窗口无标题栏（`titleBarStyle:'hidden'` + `titleBarOverlay`）：内容从 y=0 起，右上角为系统原生窗口按钮；不放品牌/状态/端口/版本等任何文字。叠加层底色（`titleBarOverlay.color`）**必须与当前在上的表面一致**——壳画布 `#060B12` / DSH 顶栏 暗 `#151517` 亮 `#FFFFFF` / 网页版站点色，由 `main/titlebar-overlay.ts` 实测同步；固定色值会在右上角留下一条横贯色缝。
+
 ## What pages MAY differ on
 
 内容布局（hero 卡 vs 表单行 vs 列表）、每屏主操作的文案与数量（仍 ≤1 个 primary）。
