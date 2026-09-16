@@ -31,6 +31,26 @@ function loadModule() {
   return require(out)
 }
 
+/**
+ * 现场编译 dsh-view 预加载桥（主题回壳依赖 window.__dshExo.send）。
+ * 与 loadModule 同一策略：只依赖源码，不依赖 out/ 构建产物与用例执行顺序。
+ */
+function buildPreload() {
+  const esbuild = require(path.join(ROOT, 'node_modules', 'esbuild'))
+  const out = path.join(tmpRoot, 'dsh-view-preload.cjs')
+  fs.mkdirSync(tmpRoot, { recursive: true })
+  esbuild.buildSync({
+    entryPoints: [path.join(ROOT, 'src', 'preload', 'dsh-view.ts')],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    external: ['electron'],
+    outfile: out,
+    logLevel: 'error'
+  })
+  return out
+}
+
 let passed = 0
 let failed = 0
 const assert = (cond, label, detail) => {
@@ -42,7 +62,9 @@ app.whenReady().then(async () => {
   let win = null
   try {
     const mod = loadModule()
-    const PRELOAD = path.join(ROOT, 'out', 'preload', 'dsh-view.js')
+    // 预加载桥现场编译：不能依赖 out/preload/dsh-view.js —— CI 里 npm test 跑在 npm run build
+    // *之前*，且 out/ 已 gitignore，读构建产物会让本用例在 CI 必挂（本地因残留产物而假绿）。
+    const PRELOAD = buildPreload()
 
     console.log('1) normalizeCssColor')
     assert(mod.normalizeCssColor('rgb(21, 21, 23)') === '#151517', 'rgb → hex', mod.normalizeCssColor('rgb(21, 21, 23)'))
