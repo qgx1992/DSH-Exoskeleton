@@ -18,8 +18,10 @@ console.log('--- resources/zstd-worker.cjs (' + (w.length / 1024).toFixed(1) + '
 check('含 turnQuestions 输出', w.includes('turnQuestions: [...turnQuestions.entries()]'))
 check('含本轮提问关联（curTurn 切换）', w.includes('curTurn = ev.turn'))
 check('含系统注入过滤白名单', w.includes('INJECTED_USER_RE') && w.includes('Current runtime context'))
-check('headInfo 渐进扩读（不再固定 512KB 单次）', w.includes('headLen * 4'))
-check('headInfo 有读取封顶', w.includes('HEAD_LIMIT_MAX'))
+check('headInfo 渐进扩读（不再固定 512KB 单次）', w.includes('headLen *= 4'))
+check('headInfo 有读取封顶', w.includes('HEAD_SCAN_MAX'))
+check('headInfo 取末条 session/title', w.includes('lastTitle') && w.includes('winTitle'))
+check('已移除「首个 title 即定」旧逻辑', !w.includes("title-llm-request') && !title"))
 
 // 2) 主进程 bundle（asar）
 const s = asar.extractFile(path.join('dist', 'win-unpacked', 'resources', 'app.asar'), path.join('out', 'main', 'index.js')).toString('utf8')
