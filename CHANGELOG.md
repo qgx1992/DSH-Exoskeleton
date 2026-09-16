@@ -6,6 +6,11 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
+## [未发布]
+
+### 🐛 Bug 修复
+- **`npm run clean:dist` 从不清理 beta 产物，导致 `dist/` 只增不减**：清理脚本的文件名正则只认 `x.y.z` 直跟 `.exe`，而 beta 产物是 `0.9.4-beta.4.exe`，后缀匹配不上 → 被归入「非版本化文件」永久保留（实测累积到 1.4GB 才被发现）。现按「**正式版 / 预发布版**」两条通道分别计数：正式版默认保留最近 5 个，预发布版默认保留最近 2 个（`--keep N` / `--keep-beta N` 可调）——beta 用完即弃，不宜与正式版争名额；且正式包已发到 GitHub Release，本地 `dist/` 只服务于「回滚/对照最近几版」的临时需求，无需长期存档。同时修正版本排序：旧实现只解析 `x.y.z` 数字段；新版带预发布后缀逐段比较（`beta.10` 排在 `beta.2` 之后，绝不比字符串，遵守 R-22），且正式版高于同 base 预发布版。新增单测 `scripts/test/test-prune-dist.mjs`（20 项，已接入 `npm test`）：这是**会删文件**的脚本，正则/比较器写错会静默删错东西，故重点覆盖 beta.10 排序、两通道互不挤占、孤儿 blockmap 纳管、`latest.yml`/`win-unpacked` 绝不误判为产物，并用断言锁住默认保留数量（5 / 2）防文档漂移。
+
 ## [0.9.4] - 2026-09-16
 
 ### 🐛 Bug 修复

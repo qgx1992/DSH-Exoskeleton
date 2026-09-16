@@ -30,6 +30,7 @@ const CASES = [
   { name: 'dsh-view-preload', src: 'src/preload/dsh-view.ts', out: 'dsh-view.cjs', test: 'scripts/test/test-dsh-view.cjs' },
   { name: 'titlebar-overlay', src: 'src/main/titlebar-overlay.ts', out: 'titlebar-overlay.cjs', test: 'scripts/test/test-titlebar-overlay.cjs' },
   { name: 'session-jsonl', plain: ['--experimental-strip-types', 'scripts/test/test-session-jsonl.mts'] },
+  { name: 'prune-dist', plain: ['scripts/test/test-prune-dist.mjs'] },
 ]
 
 function run(label, cmd, args) {
