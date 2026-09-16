@@ -3,7 +3,10 @@
  * - 容器格式：多帧 zstd（每追加批次一个独立 frame，带校验和），与 dsh-session-persistence-jsonl 一致
  * - 解压：Node 内置 zlib.zstdDecompressSync（Node ≥22.4 / 24 自带）
  * - 性能：仅解压头部若干帧即可取得会话标题/首条消息（长会话避免全量解压）
+ * - 文件名：会话日志按 Session format 代数命名，**不是固定的 session.jsonl**（见下方 resolveSessionLog）
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import zlib from 'node:zlib'
 
 export interface SessionRecord {
@@ -144,6 +147,67 @@ function firstTextContent(p: Record<string, unknown>): string {
 
 export function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s
+}
+
+/**
+ * 会话日志文件名（Session format 代数寻址，镜像内核 dsh-session-format 的规则）：
+ *   generation 0 → `session.jsonl`；generation N ≥ 1 → `session.vN.jsonl`
+ * 每个世代再叠压缩后缀（本应用场景为 `.zstd`，见 dsh-session-persistence-jsonl 的 logSuffix）。
+ *
+ * 背景（线上故障根因）：内核 0.1.5 起 Session format 升到 v3，写盘文件名从
+ * `session.jsonl.zstd` 变为 `session.v3.jsonl.zstd`。壳侧一律硬编码旧名，导致
+ * stat 恒失败 → 会话完成通知彻底失效、面板会话列表只看得见未升级的旧会话。
+ * 因此凡是要定位会话日志的地方，都必须走 resolveSessionLog 而不是拼字面量。
+ */
+export const SESSION_LOG_RE = /^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/
+
+/** 会话日志引用（解析结果） */
+export interface SessionLogRef {
+  /** 文件名（含压缩后缀），如 `session.v3.jsonl.zstd` */
+  name: string
+  /** Session format 代数（v0 = `session.jsonl`；缺失 `.vN` 即 0） */
+  version: number
+  /** 绝对路径 */
+  file: string
+  /** 是否 zstd 压缩（false = 明文 .jsonl，本应用的 worker 无法解压，调用方应告警） */
+  compressed: boolean
+}
+
+/** 解析规范会话日志文件名；非规范名（`session.v0.jsonl`/含压缩前缀/大小写不符）返回 null */
+export function parseSessionLogName(name: string): { version: number; compressed: boolean } | null {
+  const m = SESSION_LOG_RE.exec(name)
+  if (!m) return null
+  return { version: m[1] === undefined ? 0 : Number(m[1]), compressed: m[2] !== undefined }
+}
+
+/**
+ * 定位会话目录下应当被读取的日志文件：按内核口径取**最高代数**。
+ * 内核每次格式迁移都新写一个 `session.vN.jsonl`（旧文件保留不删），所以
+ * v0 与 v3 可能并存 —— 此时必须读 v3，读 v0 会拿到迁移前的陈旧内容。
+ * @returns 无规范命名的日志时返回 null
+ */
+export function resolveSessionLog(sessionDir: string): SessionLogRef | null {
+  let names: string[]
+  try {
+    names = fs.readdirSync(sessionDir)
+  } catch {
+    return null
+  }
+  let best: { name: string; version: number; compressed: boolean } | null = null
+  for (const name of names) {
+    const parsed = parseSessionLogName(name)
+    if (!parsed) continue
+    // 先比代数；同代数（理论上不会出现）偏向可解压的 .zstd
+    if (
+      !best ||
+      parsed.version > best.version ||
+      (parsed.version === best.version && parsed.compressed && !best.compressed)
+    ) {
+      best = { name, version: parsed.version, compressed: parsed.compressed }
+    }
+  }
+  if (!best) return null
+  return { ...best, file: path.join(sessionDir, best.name) }
 }
 
 /**

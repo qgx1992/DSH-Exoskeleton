@@ -20,7 +20,7 @@ import { configStore } from './config'
 import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
 import { closeNotification } from './notify'
-import { decodeWorkspaceName, projectNameFromPath } from '../shared/session-jsonl'
+import { decodeWorkspaceName, projectNameFromPath, resolveSessionLog } from '../shared/session-jsonl'
 
 /** 兜底轮询间隔（主触发是 fs.watch，这是 fs.watch 失效时的保底；非法值回落默认，限制在 [500ms, 60s]） */
 const POLL_RAW = Number(process.env.DSH_SESSION_POLL_MS ?? 500)
@@ -31,6 +31,8 @@ const WATCH_DEBOUNCE_MS = 120
 const MAX_NOTIFIED_TURNS = 200
 
 interface Tracked {
+  /** 当前跟踪的日志文件（含文件名）——内核格式迁移会换名，故必须记下用于变更检测 */
+  file: string
   readOffset: number
   /** 已通知过的轮次编号（Set<turn 编号>；防止同一轮重复通知） */
   notifiedTurns: Set<number>
@@ -174,7 +176,11 @@ export class SessionWatcher extends EventEmitter {
         for (const s of sessionDirs) {
           if (!s.startsWith('session-')) continue
           const sessionDir = path.join(wsDir, s)
-          const file = path.join(sessionDir, 'session.jsonl.zstd')
+          // 日志文件名按 Session format 代数命名（v0=session.jsonl.zstd，v3=session.v3.jsonl.zstd…），
+          // 不能拼字面量：内核升级格式后旧名不再被写入，通知会整体失效
+          const resolved = resolveSessionLog(sessionDir)
+          if (!resolved) continue
+          const file = resolved.file
           const key = sessionDir
           const uuid = s.replace(/^session-/, '')
           seen.add(key)
@@ -186,12 +192,28 @@ export class SessionWatcher extends EventEmitter {
             continue
           }
           if (size === 0) continue
+          // 明文 .jsonl（非 zstd）本壳无法解压，跟踪也无意义，跳过避免每轮扫描空转
+          if (!resolved.compressed) {
+            if (configStore.get().notifySessionDone !== 'off') {
+              logger.warn('session log is not zstd-compressed, skipped', { file })
+            }
+            continue
+          }
 
           let t = this.tracked.get(key)
           if (!t) {
             // 基线：仅记录偏移，不处理旧内容（避免启动时对历史会话批量通知）。
             // 已挂着的询问卡同样不回填（与 turn/end 基线语义一致）
-            this.tracked.set(key, { readOffset: size, notifiedTurns: new Set<number>(), pendingAsks: new Map() })
+            this.tracked.set(key, { file, readOffset: size, notifiedTurns: new Set<number>(), pendingAsks: new Map() })
+            continue
+          }
+
+          // 日志换了世代（内核把 v0 迁移成 v3 等）：新文件内容与旧偏移无对应关系，
+          // 重建基线跳过本轮。宁可漏掉迁移瞬间的那一轮，不可因错位解析刷出一批误报。
+          if (t.file !== file) {
+            logger.info('session log generation changed, rebaseline', { uuid, from: path.basename(t.file), to: resolved.name })
+            t.file = file
+            t.readOffset = size
             continue
           }
 

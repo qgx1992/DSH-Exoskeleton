@@ -37,7 +37,8 @@ function walk(dir, out) {
   for (const e of entries) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walk(p, out)
-    else if (e.name === 'session.jsonl.zstd') out.push(p)
+    // 世代无关：session.jsonl.zstd / session.v3.jsonl.zstd 都要收（内核 0.1.5 起改名为 .v3）
+    else if (/^session(?:\.v[1-9][0-9]*)?\.jsonl\.zstd$/.test(e.name)) out.push(p)
   }
 }
 

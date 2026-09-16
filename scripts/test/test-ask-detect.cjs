@@ -89,9 +89,10 @@ app.whenReady().then(async () => {
     await configStore.set({ notifyChannel: 'webview' })
 
     const wsName = '--D-test_ws--'
-    const mkSess = (uuid) => {
+    // 默认 v3 命名（内核 0.1.5 起的实际写法）；旧名由后面的专门用例覆盖
+    const mkSess = (uuid, logName = 'session.v3.jsonl.zstd') => {
       const sessDir = path.join(fakeHome, 'sessions', wsName, `session-${uuid}`)
-      const jsonl = path.join(sessDir, 'session.jsonl.zstd')
+      const jsonl = path.join(sessDir, logName)
       const mid = path.join(sessDir, 'mid-frame.tmp')
       fs.mkdirSync(sessDir, { recursive: true })
       return { sessDir, jsonl, mid, uuid }
@@ -208,6 +209,17 @@ app.whenReady().then(async () => {
     assert(received.length === receivedBefore, 'hub 不投递（显示开关生效）')
     await configStore.set({ notifyAskCard: true })
     configStore.flush() // 立即落盘，避免 quit 竞态残留 false
+
+    console.log('10) 旧命名 session.jsonl.zstd（未迁移世代）→ 询问卡仍能检测')
+    const C = mkSess('cccc0000-0000-4000-8000-000000000003', 'session.jsonl.zstd')
+    zstdFrame([{ type: 'session', cwd: 'D:\\legacy', id: `session-${C.uuid}` }], C.jsonl)
+    sessionWatcher.syncWithService('running')
+    await sleep(500)
+    zstdFrame([askCall(1, 'call_C1', [{ id: 'qc1', question: '旧命名会话里的提问' }])], C.mid)
+    append(C.jsonl, C.mid)
+    await sleep(400)
+    assert(askOpens.length === 5, '旧命名会话的询问卡能检测（向后兼容）', askOpens.length)
+    assert(askOpens[askOpens.length - 1].uuid === C.uuid, '询问卡归属旧命名会话')
 
     console.log(`\\n结果：${passed} passed, ${failed} failed`)
     process.exitCode = failed > 0 ? 1 : 0

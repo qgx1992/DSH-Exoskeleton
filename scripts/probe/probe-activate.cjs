@@ -79,7 +79,7 @@ app.whenReady().then(async () => {
   console.log('完成后的列表标题项:', JSON.stringify(listTitles.filter((t) => t.includes(key))))
 
   // 3) 模拟产品 wire：headInfo 取 通知标题 + 首条用户消息
-  const sessFiles = execFileSync('powershell', ['-NoProfile', '-Command', 'Get-ChildItem "$env:USERPROFILE\\.dsh\\sessions" -Recurse -Filter session.jsonl.zstd | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName'], { encoding: 'utf-8' }).trim()
+  const sessFiles = execFileSync('powershell', ['-NoProfile', '-Command', 'Get-ChildItem "$env:USERPROFILE\\.dsh\\sessions" -Recurse -Filter session*.jsonl.zstd | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName'], { encoding: 'utf-8' }).trim()
   const worker = spawn(nodeExe, [path.resolve('scripts/zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
   await new Promise((r) => setTimeout(r, 300))
   let headInfo = null

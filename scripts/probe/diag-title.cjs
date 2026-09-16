@@ -73,7 +73,7 @@ app.whenReady().then(async () => {
   // 3) 用 watcher 视角（headInfo）读取"通知会用到的标题 / cwd / 首条用户消息"
   const worker = require('child_process').spawn(nodeExe, [path.resolve('scripts/zstd-worker.cjs')], { stdio: ['pipe', 'pipe', 'inherit'] })
   await new Promise((r) => setTimeout(r, 300))
-  const sessFiles = require('child_process').execFileSync('powershell', ['-NoProfile', '-Command', `Get-ChildItem "$env:USERPROFILE\\.dsh\\sessions" -Recurse -Filter session.jsonl.zstd | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName`], { encoding: 'utf-8' }).trim()
+  const sessFiles = require('child_process').execFileSync('powershell', ['-NoProfile', '-Command', `Get-ChildItem "$env:USERPROFILE\\.dsh\\sessions" -Recurse -Filter session*.jsonl.zstd | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName`], { encoding: 'utf-8' }).trim()
   console.log('最新会话文件:', sessFiles)
   let headInfo = null
   let buf = ''

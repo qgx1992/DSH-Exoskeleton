@@ -8,6 +8,8 @@ import {
   truncate
 } from '../../src/shared/session-jsonl.ts'
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 let passed = 0
 let failed = 0
@@ -41,7 +43,40 @@ assert(decodeWorkspaceName('--D-A-my~0020project-~7814~7A76agent--').includes('�
 assert(decodeWorkspaceName('--C-Users-QIU-~0020.dsh--').includes(' '), '~0020 空格解码')
 assert(truncate('abcde', 3) === 'abc…', 'truncate')
 
-console.log('4) 帧扫描/真实文件（可选）')
+console.log('4) 会话日志文件名解析（Session format 代数）')
+{
+  const { parseSessionLogName, resolveSessionLog } = await import('../../src/shared/session-jsonl.ts')
+  assert(parseSessionLogName('session.jsonl.zstd')?.version === 0, 'v0 = session.jsonl.zstd')
+  assert(parseSessionLogName('session.jsonl')?.compressed === false, '明文 v0 可识别且标记未压缩')
+  assert(parseSessionLogName('session.v3.jsonl.zstd')?.version === 3, 'v3 = session.v3.jsonl.zstd')
+  assert(parseSessionLogName('session.v12.jsonl.zstd')?.version === 12, '多位代数 v12')
+  assert(parseSessionLogName('session.v0.jsonl.zstd') === null, 'session.v0 非规范名（v0 不带 .vN）')
+  assert(parseSessionLogName('session.V3.jsonl.zstd') === null, '大写 .V3 非规范名')
+  assert(parseSessionLogName('session.v03.jsonl.zstd') === null, '前导零非规范名')
+  assert(parseSessionLogName('other.jsonl.zstd') === null, '非会话日志名忽略')
+
+  // 目录择优：模拟内核格式迁移后 v0 与 v3 并存（实际环境 14 个会话处于该状态）
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-logresolve-'))
+  const dir = path.join(tmp, 'session-x')
+  fs.mkdirSync(dir)
+  assert(resolveSessionLog(dir) === null, '空目录无日志 → null')
+  fs.writeFileSync(path.join(dir, 'session.jsonl.zstd'), '')
+  assert(resolveSessionLog(dir)?.version === 0, '仅 v0 → 选 v0')
+  fs.writeFileSync(path.join(dir, 'session.v3.jsonl.zstd'), '')
+  const picked = resolveSessionLog(dir)
+  assert(picked?.version === 3, 'v0+v3 并存 → 选最高代数 v3（读 v0 会拿到迁移前陈旧内容）')
+  assert(picked?.name === 'session.v3.jsonl.zstd', '返回准确文件名')
+  assert(picked?.file === path.join(dir, 'session.v3.jsonl.zstd'), '返回绝对路径')
+  assert(picked?.compressed === true, '标记 zstd 压缩')
+  fs.writeFileSync(path.join(dir, 'session.v10.jsonl.zstd'), '')
+  assert(resolveSessionLog(dir)?.version === 10, '更高代数 v10 优先于 v3')
+  fs.writeFileSync(path.join(dir, 'junk.txt'), '')
+  assert(resolveSessionLog(dir)?.version === 10, '无关文件不影响择优')
+  assert(resolveSessionLog(path.join(tmp, 'missing')) === null, '目录不存在 → null 不抛')
+  fs.rmSync(tmp, { recursive: true, force: true })
+}
+
+console.log('5) 帧扫描/真实文件（可选）')
 const file = process.argv[2]
 if (file && fs.existsSync(file)) {
   const { scanZstdFrames, readSessionRecords } = await import('../../src/shared/session-jsonl.ts')

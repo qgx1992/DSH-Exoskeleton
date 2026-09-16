@@ -316,7 +316,7 @@ export interface BackupInfo {
   entries: string[]
 }
 
-/** 会话摘要（~/.dsh/sessions/<workspace>/session-<uuid>/session.jsonl.zstd） */
+/** 会话摘要（~/.dsh/sessions/<workspace>/session-<uuid>/<会话日志>，文件名随 Session format 代数变化） */
 export interface SessionInfo {
   /** 会话 uuid（目录名去 session- 前缀） */
   uuid: string
@@ -485,7 +485,7 @@ export interface DesktopApi {
     count: () => Promise<number>
     /** 在 DSH Web UI 中打开会话（唤起窗口并定位） */
     open: (uuid: string) => Promise<SaveResult>
-    /** 删除会话目录（含 session.jsonl.zstd） */
+    /** 删除会话目录（含其中的会话日志文件） */
     remove: (uuid: string) => Promise<SaveResult>
     /** 导出会话数据文件（用户选择保存位置后复制） */
     export: (uuid: string) => Promise<{ ok: boolean; path?: string; error?: string }>

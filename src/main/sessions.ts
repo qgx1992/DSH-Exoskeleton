@@ -1,6 +1,7 @@
 /**
  * 会话管理（P0：总览/会话页数据源）
- * - 扫描 ~/.dsh/sessions/<workspace>/session-<uuid>/session.jsonl.zstd
+ * - 扫描 ~/.dsh/sessions/<workspace>/session-<uuid>/ 下的会话日志
+ *   （文件名随 Session format 代数变化：session.jsonl.zstd → session.v3.jsonl.zstd）
  * - 复用 zstd-worker 的 headInfo 提取标题/cwd/首条用户消息（与通知链路同源）
  * - 提供打开（唤起窗口 + 在 Web UI 定位）、删除、导出
  */
@@ -12,7 +13,7 @@ import { dshManager } from './dsh-manager'
 import { windowManager } from './window-manager'
 import { notificationHub } from './notification-hub'
 import { zstdWorker } from './zstd-worker'
-import { decodeWorkspaceName, projectNameFromPath, truncate } from '../shared/session-jsonl'
+import { decodeWorkspaceName, projectNameFromPath, resolveSessionLog, truncate } from '../shared/session-jsonl'
 import type { SessionInfo } from '../shared/types'
 
 /** 列表硬上限：防止海量会话把面板/主进程拖垮（本地会话一般远小于此值） */
@@ -65,7 +66,10 @@ async function scanCandidates(limit?: number, uuidFilter?: string, noLimit = fal
     for (const s of sessionDirs) {
       if (!s.startsWith('session-')) continue
       const sessionDir = path.join(wsDir, s)
-      const file = path.join(sessionDir, 'session.jsonl.zstd')
+      // 日志文件名按 Session format 代数命名，不能拼字面量（详见 resolveSessionLog 注释）
+      const resolved = resolveSessionLog(sessionDir)
+      if (!resolved) continue
+      const file = resolved.file
       let st: fs.Stats
       try {
         st = await fs.promises.stat(file)
@@ -175,7 +179,7 @@ export async function openSession(uuid: string): Promise<{ ok: boolean; error?: 
   }
 }
 
-/** 删除会话目录（含 session.jsonl.zstd；安全校验防止越权） */
+/** 删除会话目录（含会话日志文件；安全校验防止越权） */
 export async function removeSession(uuid: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const session = await findSession(uuid)
@@ -190,7 +194,7 @@ export async function removeSession(uuid: string): Promise<{ ok: boolean; error?
   }
 }
 
-/** 导出会话数据文件：弹出保存对话框后复制 session.jsonl.zstd */
+/** 导出会话数据文件：弹出保存对话框后复制会话日志（保留原文件名，便于识别世代） */
 export async function exportSession(uuid: string): Promise<{ ok: boolean; path?: string; error?: string }> {
   try {
     const session = await findSession(uuid)
@@ -199,7 +203,8 @@ export async function exportSession(uuid: string): Promise<{ ok: boolean; path?:
     const safeName = (session.title || session.uuid).replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)
     const opts: Electron.SaveDialogOptions = {
       title: '导出会话',
-      defaultPath: `${safeName}.jsonl.zstd`,
+      // 保留原日志文件名（含 session.vN 世代信息，便于后续排查）
+      defaultPath: `${safeName}·${path.basename(session.file)}`,
       filters: [
         { name: 'DSH 会话数据', extensions: ['zstd'] },
         { name: '所有文件', extensions: ['*'] }

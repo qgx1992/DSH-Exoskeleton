@@ -354,6 +354,23 @@ if (!gotTheLock) {
 - 通知标题「DSH 对话完成」，正文带项目/标题/轮次（第 N 轮）
 - watcher 启动前已存在的旧会话（基线）不误报
 
+**会话日志的定位（关键，勿拼字面量）**：日志文件名随内核 Session format 代数变化，
+**不是固定的 `session.jsonl.zstd`**——格式每迁移一版，内核就新写一个 `session.vN.jsonl`（旧文件保留不删）：
+
+| 世代 | 文件名 |
+|------|--------|
+| v0（原始） | `session.jsonl.zstd` |
+| v3（内核 0.1.5+） | `session.v3.jsonl.zstd` |
+
+因此 `session-watcher.ts` 与 `sessions.ts` 必须走 `shared/session-jsonl.ts` 的
+`resolveSessionLog(sessionDir)`（镜像内核 `dsh-session-format` 规则，**取最高代数**）：
+- v0 与 v3 并存（格式迁移现场）→ 必须读 v3，读 v0 拿到的是迁移前的陈旧内容
+- 日志换世代时 watcher 需**重建基线**（新旧文件偏移无对应关系，否则错位解析出一批误报）
+- 明文 `.jsonl`（非 zstd）本壳无法解压 → 跳过并告警，不每轮空转
+
+> 历史故障：内核 0.1.5 升 v3 后壳侧仍按旧名 `stat`，导致会话完成/询问卡通知**全部静默丢失**，
+> 且面板只看得见未升级的旧会话。踩坑与排查方法见 AGENT.md §7 第 15 条。
+
 **点击通知跳转会话**（`window-manager.ts` `activateSessionInWebUi`）：
 - 优先按**会话 ID 精确匹配**：从会话行 DOM 元素的 React fiber（`__reactFiber$` 属性）向上读取
   `node.id`（会话 uuid），消除同标题会话误点

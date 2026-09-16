@@ -44,13 +44,15 @@ app.whenReady().then(async () => {
     wireSessionWatcher()
 
     const wsName = '--D-test_ws--'
-    const mkSess = (uuid) => {
-      const sessDir = path.join(fakeHome, 'sessions', wsName, `session-${uuid}`)
-      const jsonl = path.join(sessDir, 'session.jsonl.zstd')
-      const mid = path.join(sessDir, 'mid-frame.tmp')
-      fs.mkdirSync(sessDir, { recursive: true })
-      return { sessDir, jsonl, mid, uuid }
-    }
+  // 日志文件名按 Session format 代数命名（v0=session.jsonl.zstd / v3=session.v3.jsonl.zstd）。
+  // 默认用 v3——内核 0.1.5 起的实际写法，覆盖「通知失效」回归（曾因硬编码旧名而全量失效）。
+  const mkSess = (uuid, logName = 'session.v3.jsonl.zstd') => {
+    const sessDir = path.join(fakeHome, 'sessions', wsName, `session-${uuid}`)
+    const jsonl = path.join(sessDir, logName)
+    const mid = path.join(sessDir, 'mid-frame.tmp')
+    fs.mkdirSync(sessDir, { recursive: true })
+    return { sessDir, jsonl, mid, uuid }
+  }
     const append = (jsonl, mid) => fs.appendFileSync(jsonl, fs.readFileSync(mid))
 
     const completed = []
@@ -158,6 +160,55 @@ app.whenReady().then(async () => {
     assert(completed.length === 2, 'interrupted 不通知')
     await sleep(700)
     assert(completed.length === 2, 'interrupted 持续不通知')
+
+    // ---------- 会话 D：旧命名（v0）——确认不因改解析逻辑而丢掉老会话 ----------
+    const D = mkSess('aaaaaaaa-0000-4000-8000-000000000004', 'session.jsonl.zstd')
+    console.log('7) 旧命名 session.jsonl.zstd（未迁移世代）→ 仍能通知')
+    zstdFrame([{ type: 'session', cwd: 'D:\\legacy', id: `session-${D.uuid}` }], path.join(D.sessDir, 'head.tmp'))
+    fs.copyFileSync(path.join(D.sessDir, 'head.tmp'), D.jsonl)
+    await sleep(250)
+    zstdFrame(
+      [
+        { type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } },
+        { type: 'turn/end', seq: 2, time: Date.now(), data: { turn: 1, reason: { kind: 'completed' } } }
+      ],
+      D.mid
+    )
+    append(D.jsonl, D.mid)
+    await sleep(400)
+    assert(completed.length === 3, '旧命名会话仍正常通知（向后兼容）')
+    assert(completed[2].uuid === D.uuid, '旧命名会话 uuid 正确')
+
+    // ---------- 会话 E：v0/v3 并存（内核格式迁移现场）→ 必须读 v3 ----------
+    const E = mkSess('bbbbbbbb-0000-4000-8000-000000000005')
+    console.log('8) v0 与 v3 并存（格式迁移现场）→ 读最高代数 v3')
+    // v0 是迁移前的陈旧内容（含一个已完成轮次），v3 是迁移后的当前内容
+    zstdFrame(
+      [
+        { type: 'session', cwd: 'D:\\migrated', id: `session-${E.uuid}` },
+        { type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } },
+        { type: 'turn/end', seq: 2, time: Date.now(), data: { turn: 1, reason: { kind: 'completed' } } }
+      ],
+      path.join(E.sessDir, 'session.jsonl.zstd')
+    )
+    zstdFrame(
+      [
+        { type: 'session', cwd: 'D:\\migrated', id: `session-${E.uuid}` },
+        { type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 1 } }
+      ],
+      E.jsonl
+    )
+    sessionWatcher._debugState().clear() // 强制重新基线化（模拟重启后重新扫描）
+    await sleep(400)
+    const trackedE = [...sessionWatcher._debugState().values()].find((v) => v.file.endsWith('session.v3.jsonl.zstd'))
+    assert(!!trackedE, '并存时跟踪的是 v3（而非陈旧的 v0）')
+    const before = completed.length
+    zstdFrame([{ type: 'turn/end', seq: 3, time: Date.now(), data: { turn: 1, reason: { kind: 'completed' } } }], E.mid)
+    append(E.jsonl, E.mid)
+    await sleep(400)
+    assert(completed.length === before + 1, 'v3 新增轮次能通知（偏移落在 v3 上解析正确）')
+    assert(completed[completed.length - 1].uuid === E.uuid, '通知归属并存会话')
+    assert(completed[completed.length - 1].turn === 1, '解析出的轮次编号正确（证明确实读的 v3）')
 
     sessionWatcher.stop()
   } catch (e) {

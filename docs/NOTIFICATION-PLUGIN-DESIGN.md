@@ -14,7 +14,7 @@
 
 | 来源 | 触发 | 代码 |
 | :--- | :--- | :--- |
-| **对话完成** | 主进程轮询 `~/.dsh/sessions/*/session-*/session.jsonl.zstd`，解析到非 interrupted 的 `turn/end` 即通知（按轮去重），点击 → 唤起窗口 + `activateSessionInWebUi` | `session-watcher.ts` |
+| **对话完成** | 主进程轮询 `~/.dsh/sessions/*/session-*/` 下的会话日志（**文件名随 Session format 代数变化**，经 `resolveSessionLog` 取最高代数，如 `session.v3.jsonl.zstd`；不可写死 `session.jsonl.zstd`），解析到非 interrupted 的 `turn/end` 即通知（按轮去重），点击 → 唤起窗口 + `activateSessionInWebUi` | `session-watcher.ts` + `shared/session-jsonl.ts` |
 | **询问卡等待（v0.8.4）** | Agent 提问（`ask_user_question`）或计划审批（`exit_plan_mode`）阻塞等用户输入时通知，回答后自动撤销操作中心残留 toast | `session-watcher.ts`（pending 配对状态机）+ `zstd-worker.cjs`（askOpens/toolResultCallIds） |
 | **服务事件** | 服务就绪 / 异常 / 崩溃重启 | `index.ts` statusChange |
 | **更新就绪** | electron-updater 下载完成 | `updater.ts` |
