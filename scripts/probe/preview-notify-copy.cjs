@@ -42,11 +42,15 @@ app.whenReady().then(async () => {
   const mid = path.join(sessDir, 'mid.tmp')
 
   const now = Date.now()
+  // 与真实日志同构：首句提问会被写成**两个** session/title——
+  // 先是一个截断的临时标题，再是 AI 重命名后的正式会话名（内核 findLast 取后者）。
   zstdFrame([
     { type: 'session', cwd, id: `session-${uuid}` },
     { type: 'user/message', seq: 1, time: now, data: { role: 'user', content: [{ type: 'text', text: ask }] } },
-    { type: 'session/title', seq: 2, time: now, data: { title: ask } },
-    { type: 'turn/start', seq: 3, time: now, data: { turn: 1 } }
+    { type: 'session/title', seq: 2, time: now, data: { title: '检查通知功能为什么' } },
+    { type: 'session/title-llm-request', seq: 3, time: now, data: {} },
+    { type: 'session/title', seq: 4, time: now, data: { title: '通知失效问题排查' } },
+    { type: 'turn/start', seq: 5, time: now, data: { turn: 1 } }
   ], file)
 
   sessionWatcher.syncWithService('running')
