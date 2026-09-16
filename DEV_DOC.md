@@ -146,7 +146,10 @@ interface DSHManager {
 - `titleBarStyle: 'hidden'` + `titleBarOverlay`：内容从 y=0 铺满，右上角为**系统原生**最小化/最大化/关闭（叠加在内容之上、不占布局），无需自绘也不占内容空间
 - `Menu.setApplicationMenu(null)` 移除 Electron 默认应用菜单（File / Edit / View / Window / Help）。实测：不清理时带 frame 的窗口会把它画成菜单栏（窗口高-内容高 = 39px）
 - 顶部那一行直接是 **DSH 自己的侧边栏品牌行**（鲸鱼 logo + deepseek HARNESS），壳不重复绘制品牌
-- 窗口拖动：注入 CSS 给 DSH 顶部 logo 行设 `-webkit-app-region: drag`，行内按钮回设 `no-drag`（logo 本身是「新建会话」按钮）
+- 窗口拖动：三块拖拽区，均在同一次 `insertCSS` / 同批注入里下发（§4.1.2.3）
+  1. DSH 侧边栏品牌行（logo 行）——行内按钮回设 `no-drag`（logo 本身是「新建会话」按钮）
+  2. 中间主体顶部**会话态**：`header` 设 `drag`，行内按钮/svg/img 回设 `no-drag`
+  3. 中间主体顶部**空态**：固定定位透明拖拽条 `#dsh-exo-drag-strip`（空态没有有高度的 header）
 - 窗口几何（大小/位置/最大化）仍由壳保存与恢复（`configStore.windowBounds`）
 - **管理面板入口在系统托盘菜单**（「管理面板…」，§4.1.3），面板内可随时「回到 Web UI」
 - **网页版 DeepSeek 入口注入在 DSH Web UI 自己的左侧边栏**（底部「设置」行上方），详见 §4.1.5
@@ -218,6 +221,41 @@ const win = new BrowserWindow({
 **验证** `scripts/probe/verify-header-offset.cjs`（22 项）：逐宽度（1440/1280/1200）断言零重叠、header 只命中 1 个、标题行 `top ≥ 36`、页面未被撑出滚动条、选项卡顺序正常；并含两项防自欺：
 - **非空过门禁**：先轮询确认会话头真的渲染（`header` 高度 > 0 且 `titleRow` 存在）再判重叠——空态下「无重叠」是 vacuous pass，第一版脚本就因此假通过
 - **基线对照**：修复前必须实测到重叠（432px²），否则用例无鉴别力
+
+#### 4.1.2.3 顶部拖拽区（窗口拖动）
+
+**问题**：无系统标题栏后，窗口只能靠页面里的拖拽区拖。而 `-webkit-app-region` **不继承**（初始值 `none`），必须逐块声明。旧实现只声明了 DSH 侧边栏的 `logoRow` 一处，于是**中间主体顶部拖不动**（用户反馈"只有左侧边栏顶部可以拖动"）。
+
+**实测取证**（`scripts/probe/probe-drag-region-dom.cjs`，y=18 横向扫描、沿祖先链解析 `app-region`）：
+
+| x | 命中元素 | 解析 region |
+| --- | --- | --- |
+| 60–260 | `div.hHd-Xa_logoRow` | `drag` ✅ |
+| 300–1380 | `header.wSkVaW_header` / `div.wSkVaW_scrollBody` | `none` ❌ |
+
+三个坑（缺一不可）：
+1. **不继承**：中间列从未被声明，就是普通网页内容；
+2. **会话态 header 是空内边距**：`padding-top:36px`（§4.1.2.2 的让位规则）使 `y<36` 恰好是 header 的空白区——好消息，在这里设 drag 不会压住任何内容；
+3. **空态根本没有有高度的 header**：DSH 不渲染会话头（实测只有 1 个 0 高度 `header`），该位置命中的是整列高的 `div.wSkVaW_scrollBody`——它同时承载聊天区，**不能**设 drag（会让整个消息区无法滚轮/选中），故空态只能另想办法。
+
+**修法**（两种态分开处理）：
+
+| 态 | 手段 | 依据 |
+| --- | --- | --- |
+| 会话态 | CSS：`header { -webkit-app-region: drag }` + 行内 `button/a/input/select/textarea/svg/img/[role]` 回设 `no-drag` | `y<36` 是空内边距，无内容可压；实测 15 个 header 内可交互元素全部解析为 `no-drag` |
+| 空态 | 脚本插入固定定位透明条 `#dsh-exo-drag-strip`（`y<36`，`left`=侧边栏宽，`right`=138px） | 实测空态该带内可交互元素为 **0 个**，纯空白，可安全整条设 drag |
+
+**空态拖拽条的三条约束**（都有实测依据）：
+- **只在空态插**：会话态 header 自己已是拖拽区，此时留着拖拽条会压住标题行的面包屑等按钮（实测覆盖 3 个 `button`）→ 脚本内 `hasHeader()`（存在高度 > 0 的 `header`）为真即 `remove()`；
+- **左边界跟随侧边栏**：侧边栏可折叠（实测 280px ↔ 56px），写死会要么盖住侧边栏按钮、要么在收起后留一条拖不动的缝。每次 sync 现测 `[class*="sidebarCol"]` 宽度；
+- **右边界让开原生按钮簇**：Windows 下按钮簇占 `x ∈ [W-138, W]` 且画在内容之上，铺过去也没用（`WINDOW_CONTROLS_CLUSTER_WIDTH = 138`）。
+
+**自愈与跟随**：
+- 拖拽条由 `buildTopDragStripScript` 创建（幂等：固定 id + `__dshExoDragStripInstalled`），React 重渲染清掉外部节点后由**内容变更观察器**节流补插（与侧边栏入口同策略）；
+- 侧边栏折叠**只改布局宽度、不改 class 也不增删节点**，内容变更观察器完全看不到 → 另接 `ResizeObserver(侧边栏列)` + `window.resize`；列元素要等 React 首次渲染才存在，故加短轮询（500ms × 40 次，拿到即停）；
+- 壳侧 `windowManager.syncDragStrip()` 在窗口 `resize` 时再显式推一次（WebContentsView 场景页面未必收到 resize）。
+
+**验证** `scripts/probe/verify-drag-region.cjs`（22 项）：空态/会话态/折叠后三种情形下断言带内采样点全部 `drag`、带内零被盖可交互元素、会话态 header 内可交互元素全部 `no-drag`（**防误拖：按钮必须可点**）、拖拽条左右边界贴合、页面未出滚动条；并含三项防自欺：空态必须确实没有有高度的 header、会话态 header 必须已渲染（非空过）、折叠必须真的改变了列宽。
 
 #### 4.1.3 系统托盘
 

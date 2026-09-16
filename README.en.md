@@ -7,21 +7,23 @@
 A lightweight, clean, feature-complete DSH desktop shell: wraps the official `dsh web` into a **double-click-to-run** Windows desktop app.
 Following the **shell-kernel separation** principle — **no changes to the DSH core**, seamless tracking of official upgrades; by default shares `~/.dsh`, so existing configs require zero migration.
 
-## Latest Release Highlights (v0.9.3)
+## Latest Release Highlights (v0.9.4)
 
-> [Release notes](https://github.com/qgx1992/DSH-Exoskeleton/releases/tag/v0.9.3) · Full history in the [changelog](CHANGELOG.md)
+> [Release notes](https://github.com/qgx1992/DSH-Exoskeleton/releases/tag/v0.9.4) · Full history in the [changelog](CHANGELOG.md)
 
-- **Fixed “kernel cannot be uninstalled”**: kernel native modules (sharp / koffi) are hard-linked across kernel versions (the **same file object**), and once the running kernel process maps them, Windows refuses to delete them. The old implementation aborted halfway, leaving the kernel corrupted while it was still listed as “installed” — and every retry damaged it further. Uninstall is now **rename-first, deletion as a fallback**: the uninstall takes effect immediately, physical deletion is retried in the background, and if it still fails nothing is corrupted — cleanup happens on the next launch.
-- **New startup reconciliation**: kernels whose files are damaged or whose install was interrupted are detected and marked “damaged”, with one-click cleanup — previously such leftovers were invisible in the UI while still occupying disk (252MB observed leaked). Pointers to dead kernels (default kernel, crash-rollback target) are cleared as well.
-- **More actionable feedback**: occupancy errors (`EPERM` / `EBUSY`) are translated into plain language with a suggested fix; kernel disk usage is measured from disk and “pending reclaim” is reported separately.
-- **Startup is no longer blocked by reconciliation**: re-measuring damaged kernels now runs asynchronously in the background (a synchronous full scan used to freeze startup for seconds).
+- **The title bar is gone — content now fills the whole window**: the window uses `titleBarStyle: 'hidden'` + `titleBarOverlay`, so content starts at y=0 while the native minimise/maximise/close buttons float on top at the top-right (nothing is hand-drawn and no content space is consumed). The top row is DSH's own sidebar brand row. Electron's default application menu (File / Edit / View / Window / Help) has been removed as well. Window dragging is handled by three drag regions: the sidebar brand row, and the top of the main column (the `header` in a session, a transparent drag strip in the empty state).
+- **Web DeepSeek is embedded into the DSH sidebar** (above the “Settings” row): one click embeds the official chat.deepseek.com to the right of the sidebar, another click collapses it; the login session is persisted across restarts.
+- **Fixed “the top of the main column cannot drag the window”**: without a system title bar the window can only be dragged via page drag regions, and `-webkit-app-region` is **not inherited**. The old code declared only the sidebar brand row, so only the left sidebar's top edge could drag the window. Both the session and empty states are now covered, while every button in the header stays clickable.
+- **Fixed the session header being covered by the native window buttons**: the native button cluster is drawn **above** the content in the top-right corner (`x ∈ [W-138, W], y ∈ [0, 36]`), while the session header's title row sits at `y = 10..42` — they overlapped at every window width, hiding roughly 62% of the top-right icon buttons. The row is now pushed below the button band.
+- **Fixed the colour mismatch behind the three native buttons**: the overlay background used to be hard-coded and never updated, while the content area hosts surfaces with different backgrounds (management panel / DSH top bar in dark and light / the official site). It produced a visible seam across the DSH top bar, which in the light theme became a “black block on white”. The colour is now synced dynamically to the current surface and page theme, with the button glyph colour automatically picking the higher-contrast option.
+- **The management panel is now opened from the system tray**: the tray context menu gained “Management panel…”, which opens it on the Overview page; the panel can return to the Web UI at any time.
 
 ## Features
 
 | Module | Description |
 | :--- | :--- |
 | DSH subprocess management | Start/stop/restart `dsh web`, `--port 0` auto-assigns the port, health checks, auto-restart on crash |
-| Native window | Frameless window + custom-drawn title bar + real-time status dot (cyan = running / grey = starting / red = error) |
+| Native window | Title-bar-less window + native window buttons overlaid at the top-right (content fills from y=0); the top row is DSH's own sidebar brand row, with three drag regions for moving the window |
 | System tray | Single-click to restore, right-click menu (open / start-stop service / launch at startup / logs / update / about / quit) |
 | Single instance | Double-click brings up the existing window |
 | Dashboard | Unified management panel for status / settings / logs / updates |
