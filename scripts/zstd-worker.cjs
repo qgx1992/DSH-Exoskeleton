@@ -244,40 +244,40 @@ function handle(req, res) {
       }
       if (req.cmd === 'headInfo') {
         // 读头部取标题/cwd/首条用户消息。
-        // 坑（实测）：只能按**字节**渐进扩读，不能写成“读前 512KB + 解前 16 帧”——
+        //
+        // 坑 1（标题取哪个）——**必须取最后一个 `session/title`**：
+        // 内核（dsh-client-connection 的 projectionValuesOf）用 `log.findLast(item => item.type === 'session/title')`
+        // 取最后一条，因为它才是「AI 重命名后的正式会话名」（UI 侧边栏显示的就是它）。
+        // 一个会话的 title 序列实测是：
+        //   [0] 截断的首句提问（临时）→ [1] title-llm-request（带请求无 title）→ [2] AI 精炼后的名字
+        // 取第一个就会把通知写成截断的临时提问（实测 53/60 = 88% 会话两者不同）。
+        //
+        // 坑 2（读多少字节）——只能按**字节**渐进扩读，不能写成“读前 512KB”：
         // zstd 按追加批次压帧，一次超长输出可压成单帧上 MB（实测有 1011KB 的单帧
         // 正好携带 session/title）；固定 512KB 会把该帧整段截在缓冲区外，
         // 导致 title 为空、通知标题退化成 uuid（实测 13/105 个会话受影响）。
-        // 故：从 512KB 起逐步翻倍重读，直到解析出 title 或已读到文件尾。
         let cwd = ''
-        let title = ''
         let firstUserText = ''
-        const HEAD_LIMIT_MAX = 64 * 1024 * 1024 // 封顶 64MB，防病态文件把内存吃满
-        for (let headLen = 512 * 1024; ; headLen = Math.min(headLen * 4, HEAD_LIMIT_MAX)) {
-          const readLen = Math.min(size, headLen)
+        let lastTitle = ''
+        // 渐进扩读：从 512KB 起翻倍，直到读完全文件或达封顶。
+        // 因 title 可能出现在靠后位置（最后一条才有效），不能一拿到就提前停。
+        const HEAD_SCAN_MIN = 2 * 1024 * 1024 // 至少扫 2MB（AI 重命名在第一轮内，实测最大 1.01MB）
+        const HEAD_SCAN_MAX = 8 * 1024 * 1024 // 封顶 8MB（≈实测最大值的 8 倍），防超大文件反复解压
+        for (let headLen = 512 * 1024; ; headLen *= 4) {
+          const readLen = Math.min(size, Math.min(headLen, HEAD_SCAN_MAX))
           const buf = Buffer.alloc(readLen)
           fs.readSync(fh, buf, 0, readLen, 0)
-          cwd = ''
-          title = ''
-          firstUserText = ''
-          // 只解连续的完整帧（截断处的半帧由 scanZstdFrames 自然丢弃）
+          // 本窗口内重扫：cwd/首条用户消息取首次（语义不变），title 取**最后一次**
+          let winTitle = ''
           for (const fr of scanZstdFrames(buf)) {
             for (const line of decompress(buf, fr).split('\n')) {
               if (!line.trim()) continue
               try {
                 const j = JSON.parse(line)
                 if (j.type === 'session' && typeof j.cwd === 'string' && !cwd) cwd = j.cwd
-                if ((j.type === 'session/title' || j.type === 'session/title-llm-request') && !title) {
+                if (j.type === 'session/title') {
                   const t = j.data && j.data.title
-                  if (typeof t === 'string' && t.trim()) title = t.trim().slice(0, 80)
-                }
-                if (!title && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
-                  for (const part of j.data.content) {
-                    if (part && typeof part.text === 'string' && part.text.trim()) {
-                      title = part.text.trim().slice(0, 80)
-                      break
-                    }
-                  }
+                  if (typeof t === 'string' && t.trim()) winTitle = t.trim().slice(0, 80)
                 }
                 // 首条用户消息（列表显示用同一来源），始终收集
                 if (!firstUserText && j.type === 'user/message' && j.data && Array.isArray(j.data.content)) {
@@ -291,10 +291,14 @@ function handle(req, res) {
               } catch { /* noop */ }
             }
           }
-          // 已拿到想要的全部信息，或已读完整文件，或已达封顶 → 收工
-          if ((cwd && title && firstUserText) || readLen >= size || readLen >= HEAD_LIMIT_MAX) break
+          // 本窗口的最后一条 title 覆盖之前的（后窗口比前窗口新）
+          if (winTitle) lastTitle = winTitle
+          const done = cwd && lastTitle && firstUserText
+          if (readLen >= size || readLen >= HEAD_SCAN_MAX) break
+          if (done && readLen >= HEAD_SCAN_MIN) break
         }
-        res({ ok: true, cwd, title, firstUserText })
+        // 拿不到 session/title 时回落首条用户消息（与内核 projection 行为一致）
+        res({ ok: true, cwd, title: lastTitle || firstUserText, firstUserText })
         return
       }
       res({ ok: false, error: 'unknown cmd: ' + req.cmd })

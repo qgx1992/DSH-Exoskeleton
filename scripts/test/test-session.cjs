@@ -88,6 +88,20 @@ app.whenReady().then(async () => {
 
     console.log('2) 观察期第 1 轮 turn/end(completed) → 立即通知')
     const t1 = Date.now()
+    // ★ 回归：会话 A 的日志里写入两次 session/title（首次是截断的首句提问，
+    //   后一次是“AI 重命名后的正式会话名”）。headInfo 必须取**最后一个**，
+    //   否则通知正文首行会显示重命名前的临时名字——与 DSH 侧边栏不一致。
+    //   内核口径：dsh-client-connection log.findLast(item => item.type === 'session/title')。
+    zstdFrame(
+      [
+        { type: 'session/title', seq: 3, time: t1, data: { title: '检查通知功能为什么' } },
+        { type: 'session/title-llm-request', seq: 4, time: t1, data: {} },
+        { type: 'session/title', seq: 5, time: t1, data: { title: '通知失效问题排查' } }
+      ],
+      A.mid
+    )
+    append(A.jsonl, A.mid)
+    await sleep(250)
     zstdFrame(
       [
         { type: 'user/message', seq: 7, time: t1, data: { role: 'user', content: [{ type: 'text', text: '继续' }] } },
@@ -109,6 +123,14 @@ app.whenReady().then(async () => {
     assert(doneEv?.title === 'demo · DSH 对话完成', '完成通知标题行 = 项目名 · DSH 对话完成（cwd=D:\\proj\\demo）', doneEv?.title)
     assert(!/项目「/.test(doneEv?.body ?? ''), '完成通知正文不再带「项目「X」·」前缀', doneEv?.body)
     assert(/（第 2 轮）$/.test(doneEv?.body ?? ''), '完成通知正文以「（第 N 轮）」结尾', doneEv?.body)
+    // ★ 正文首行应是会话名，且必须是**最后一个** session/title（AI 重命名后的），
+    //   不是首次写入的截断临时标题。
+    assert(
+      /^通知失效问题排查（第 2 轮）/.test(doneEv?.body ?? ''),
+      '★ 正文用最后一个 session/title（AI 重命名后）而非首次的临时标题',
+      JSON.stringify((doneEv?.body ?? '').split('\n')[0])
+    )
+    assert(!/检查通知功能为什么/.test(doneEv?.body ?? ''), '未使用重命名前的截断临时标题（负向断言）', doneEv?.body)
 
     console.log('3) 同一轮重复 turn/end（崩溃修复重写场景）→ 按轮去重')
     const t2 = Date.now()

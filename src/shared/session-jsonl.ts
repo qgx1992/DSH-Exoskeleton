@@ -99,11 +99,14 @@ export function readSessionRecords(buffer: Buffer, maxFrames = 8, maxBytes = 512
 
 /** 从会话记录中提取标题：优先 session/title 事件，其次首条用户消息，最后 fallback */
 export function extractTitle(records: SessionRecord[], fallbackUuid: string): string {
-  // 1) DSH 自动生成的标题事件
-  for (const r of records) {
-    const p = r.parsed
+  // 1) DSH 自动生成的标题事件——**取最后一个**（与内核口径一致）。
+  //    内核（dsh-client-connection `projectionValuesOf`）用 `log.findLast(item => item.type === 'session/title')`，
+  //    因为 title 会经历「截断的首句提问 → AI 精炼重命名」两（多）次写入，
+  //    只有最后一条是 UI 显示的正式会话名（实测 88% 会话首尾不同）。
+  for (let i = records.length - 1; i >= 0; i--) {
+    const p = records[i].parsed
     if (!p) continue
-    if (p.type === 'session/title' || p.type === 'session/title-llm-request') {
+    if (p.type === 'session/title') {
       const t = (p.data as { title?: string } | undefined)?.title
       if (typeof t === 'string' && t.trim()) return truncate(t.trim(), 80)
     }

@@ -22,6 +22,42 @@ assert(
   extractTitle([{ parsed: { type: 'session/title', data: { title: ' 整理文档 ' } }, line: '' }], 'ab12') === '整理文档',
   'session/title 优先且 trim'
 )
+// ★ 回归：title 会经历「截断首句提问 → AI 精炼重命名」两次写入，必须取**最后一个**。
+//   内核口径 dsh-client-connection: log.findLast(item => item.type === 'session/title')。
+//   取第一个会把通知写成截断的临时提问（曾实测 53/60 = 88% 会话首尾不同）。
+assert(
+  extractTitle(
+    [
+      { parsed: { type: 'session/title', data: { title: '检查一下dsh配置中提供商配置' } }, line: '' },
+      { parsed: { type: 'session/title-llm-request', data: {} }, line: '' },
+      { parsed: { type: 'session/title', data: { title: 'dsh中opencode-go配置DeepSeek Flash' } }, line: '' }
+    ],
+    'ab12'
+  ) === 'dsh中opencode-go配置DeepSeek Flash',
+  '★ 多个 session/title 取最后一个（AI 重命名后的正式会话名）'
+)
+assert(
+  extractTitle(
+    [
+      { parsed: { type: 'session/title', data: { title: '旧标题' } }, line: '' },
+      { parsed: { type: 'user/message', data: { content: [{ type: 'text', text: '用户消息' }] } }, line: '' },
+      { parsed: { type: 'session/title', data: { title: '新标题' } }, line: '' }
+    ],
+    'ab12'
+  ) === '新标题',
+  '★ 最后一条 title 在用户消息之后仍优先于首条用户消息'
+)
+// 末尾的 title 若为空/无效，应回退到前一条有效 title（而非直接跳到用户消息）
+assert(
+  extractTitle(
+    [
+      { parsed: { type: 'session/title', data: { title: '有效标题' } }, line: '' },
+      { parsed: { type: 'session/title', data: {} }, line: '' }
+    ],
+    'ab12'
+  ) === '有效标题',
+  '末尾 title 无内容时回退前一条有效 title'
+)
 assert(
   extractTitle(
     [{ parsed: { type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: '帮我写一个方案' }] } }, line: '' }],
