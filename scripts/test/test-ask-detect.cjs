@@ -137,6 +137,9 @@ app.whenReady().then(async () => {
     const evA1 = received.find((e) => e.kind === 'session-ask')
     assert(gotAskEv, 'hub 收到 session-ask 事件')
     assert(/交互确认/.test(evA1?.body ?? '') && /要不要保留旧配置/.test(evA1?.body ?? ''), '正文含问题文本', evA1?.body)
+    // v0.9.5 文案：项目名在标题行，正文不再重复项目名（会话标题 = 首条用户提问）
+    assert(evA1?.title === 'demo · DSH 等待你的回答', '标题行 = 项目名 · DSH 等待你的回答（cwd=D:\\proj\\demo）', evA1?.title)
+    assert(!/项目「/.test(evA1?.body ?? ''), '正文不再带「项目「X」·」前缀', evA1?.body)
 
     console.log('3) 非白名单工具（pwsh）call 无 result → 不触发')
     zstdFrame([otherCall(2, 'call_A2')], A.mid)

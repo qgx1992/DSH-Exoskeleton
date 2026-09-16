@@ -203,13 +203,10 @@ class NotificationHub {
       this.deliver(bucket.latest)
       return
     }
-    const project = first.session?.project
     const title = first.session?.sessionTitle ?? ''
-    const body = project
-      ? `项目「${project}」· 已完成 ${count} 轮`
-      : title
-        ? `${title}（已完成 ${count} 轮）`
-        : `已完成 ${count} 轮`
+    // 项目名已在 first.title 里（由 producer 用 notificationTitle 拼入，见 session-watcher），
+    // 此处不得再拼一次，否则会变成「项目 · 项目 · DSH 对话完成」。正文只描述“完成了几轮”。
+    const body = title ? `${title}（已完成 ${count} 轮）` : `已完成 ${count} 轮`
     const merged: NotificationEvent = {
       ...first,
       id: randomUUID(),

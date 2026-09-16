@@ -225,3 +225,16 @@ export function projectNameFromPath(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean)
   return parts.length > 0 ? parts[parts.length - 1] : p
 }
+
+/**
+ * 通知标题：有项目名时拼在标题行（`项目名 · 基础标题`），正文腾出来只放会话标题/问题。
+ *
+ * 为什么放标题而不是正文（v0.9.5）：此前把项目名放在正文开头（`项目「X」· 标题`），
+ * 而会话标题本身就是用户第一句提问，两者叠在一起后正文很快被挤爆截断；
+ * 标题行在 Windows toast / 操作中心里通常更短且不会被截，更适合放“这是哪个项目”。
+ * 无项目名（拿不到 cwd）时退回基础标题，不显示空分隔符。
+ */
+export function notificationTitle(project: string, base: string): string {
+  const p = (project || '').trim()
+  return p ? `${p} · ${base}` : base
+}

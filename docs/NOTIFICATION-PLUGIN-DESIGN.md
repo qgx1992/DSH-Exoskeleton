@@ -163,7 +163,7 @@ notifyServiceEvents: boolean
 ### 4.1 notification-hub.ts（新模块）
 
 - `dispatch(ev)`：按 `notifyChannel` 选 provider（auto 逻辑见 §5.2）→ 投递 → 记录回执（成功/失败）到日志；
-- **聚合策略**（只作用于 `session-done`）：`aggregate` 模式下同一 `session.uuid` 在 `notifyAggregateWindowMs` 内到达的多轮事件合并为一条「项目「X」· 已完成 N 轮」；`per-turn` 模式原样投递；`groupBy` 按 **session uuid**（不是标题，防同名会话误合并）；
+- **聚合策略**（只作用于 `session-done`）：`aggregate` 模式下同一 `session.uuid` 在 `notifyAggregateWindowMs` 内到达的多轮事件合并为一条——标题行保留首轮的项目名（`项目名 · DSH 对话完成`），正文变为 `标题（已完成 N 轮）`；`per-turn` 模式原样投递；`groupBy` 按 **session uuid**（不是标题，防同名会话误合并）；
 - 失败处理：provider 返回 false 时按「webview → native → 托盘」降级链重试一次，仍失败记 `logger.warn`（漏报可查）。
 
 ### 4.2 事件产生点改造（只改投递目标，不动检测逻辑）
@@ -244,7 +244,7 @@ auto 决策    = webview 在线 && DSH 窗口是前台焦点 && notifyChannel=au
 ### 6.2 页面内渲染
 
 - 全局 toast 栈（右上角），按 `kind` 分级样式（成功/错误/信息/警告）；
-- **对话完成 toast**：`项目「X」· 标题（第 N 轮）`；点击 → 激活会话（§6.3）；
+- **对话完成 toast**：标题 `项目名 · DSH 对话完成`，正文 `标题（第 N 轮）`（v0.9.5：项目名从正文移至标题行，见 §4.1 文案）；点击 → 激活会话（§6.3）；
 - **服务异常/重启 toast**、**更新就绪 toast**：更新就绪点击 → `notify:install`（P2 review 修正：不再只是唤起窗口，而是触发壳侧 `updater.install()`）；meta 文案分级（「点击重启安装」/「点击查看会话」）；
 - 可选增强（后续）：未读徽章、声音提醒。
 

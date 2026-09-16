@@ -24,7 +24,7 @@ const CASES = [
   { name: 'kernel-compat', src: 'src/main/kernel-compat.ts', out: 'kernel-compat.cjs', test: 'scripts/test/test-kernel-compat.cjs', externals: ['@deepseek-ai/*'] },
   { name: 'kernel-provision', src: 'scripts/test/test-kernel-provision-entry.ts', out: 'kernel-provision.cjs', test: 'scripts/test/test-kernel-provision.cjs', externals: ['@deepseek-ai/*'] },
   { name: 'profiles', src: 'src/main/profiles.ts', out: 'profiles.cjs', test: 'scripts/test/test-profiles.cjs' },
-  { name: 'session-watcher', src: 'src/main/session-watcher.ts', out: 'session-watcher.cjs', test: 'scripts/test/test-session.cjs' },
+  { name: 'session-watcher', src: 'scripts/test/test-session-entry.ts', out: 'session-watcher.cjs', test: 'scripts/test/test-session.cjs' },
   { name: 'notification-hub', src: 'scripts/test/test-notify-entry.ts', out: 'notification-hub.cjs', test: 'scripts/test/test-notify.cjs' },
   { name: 'session-ask', src: 'scripts/test/test-ask-entry.ts', out: 'session-ask.cjs', test: 'scripts/test/test-ask-detect.cjs' },
   { name: 'dsh-view-preload', src: 'src/preload/dsh-view.ts', out: 'dsh-view.cjs', test: 'scripts/test/test-dsh-view.cjs' },

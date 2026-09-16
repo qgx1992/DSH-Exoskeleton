@@ -20,7 +20,7 @@ import { configStore } from './config'
 import { windowManager } from './window-manager'
 import { zstdWorker } from './zstd-worker'
 import { closeNotification } from './notify'
-import { decodeWorkspaceName, projectNameFromPath, resolveSessionLog } from '../shared/session-jsonl'
+import { decodeWorkspaceName, notificationTitle, projectNameFromPath, resolveSessionLog } from '../shared/session-jsonl'
 
 /** 兜底轮询间隔（主触发是 fs.watch，这是 fs.watch 失效时的保底；非法值回落默认，限制在 [500ms, 60s]） */
 const POLL_RAW = Number(process.env.DSH_SESSION_POLL_MS ?? 500)
@@ -356,13 +356,14 @@ export function wireSessionWatcher(): void {
     }
     if (!project) project = projectNameFromPath(decodeWorkspaceName(ev.workspace))
 
-    // 正文带轮次：项目「X」· 标题（第 N 轮）
+    // 正文只留会话标题 + 轮次；项目名移到通知标题行（v0.9.5）——正文空间有限，
+    // 原先 `项目「X」· 标题` 让每条通知都重复一遍项目名，挤掉了标题可见长度。
     const turnSuffix = ev.turn ? `（第 ${ev.turn} 轮）` : ''
-    const body = project ? `项目「${project}」· ${title}${turnSuffix}` : `${title}${turnSuffix}`
+    const body = `${title}${turnSuffix}`
     notificationHub.dispatch({
       id: randomUUID(),
       kind: 'session-done',
-      title: 'DSH 对话完成',
+      title: notificationTitle(project, 'DSH 对话完成'),
       body,
       ts: Date.now(),
       session: {
@@ -422,13 +423,13 @@ export function wireSessionWatcher(): void {
 
     const turnSuffix = ev.turn ? `（第 ${ev.turn} 轮）` : ''
     const askText = ev.questions && ev.questions.length > 0 ? ev.questions.join(' / ') : 'Agent 等待你的回答'
-    const body = project ? `项目「${project}」· ${title}${turnSuffix} · ${askText}` : `${title}${turnSuffix} · ${askText}`
+    const body = `${title}${turnSuffix} · ${askText}`
     const evId = randomUUID()
     askNotifyIds.set(ev.uuid + '|' + ev.callId, evId)
     notificationHub.dispatch({
       id: evId,
       kind: 'session-ask',
-      title: 'DSH 等待你的回答',
+      title: notificationTitle(project, 'DSH 等待你的回答'),
       body,
       ts: Date.now(),
       session: {

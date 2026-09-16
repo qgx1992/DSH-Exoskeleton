@@ -76,7 +76,17 @@ console.log('4) 会话日志文件名解析（Session format 代数）')
   fs.rmSync(tmp, { recursive: true, force: true })
 }
 
-console.log('5) 帧扫描/真实文件（可选）')
+console.log('5) 通知标题拼装（项目名入标题行，v0.9.5 文案）')
+{
+  const { notificationTitle } = await import('../../src/shared/session-jsonl.ts')
+  assert(notificationTitle('myproj', 'DSH 对话完成') === 'myproj · DSH 对话完成', '有项目名 → 标题行前缀')
+  assert(notificationTitle('myproj', 'DSH 等待你的回答') === 'myproj · DSH 等待你的回答', '询问卡标题同样拼项目名')
+  assert(notificationTitle('', 'DSH 对话完成') === 'DSH 对话完成', '无项目名 → 不显示空分隔符')
+  assert(notificationTitle('   ', 'DSH 对话完成') === 'DSH 对话完成', '空白项目名同样跳过')
+  assert(notificationTitle('中文项目', 'DSH 对话完成') === '中文项目 · DSH 对话完成', '中文项目名')
+}
+
+console.log('6) 帧扫描/真实文件（可选）')
 const file = process.argv[2]
 if (file && fs.existsSync(file)) {
   const { scanZstdFrames, readSessionRecords } = await import('../../src/shared/session-jsonl.ts')

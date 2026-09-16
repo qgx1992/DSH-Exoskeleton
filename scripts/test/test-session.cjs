@@ -40,8 +40,14 @@ const zstdFrame = (lines, out) => {
 
 app.whenReady().then(async () => {
   try {
-    const { sessionWatcher, wireSessionWatcher } = require('../out/session-watcher.cjs')
+    const { sessionWatcher, wireSessionWatcher, notificationHub, configStore } = require('../out/session-watcher.cjs')
     wireSessionWatcher()
+
+    // 通知渠道固定为 fake webview：断言实际投递载荷，不弹原生、不扰民
+    const received = []
+    notificationHub.setWebview({ deliver: (ev) => { received.push(ev); return true } })
+    notificationHub.markWebviewReady(true)
+    await configStore.set({ notifyChannel: 'webview', notifySessionDone: 'per-turn', notifyAskCard: true })
 
     const wsName = '--D-test_ws--'
   // 日志文件名按 Session format 代数命名（v0=session.jsonl.zstd / v3=session.v3.jsonl.zstd）。
@@ -96,6 +102,13 @@ app.whenReady().then(async () => {
     assert(completed.length === 1, 'turn/end 出现即完成（1 次，无需静默等待）')
     assert(completed[0].uuid === A.uuid, '携带 uuid')
     assert(completed[0].turn === 2, '携带轮次编号')
+
+    // v0.9.5 文案（本用例是用户报的「项目（项目名）·问题」那条通知）：
+    // 项目名移入标题行，正文只留会话标题 + 轮次
+    const doneEv = received.filter((e) => e.kind === 'session-done').pop()
+    assert(doneEv?.title === 'demo · DSH 对话完成', '完成通知标题行 = 项目名 · DSH 对话完成（cwd=D:\\proj\\demo）', doneEv?.title)
+    assert(!/项目「/.test(doneEv?.body ?? ''), '完成通知正文不再带「项目「X」·」前缀', doneEv?.body)
+    assert(/（第 2 轮）$/.test(doneEv?.body ?? ''), '完成通知正文以「（第 N 轮）」结尾', doneEv?.body)
 
     console.log('3) 同一轮重复 turn/end（崩溃修复重写场景）→ 按轮去重')
     const t2 = Date.now()

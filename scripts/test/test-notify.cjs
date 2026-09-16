@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
       id: 'ev-' + Math.random().toString(36).slice(2),
       kind,
       title: 'DSH 对话完成',
-      body: '项目「foo」· 标题',
+      body: '标题',
       ts: Date.now(),
       ...extra
     })
@@ -87,6 +87,21 @@ app.whenReady().then(async () => {
     await sleep(500)
     assert(received.length === 1, 'aggregate：单轮 flush 一条', received.length)
     assert(received[0].body === '项目「x」· 一轮', 'aggregate：单轮保持原正文', received[0] && received[0].body)
+    await sleep(150)
+
+    console.log('3b) aggregate 多轮：项目名进标题行不变，正文只描述轮数（v0.9.5 文案）')
+    received.length = 0
+    notificationHub.dispatch(
+      mk('session-done', {
+        title: 'myproj · DSH 对话完成',
+        session: { uuid: 'agg-title-1', project: 'myproj', sessionTitle: '重构上传模块' }
+      })
+    )
+    notificationHub.dispatch(mk('session-done', { title: 'myproj · DSH 对话完成', session: { uuid: 'agg-title-1', project: 'myproj', sessionTitle: '重构上传模块' } }))
+    await sleep(500)
+    assert(received.length === 1, 'aggregate 多轮合并为 1 条', received.length)
+    assert(received[0].title === 'myproj · DSH 对话完成', '聚合后标题行保留项目名（不被覆盖）', received[0] && received[0].title)
+    assert(received[0].body === '重构上传模块（已完成 2 轮）', '聚合后正文 = 会话标题 + 已完成 N 轮（不含项目名）', received[0] && received[0].body)
     await sleep(150)
 
     console.log('4) off：会话完成不投递')
