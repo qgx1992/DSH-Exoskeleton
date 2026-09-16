@@ -133,6 +133,8 @@ export interface NotificationEvent {
     project?: string
     sessionTitle?: string
     firstUserText?: string
+    /** 本轮用户提问（session-done 专用；识别不到时缺省，正文回落为只显示会话标题） */
+    turnQuestion?: string
     /** session-ask 专用：卡片问题文本（worker 内已截断；最多 3 条，每条 ≤120 字符） */
     questions?: string[]
   }

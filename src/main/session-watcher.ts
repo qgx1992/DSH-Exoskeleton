@@ -29,11 +29,20 @@ const POLL_MS = Number.isFinite(POLL_RAW) ? Math.min(60_000, Math.max(500, POLL_
 const WATCH_DEBOUNCE_MS = 120
 /** 单会话去重记录上限（防止超长会话的 notifiedTurns 无限增长） */
 const MAX_NOTIFIED_TURNS = 200
+/** 「本轮提问」缓存上限（同上；轮次已通知过的提问不再需要，留最近若干轮够用） */
+const MAX_TURN_QUESTIONS = 200
 
 interface Tracked {
   /** 当前跟踪的日志文件（含文件名）——内核格式迁移会换名，故必须记下用于变更检测 */
   file: string
   readOffset: number
+  /**
+   * 本轮提问缓存（turn → 文本）。
+   * 必需跨批次缓存的原因（实测）：提问所在的 user/message 往往在**早批**到达，
+   * 而 turn/end 可能隔几分钟才在**晚批**到达，而 frameEvents 只解析 offset 之后的帧——
+   * 不缓存的话通知时查不到提问，「本次：」永远是空的。
+   */
+  turnQuestions: Map<number, string>
   /** 已通知过的轮次编号（Set<turn 编号>；防止同一轮重复通知） */
   notifiedTurns: Set<number>
   /** session-ask：等待回答的询问卡集合（callId → 卡片信息）。
@@ -49,6 +58,8 @@ export interface SessionDoneEvent {
   file: string
   /** 本轮轮次编号（turn/end 的 data.turn；缺失时为 undefined） */
   turn?: number
+  /** 本轮用户提问（该轮 turn/start 后第一条非系统注入的 user 消息；识别不到时 undefined） */
+  turnQuestion?: string
 }
 
 /** session-ask：询问卡打开事件（tool/call 已入日志且等待 tool/result 配对） */
@@ -204,7 +215,7 @@ export class SessionWatcher extends EventEmitter {
           if (!t) {
             // 基线：仅记录偏移，不处理旧内容（避免启动时对历史会话批量通知）。
             // 已挂着的询问卡同样不回填（与 turn/end 基线语义一致）
-            this.tracked.set(key, { file, readOffset: size, notifiedTurns: new Set<number>(), pendingAsks: new Map() })
+            this.tracked.set(key, { file, readOffset: size, turnQuestions: new Map(), notifiedTurns: new Set<number>(), pendingAsks: new Map() })
             continue
           }
 
@@ -230,6 +241,15 @@ export class SessionWatcher extends EventEmitter {
             if (r.ok) {
               // H3: 成功后才推进偏移——失败不推进，下一轮重试（避免该批新帧被永久跳过）
               t.readOffset = size
+              // 「本轮提问」写入跨批次缓存（turn → 文本）：提问常在早批，turn/end 在晚批，
+              // 不持久缓存的话通知时查不到。同轮已记过不覆盖（保持首条语义，与 worker 侧一致）。
+              for (const [turn, text] of r.turnQuestions ?? []) {
+                if (!t.turnQuestions.has(turn)) t.turnQuestions.set(turn, text)
+              }
+              // 上限保护：超长会话轮次很多，防止 Map 无限增长（保留最近的轮次）
+              if (t.turnQuestions.size > MAX_TURN_QUESTIONS) {
+                t.turnQuestions = new Map([...t.turnQuestions].slice(-MAX_TURN_QUESTIONS))
+              }
               // session-ask 结果优先：同批帧内 result 先于 call 处理（call+result 同批到达 = 秒答，不通知）
               const batchResults = new Set(r.toolResultCallIds ?? [])
               for (const cid of batchResults) {
@@ -276,7 +296,9 @@ export class SessionWatcher extends EventEmitter {
                   workspace: ws,
                   uuid: s.replace(/^session-/, ''),
                   file,
-                  turn: te.turn
+                  turn: te.turn,
+                  // 本轮提问（拿不到则 undefined，通知正文回落为只显示会话标题）
+                  turnQuestion: te.turn !== undefined ? t.turnQuestions.get(te.turn) : undefined
                 })
               }
             }
@@ -356,10 +378,13 @@ export function wireSessionWatcher(): void {
     }
     if (!project) project = projectNameFromPath(decodeWorkspaceName(ev.workspace))
 
-    // 正文只留会话标题 + 轮次；项目名移到通知标题行（v0.9.5）——正文空间有限，
-    // 原先 `项目「X」· 标题` 让每条通知都重复一遍项目名，挤掉了标题可见长度。
+    // 正文（v0.9.5 口径）：项目名在标题行；正文第一行是会话名（“这是哪个会话”），
+    // 第二行补上「本次：你这一轮真正问的」——只显示会话名的话，多轮会话每条通知
+    // 长得一模一样，看不出刚完成的到底是哪一轮。
     const turnSuffix = ev.turn ? `（第 ${ev.turn} 轮）` : ''
-    const body = `${title}${turnSuffix}`
+    const body = ev.turnQuestion
+      ? `${title}${turnSuffix}\n本次：${ev.turnQuestion}`
+      : `${title}${turnSuffix}`
     notificationHub.dispatch({
       id: randomUUID(),
       kind: 'session-done',
@@ -374,7 +399,8 @@ export function wireSessionWatcher(): void {
         turn: ev.turn,
         project,
         sessionTitle: title,
-        firstUserText
+        firstUserText,
+        turnQuestion: ev.turnQuestion
       },
       // 通知点击（原生通道 actions）：唤起窗口 + 定位会话。
       // 修复「点击通知偶尔不跳转」：优先转发 webview 插件用 sessions.open 程序化激活

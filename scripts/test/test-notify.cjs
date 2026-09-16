@@ -104,6 +104,25 @@ app.whenReady().then(async () => {
     assert(received[0].body === '重构上传模块（已完成 2 轮）', '聚合后正文 = 会话标题 + 已完成 N 轮（不含项目名）', received[0] && received[0].body)
     await sleep(150)
 
+    console.log('3c) aggregate 多轮：正文第二行给出**最后一轮**的提问（不是首轮）')
+    received.length = 0
+    const aggBase = { title: 'myproj · DSH 对话完成', session: { uuid: 'agg-q-1', project: 'myproj', sessionTitle: '重构上传模块' } }
+    notificationHub.dispatch(mk('session-done', { ...aggBase, session: { ...aggBase.session, turnQuestion: '先改导出' } }))
+    notificationHub.dispatch(mk('session-done', { ...aggBase, session: { ...aggBase.session, turnQuestion: '再把下载也改掉' } }))
+    await sleep(500)
+    assert(received.length === 1, '聚合多轮合并为 1 条', received.length)
+    assert(received[0].body === '重构上传模块（已完成 2 轮）\n本次：再把下载也改掉', '聚合正文第二行为最后一轮提问', JSON.stringify(received[0] && received[0].body))
+    assert(!/本次：先改导出/.test(received[0].body), '不展示首轮提问（合并多轮时只有最新一条有意义）')
+    await sleep(150)
+
+    console.log('3d) aggregate：多轮均无提问 → 不加空的「本次：」行')
+    received.length = 0
+    notificationHub.dispatch(mk('session-done', { title: 'p · DSH 对话完成', session: { uuid: 'agg-noq', project: 'p', sessionTitle: 'S' } }))
+    notificationHub.dispatch(mk('session-done', { title: 'p · DSH 对话完成', session: { uuid: 'agg-noq', project: 'p', sessionTitle: 'S' } }))
+    await sleep(500)
+    assert(received[0].body === 'S（已完成 2 轮）', '无提问时不输出「本次：」行', JSON.stringify(received[0] && received[0].body))
+    await sleep(150)
+
     console.log('4) off：会话完成不投递')
     received.length = 0
     await configStore.set({ notifySessionDone: 'off' })

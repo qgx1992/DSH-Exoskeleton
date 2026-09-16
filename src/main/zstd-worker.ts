@@ -28,6 +28,8 @@ interface WorkerPayload {
   askOpens?: Array<{ callId: string; turn?: number; time?: number; questions?: string[] }>
   /** session-ask：本批所有 tool/result 的 callId（去重；与 pending 卡片配对即「已回答」） */
   toolResultCallIds?: string[]
+  /** 「本轮提问」表：`[turn, text]` 数对（turn/end 通知的正文用「本次：…」） */
+  turnQuestions?: Array<[number, string]>
 }
 
 export class ZstdWorkerClient {

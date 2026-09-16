@@ -205,8 +205,12 @@ class NotificationHub {
     }
     const title = first.session?.sessionTitle ?? ''
     // 项目名已在 first.title 里（由 producer 用 notificationTitle 拼入，见 session-watcher），
-    // 此处不得再拼一次，否则会变成「项目 · 项目 · DSH 对话完成」。正文只描述“完成了几轮”。
-    const body = title ? `${title}（已完成 ${count} 轮）` : `已完成 ${count} 轮`
+    // 此处不得再拼一次，否则会变成「项目 · 项目 · DSH 对话完成」。
+    // 正文第一行描述“完成了几轮”；第二行给出**最后一轮**的提问（合并了多轮，
+    // 只能展示最新一条，否则会让人误以为这几轮问的是同一件事）。
+    const lastQuestion = bucket.latest.session?.turnQuestion
+    const base = title ? `${title}（已完成 ${count} 轮）` : `已完成 ${count} 轮`
+    const body = lastQuestion ? `${base}\n本次：${lastQuestion}` : base
     const merged: NotificationEvent = {
       ...first,
       id: randomUUID(),

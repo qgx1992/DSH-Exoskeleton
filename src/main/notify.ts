@@ -155,14 +155,18 @@ function buildLaunchUrl(meta: NotifyMeta): string {
   return `${PROTOCOL}://notify?${params.toString()}`
 }
 
-/** Windows toast XML：协议激活（整条点击 = 拉起 dsh-exo:// 协议） */
+/** Windows toast XML：协议激活（整条点击 = 拉起 dsh-exo:// 协议）。
+ *  正文支持多行（通知正文现在是「会话名」+「本次：提问」两行）：
+ *  body 里的换行需转成 `&#10;` 实体——XML 元素内容里的字面换行会被
+ *  空白规范化折叠，直接放 `\n` 会变成一行长文本。 */
 function buildToastXml(title: string, body: string, launch: string): string {
+  const bodyXml = esc(body).replace(/\r?\n/g, '&#10;')
   return [
     `<toast activationType="protocol" launch="${esc(launch)}">`,
     '  <visual>',
     '    <binding template="ToastText02">',
     `      <text id="1">${esc(title)}</text>`,
-    `      <text id="2">${esc(body)}</text>`,
+    `      <text id="2">${bodyXml}</text>`,
     '    </binding>',
     '  </visual>',
     '</toast>'

@@ -103,8 +103,8 @@ app.whenReady().then(async () => {
     assert(completed[0].uuid === A.uuid, '携带 uuid')
     assert(completed[0].turn === 2, '携带轮次编号')
 
-    // v0.9.5 文案（本用例是用户报的「项目（项目名）·问题」那条通知）：
-    // 项目名移入标题行，正文只留会话标题 + 轮次
+    // v0.9.5 文案（本次是用户报的「项目（项目名）·问题」那条通知）：
+    // 项目名移入标题行；正文 = 会话名 + 轮次，第二行补上「本次：本轮提问」
     const doneEv = received.filter((e) => e.kind === 'session-done').pop()
     assert(doneEv?.title === 'demo · DSH 对话完成', '完成通知标题行 = 项目名 · DSH 对话完成（cwd=D:\\proj\\demo）', doneEv?.title)
     assert(!/项目「/.test(doneEv?.body ?? ''), '完成通知正文不再带「项目「X」·」前缀', doneEv?.body)
@@ -174,6 +174,54 @@ app.whenReady().then(async () => {
     await sleep(700)
     assert(completed.length === 2, 'interrupted 持续不通知')
 
+    // ---------- 会话 F：「本次提问」提取（通知正文第二行）----------
+    const F = mkSess('dddddddd-0000-4000-8000-000000000006')
+    console.log('6b) 本轮提问提取：取 turn/start 后第一条真实提问，过滤系统注入')
+    zstdFrame([{ type: 'session', cwd: 'D:\\proj\\q', id: `session-${F.uuid}` }], F.jsonl)
+    await sleep(300) // 基线
+    // ★ 关键：提问在**先**一次刷盘，turn/end 在**后**一次（真实场景就是隔开的，
+    //   可能相距几分钟）。若实现只在同一批帧里找，这里就查不到提问。
+    zstdFrame(
+      [
+        { type: 'turn/start', seq: 1, time: Date.now(), data: { turn: 5 } },
+        { type: 'user/message', seq: 2, time: Date.now(), data: { role: 'user', content: [{ type: 'text', text: '帮我把导出改成 csv' }] } },
+        // 紧随其后的系统注入伪用户消息（真实数据里普遍存在），不得被当成提问
+        { type: 'user/message', seq: 3, time: Date.now(), data: { role: 'user', content: [{ type: 'text', text: 'Current runtime context. This snapshot supersedes earlier.' }] } },
+        { type: 'user/message', seq: 4, time: Date.now(), data: { role: 'user', content: [{ type: 'text', text: '<system-reminder> A skill is a reusable set' }] } }
+      ],
+      F.mid
+    )
+    append(F.jsonl, F.mid)
+    await sleep(400)
+    assert(completed.every((e) => e.uuid !== F.uuid), '只有 turn/start 时尚未通知')
+    // 晚批：turn/end 单独一次刷盘
+    zstdFrame([{ type: 'turn/end', seq: 5, time: Date.now(), data: { turn: 5, reason: { kind: 'completed' } } }], F.mid)
+    append(F.jsonl, F.mid)
+    await sleep(400)
+    const fEv = received.filter((e) => e.kind === 'session-done' && e.session?.uuid === F.uuid).pop()
+    assert(!!fEv, 'F 会话已完成并通知', !!fEv)
+    assert(
+      fEv?.session?.turnQuestion === '帮我把导出改成 csv',
+      '★ 跨批次拿到本轮提问（提问在早批、turn/end 在晚批）',
+      fEv?.session?.turnQuestion
+    )
+    assert(/本次：帮我把导出改成 csv/.test(fEv?.body ?? ''), '正文第二行含「本次：本轮提问」', fEv?.body)
+    assert(!/本次：Current runtime context/.test(fEv?.body ?? ''), '未被系统注入消息误当提问', fEv?.body)
+
+    // 无 user 消息的轮次 → turnQuestion 缺省（正文回落为只显示会话标题，不拼空的「本次：」）
+    zstdFrame(
+      [
+        { type: 'turn/start', seq: 6, time: Date.now(), data: { turn: 6 } },
+        { type: 'turn/end', seq: 7, time: Date.now(), data: { turn: 6, reason: { kind: 'completed' } } }
+      ],
+      F.mid
+    )
+    append(F.jsonl, F.mid)
+    await sleep(400)
+    const fEv2 = received.filter((e) => e.kind === 'session-done' && e.session?.uuid === F.uuid).pop()
+    assert(fEv2?.session?.turnQuestion === undefined, '无提问的轮次 turnQuestion 缺省', fEv2?.session?.turnQuestion)
+    assert(!/本次：/.test(fEv2?.body ?? ''), '缺省时不输出空的「本次：」行', fEv2?.body)
+
     // ---------- 会话 D：旧命名（v0）——确认不因改解析逻辑而丢掉老会话 ----------
     const D = mkSess('aaaaaaaa-0000-4000-8000-000000000004', 'session.jsonl.zstd')
     console.log('7) 旧命名 session.jsonl.zstd（未迁移世代）→ 仍能通知')
@@ -189,8 +237,10 @@ app.whenReady().then(async () => {
     )
     append(D.jsonl, D.mid)
     await sleep(400)
-    assert(completed.length === 3, '旧命名会话仍正常通知（向后兼容）')
-    assert(completed[2].uuid === D.uuid, '旧命名会话 uuid 正确')
+    // 不用绝对下标/总数：前面的用例数量会变，改用“本会话是否出现”判定，避免测试假失败
+    const dDones = completed.filter((e) => e.uuid === D.uuid)
+    assert(dDones.length === 1, '旧命名会话仍正常通知（向后兼容）', dDones.length)
+    assert(dDones[0].turn === 1, '旧命名会话携带轮次编号')
 
     // ---------- 会话 E：v0/v3 并存（内核格式迁移现场）→ 必须读 v3 ----------
     const E = mkSess('bbbbbbbb-0000-4000-8000-000000000005')
