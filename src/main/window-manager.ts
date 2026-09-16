@@ -12,7 +12,7 @@ import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
 import { notificationHub } from './notification-hub'
-import { buildSidebarEntryScript, setSidebarEntryActiveScript, measureSidebarWidthScript, buildTopDragRegionCss, DEEPSEEK_WEB_URL, WEBPANEL_TOGGLE_CHANNEL } from './web-sidebar-entry'
+import { buildSidebarEntryScript, setSidebarEntryActiveScript, measureSidebarWidthScript, buildTopDragRegionCss, buildTopDragStripScript, WINDOW_CONTROLS_CLUSTER_WIDTH, DEEPSEEK_WEB_URL, WEBPANEL_TOGGLE_CHANNEL } from './web-sidebar-entry'
 import {
   SHELL_CANVAS_COLOR,
   DSH_TOP_COLOR_DARK,
@@ -172,6 +172,8 @@ export class WindowManager {
     this.win.on('unmaximize', () => this.schedulePersist())
     this.win.on('resize', () => {
       this.layoutView()
+      // 窗口尺寸变了拖拽条横向范围也变（页面内 resize 监听在 WebContentsView 场景不一定触发）
+      this.syncDragStrip()
       this.schedulePersist()
     })
     this.win.on('move', () => this.schedulePersist())
@@ -516,10 +518,13 @@ export class WindowManager {
   private injectSidebarEntry(): void {
     const view = this.view
     if (!view || view.webContents.isDestroyed()) return
-    // 顶部拖拽区：无系统标题栏时，窗口拖动靠 DSH 页面顶部的 logo 行（避开其中的按钮）
+    // 顶部拖拽区（无系统标题栏）：CSS 负责 logoRow 与会话态 header，脚本负责空态拖拽条
     void view.webContents
       .insertCSS(buildTopDragRegionCss(TITLEBAR_OVERLAY_HEIGHT), { cssOrigin: 'user' })
       .catch((err) => logger.debug('drag region css skipped', err))
+    void view.webContents
+      .executeJavaScript(buildTopDragStripScript(TITLEBAR_OVERLAY_HEIGHT, WINDOW_CONTROLS_CLUSTER_WIDTH, DEFAULT_SIDEBAR_WIDTH))
+      .catch((err) => logger.debug('drag strip inject skipped', err))
     view.webContents.executeJavaScript(buildSidebarEntryScript()).catch((err) => {
       logger.debug('sidebar entry inject skipped', err)
     })
@@ -541,6 +546,21 @@ export class WindowManager {
         }
       })
       .catch(() => {})
+  }
+
+  /**
+   * 重新同步空态顶部拖拽条（壳在窗口几何变化后调用）。
+   *
+   * 为什么壳侧要主动推：侧边栏折叠/展开、窗口缩放都可能改变拖拽条应占的横向范围，
+   * 页面内虽已接了 ResizeObserver + resize，但窗口被最大化/还原时 DSH 未必收到 resize
+   * （WebContentsView 尺寸由 layoutView 设定），叠一次显式同步最稳。
+   */
+  syncDragStrip(): void {
+    const view = this.view
+    if (!view || view.webContents.isDestroyed()) return
+    void view.webContents
+      .executeJavaScript(`(() => { try { return window.__dshExoDragStripSync ? window.__dshExoDragStripSync() : 'no-sync' } catch { return 'error' } })()`)
+      .catch((err) => logger.debug('drag strip sync skipped', err))
   }
 
   /** 侧边栏入口点击：切网页版视图显隐（点击入口本身即切换） */

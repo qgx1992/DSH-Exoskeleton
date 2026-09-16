@@ -158,15 +158,137 @@ export function setSidebarEntryActiveScript(active: boolean): string {
  * - 给 DSH 的 logoRow 设 `drag`；
  * - logoRow 内部可交互元素（button / a / input）逐个设回 `no-drag`，保证点击仍有效。
  * 选择器若因版本变化落空，不影响其他功能，只是拖拽回退给系统标题栏区域。
+ *
+ * 中间主体那一列另有两块拖拽区（实测见 scripts/probe/probe-drag-region-dom.cjs）：
+ * - **会话态**：`header` 整行设 `drag`（见 overlaySafeAreaRules 的 padding-top 让位——
+ *   顶部 ${overlayHeight}px 是**空内边距**，故这一带设 drag 不会压住任何内容；
+ *   header 内的按钮/图标逐个设回 `no-drag`）；
+ * - **空态**（未打开会话时 DSH 不渲染有高度的 header）：由 `buildTopDragStripScript`
+ *   插入一条固定定位拖拽条（实测该带内可交互元素为 0 个）。
  */
 export function buildTopDragRegionCss(overlayHeight: number): string {
   return [
     '/* 顶部拖拽区（高度与原生窗口按钮叠加层对齐） */',
     `[class*="logoRow"] { -webkit-app-region: drag; min-height: ${overlayHeight}px; }`,
     '[class*="logoRow"] button, [class*="logoRow"] a, [class*="logoRow"] input, [class*="logoRow"] [role="button"] { -webkit-app-region: no-drag; }',
-    // 会话头部让位（见 buildOverlaySafeAreaCss 注释）
+    // 会话头部让位（见 overlaySafeAreaRules 注释）
     ...overlaySafeAreaRules(overlayHeight)
   ].join('\n')
+}
+
+/** 空态顶部拖拽条的元素 id（幂等标记 + 自愈查找） */
+export const DRAG_STRIP_ID = 'dsh-exo-drag-strip'
+
+/**
+ * Windows 原生窗口按钮簇宽度（实测 `x ∈ [W-138, W]`，系统画在内容之上）。
+ * 拖拽条右边界据此让开——那一段本来就由系统接管，铺过去也没用。
+ */
+export const WINDOW_CONTROLS_CLUSTER_WIDTH = 138
+
+/**
+ * 空态顶部拖拽条脚本（未打开会话时中间主体顶部的窗口拖动能力）。
+ *
+ * 为什么需要它：会话态由 CSS 给 `header` 设 drag 即可（那一带是 header 的空白内边距），
+ * 但**空态 DSH 根本不渲染有高度的 header**（实测页面上只有一个 0 高度 header），
+ * 该位置最初命中的是整列高的 `div.wSkVaW_scrollBody`——它同时承载聊天区，
+ * 不能设 drag（会让整个消息区无法滚轮/选中）。故空态改用一条**仅覆盖`y<overlayHeight`**
+ * 的固定定位透明条。
+ *
+ * 三条约束（都来自实测）：
+ * - **只在空态插入**：会话态下 header 自己已是拖拽区，此时若留着拖拽条，会压在标题行
+ *   的面包屑等按钮上吞掉点击（实测覆盖 3 个 button）。故 `hasHeader()` 为真即移除。
+ * - **左边界跟随侧边栏**：侧边栏可折叠（实测 280px ↔ 56px），固定值会要么盖住侧边栏
+ *   按钮、要么在收起后留一条拖不动的缝。每次 sync 现测列宽。
+ * - **右边界让开原生按钮簇**：Windows 下按钮簇占右上角 `x ∈ [W-138, W]`，系统画在内容
+ *   之上，拖拽条铺到最右也没有意义（那一段本来就由系统接管）。
+ *
+ * 自愈：DSH 是 React 应用，重渲染可能清掉 body 下的外部节点，故与侧边栏入口同样用
+ * MutationObserver 节流补插；另接 `resize`（窗口缩放）与 `ResizeObserver`（**侧边栏折叠**：
+ * 实测折叠只改内部布局宽度、不改 class 名也不增删节点，childList 观察器完全看不到，
+ * 只能靠尺寸变化触发）。
+ */
+export function buildTopDragStripScript(
+  overlayHeight: number,
+  clusterWidth: number,
+  fallbackSidebarWidth: number
+): string {
+  return `(() => {
+    const ID = ${JSON.stringify(DRAG_STRIP_ID)}
+    const H = ${overlayHeight}
+    const CLUSTER = ${clusterWidth}
+    const FALLBACK_SIDEBAR = ${fallbackSidebarWidth}
+
+    function sidebarWidth () {
+      try {
+        const col = document.querySelector('[class*="sidebarCol"]')
+        if (col) { const w = Math.round(col.getBoundingClientRect().width); if (w > 0) return w }
+      } catch {}
+      return FALLBACK_SIDEBAR
+    }
+    function hasHeader () {
+      try {
+        return [...document.querySelectorAll('header')].some(function (h) { return h.getBoundingClientRect().height > 0 })
+      } catch { return false }
+    }
+
+    function sync () {
+      const existing = document.getElementById(ID)
+      // 会话态：header 自带拖拽，拖拽条必须撤掉（否则吞掉标题行按钮的点击）
+      if (hasHeader()) { if (existing) existing.remove(); return 'removed' }
+      let el = existing
+      if (!el) {
+        el = document.createElement('div')
+        el.id = ID
+        el.setAttribute('aria-hidden', 'true')
+        const host = document.body || document.documentElement
+        if (!host) return 'no-host'
+        host.appendChild(el)
+      }
+      const s = el.style
+      s.position = 'fixed'
+      s.top = '0'
+      s.left = sidebarWidth() + 'px'
+      s.right = CLUSTER + 'px'
+      s.height = H + 'px'
+      s.background = 'transparent'
+      s.zIndex = '2147483000'
+      s.setProperty('-webkit-app-region', 'drag')
+      return 'shown'
+    }
+
+    window.__dshExoDragStripSync = sync
+    const first = sync()
+    if (!window.__dshExoDragStripInstalled) {
+      window.__dshExoDragStripInstalled = true
+      let timer = null
+      const schedule = () => {
+        if (timer) return
+        timer = setTimeout(() => { timer = null; try { sync() } catch {} }, 300)
+      }
+      try { new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true }) } catch {}
+      window.addEventListener('resize', schedule)
+      // 侧边栏折叠/展开只改布局宽度（不改 class、不增删节点）→ childList 观察器看不到，
+      // 必须观察列元素自身的尺寸变化，否则拖拽条左边界会停在旧值上（盖住按钮或留缝）。
+      try {
+        const col = document.querySelector('[class*="sidebarCol"]')
+        if (col && typeof ResizeObserver === 'function') new ResizeObserver(schedule).observe(col)
+      } catch {}
+      // 列元素可能要等 React 首次渲染后才存在，短轮询补挂（拿到即停）
+      let attachTries = 0
+      const attachTimer = setInterval(() => {
+        attachTries += 1
+        try {
+          const col = document.querySelector('[class*="sidebarCol"]')
+          if (col && typeof ResizeObserver === 'function') {
+            new ResizeObserver(schedule).observe(col)
+            clearInterval(attachTimer)
+          }
+        } catch {}
+        if (attachTries >= 40) clearInterval(attachTimer)
+      }, 500)
+    }
+    return first
+  })()`
 }
 
 /**
@@ -193,7 +315,16 @@ function overlaySafeAreaRules(overlayHeight: number): string[] {
   return [
     '/* 会话头部让位：整行下移到原生窗口按钮下方（避免右上角图标按钮被遮挡） */',
     `header { padding-top: ${overlayHeight}px !important; height: auto !important; min-height: ${overlayHeight + 86}px; }`,
-    // 头部内的拖拽能力不受影响；但其可交互元素必须保持可点
-    'header button, header a, header input, header [role="button"], header [role="tab"] { -webkit-app-region: no-drag; }'
+    // 会话态拖拽区：`header` 顶部那一带正是上面 padding 让出来的空内边距，
+    // 设 drag 不会压住任何内容（实测 y=6/18/28 整行命中的都是 header 自身）。
+    'header { -webkit-app-region: drag; }',
+    // 但 header 内部的可交互元素必须逐个设回可点，否则会被 drag 吞掉。
+    // 除语义控件外还列入 svg/img：实测头部里有「图标自己带 onClick 但不在 button 内」的情况
+    // （probe-drag-header-candidates 报 svg @(546,52) 解析成 drag），一并排除更稳。
+    [
+      'header button', 'header a', 'header input', 'header select', 'header textarea',
+      'header svg', 'header img', 'header [role="button"]', 'header [role="tab"]',
+      'header [role="link"]', 'header [contenteditable="true"]'
+    ].join(', ') + ' { -webkit-app-region: no-drag; }'
   ]
 }
