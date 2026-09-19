@@ -275,25 +275,78 @@ const win = new BrowserWindow({
 - 关闭窗口时隐藏而非退出（`win.hide()`）[reference:38]
 - 托盘单击唤回窗口（`win.show()`）
 
-#### 4.1.5 网页版 DeepSeek（DSH 左侧边栏入口）
+#### 4.1.5 侧边栏底部工具栏（含网页版 DeepSeek 入口）
 
-**功能**：DSH Web UI 左侧边栏底部提供一个「网页版 DeepSeek」入口，点击后在侧边栏右侧嵌入官方 chat.deepseek.com，再点收起。
+**功能**：DSH Web UI 左侧边栏底部是**一行 4 个小按钮**（32×32），**在整行内自适应均分**
+（中心恒为行宽的 1/8·3/8·5/8·7/8，侧栏宽窄变化自动跟随）：
+
+| 位置 | 按钮 | 来源 | 行为 |
+| :--- | :--- | :--- | :--- |
+| 1/8 | 设置 | 官方 `[class*="triggerRow"] > button`，**节点原样保留** | 只缩盒子（42px 整行 → 32×32、隐藏文字），onClick 仍是官方那个 → DSH 设置弹窗行为不变 |
+| 3/8 | 网页版 DeepSeek | 壳注入到 `sidebar.footer.action` 插槽 | 经 `__dshExo.send('webpanel:toggle')` 回壳切视图（点击在侧边栏右侧嵌入官方 chat.deepseek.com，再点收起） |
+| 5/8 | 管理面板 | 壳注入 | 经 `__dshExo.send('panel:open')` 回壳开管理面板 |
+| 7/8 | 折叠切换 | 壳注入（合并了 dsh-ui-tools 的两个整行按钮） | 转发 click 给官方「折叠/展开所有工作区」按钮，双向 toggle |
+
+**均分算法**：设置按钮在 `settingsArea`、另 3 个在 `footerActions`，是两个并列容器，
+不能直接用「整行 space-around」。做法是**整行按 1:3 分给两容器（`flex:1` / `flex:3`）+ 各容器内 `space-around`**，
+这是**与按钮宽度无关的精确 4 等分**（设整行 L：设置（L/4 宽、1 项）中心 = L/8；
+壳钮（3L/4 宽、3 项）中心 = i·L/4 + L/8 = 3L/8, 5L/8, 7L/8）。侧栏宽度变化时自动跟随，无需 JS 计算。
+
+**实测依据**（`scripts/probe/probe-sidebar-footer.cjs`、`probe-footer-rail.cjs`、`probe-footer-html.cjs`）：
+官方底部区 `footArea` 原本是**两行**——上一行 `footerActions`（插槽 `sidebar.footer.action`，
+第三方插件与壳注入按钮都落这里）占 69px，下一行 `settingsArea`（官方「设置」整行按钮 260×42）
+占 50px，合计 119px；窄条（rail）态下侧边栏宽 56px、`footArea` 仅 35px。
 
 **实现要点**（`src/main/web-sidebar-entry.ts`）：
-- **入口用 DOM 注入**：往官方插槽渲染出的锚点 `[data-slot="sidebar.footer.action"]` 插一个按钮。
-  该标记**不带 hash、跨版本稳定**；CSS module 类名是 hash（实测 `pI_x6G_sidebarCol`）不可依赖。
-  锚点 `display: contents`，按钮自然排进侧边栏底部那一列（与第三方「今日¥」同列，「设置」行上方）。
-- **为何不用官方插槽注册**：`sidebar.*` 插槽是 cordis 客户端插件的注册面，需独立插件包
-  （本仓 `plugins/` 已 gitignore，插件源码在各自仓库），而壳要开箱即用。
-- **点击链路**：注入按钮 → `window.__dshExo.send('webpanel:toggle')`（既有 dsh-view 桥，R-27 白名单不扩大）
-  → 主进程 `ipc-message` 监听 → `windowManager.toggleWebPanel()`。
+- **入口用 DOM 注入**：往官方插槽渲染出的锚点 `[data-slot="sidebar.footer.action"]` 插按钮。
+  该标记**不带 hash、跨版本稳定**；CSS module 类名是 hash（实测 `hHd-Xa_footArea`、设置按钮
+  `VOzbGW_trigger`），故重排规则一律用 `[class*="footArea"]` 这类**哈希无关**选择器。
+- **只改 CSS 不搬 DOM**（历史教训：dsh-ui-tools 的 v0.1.0/v0.1.2 搬 slot 节点会与框架
+  重渲染互相触发、渲染进程 100% CPU 卡死）：
+  - `sidebarFooterCss()` 把 `footArea` 由 `flex-direction:column` 改 `row`，
+    `settingsArea`（order:1）与 `footerActions`（order:2）同排；
+  - 官方设置按钮**只缩盒子**（42px 整行 → 32×32、隐藏标签文字），onClick 仍是官方那个，
+    所以「打开 DSH 设置弹窗」行为不变；
+  - `dsh-ui-tools` 的整行工具条 `.wc-collapse-bar`（256×36）`display:none` 收起，
+    其功能合并成壳的「折叠切换」按钮 —— 点击**转发 click 给官方按钮**
+    （状态取自 `[slot="sidebar.workspaces"] [aria-expanded]`，任一分组展开即显示「折叠」面）。
+    为什么不自建折叠逻辑：`setAllGroupsExpanded` 在插件内部、依赖 `ctx.slots`/store，壳无法从页面侧调用。
+- **三个必须知道的坑（均有回归断言守住）**：
+  1. **壳按钮必须包在组容器里（`flex:1 1 100%` + `order:1`）**：第三方插件（实测 dsh-cost-meter 的
+     `cm-footer-stack`）会把自己元素插到插槽**最前面**且占满整行，不分组时壳按钮会与它混在同一 wrap
+     上下文里、被顶到中间（实测底栏 131px、按键不在底行）。包组后组独占**最后一行**
+     → 第三方内容在上、**按键行永远压在底栏最底部**（用户口径）；`settingsArea` 用 `align-self:flex-end`
+     下沉到同一底行。行序完全由 CSS `order` 控制，**不搬动第三方节点**（§7 已知坑 2）；
+  2. **官方工具条按钮查找必须限定 `.wc-collapse-bar`**：壳的折叠按钮 `aria-label` 与官方同名，
+     全局 `querySelector` 会先命中壳自己 → 转发变成自点死循环（实测踩过，按钮永久失效）；
+  3. **底栏总高会被第三方内容行撑高**（实测余额栈 93px），这是正确行为（不能为好看压掉插件内容）；
+     要断言的是「壳自己的 4 个按钮在同一行且在底栏最底」，而不是底栏总高。
+- **宽/窄两态**：工具栏脚本在 `footArea` 上打 `data-dsh-exo-rail="wide|rail"`（按实测列宽 280 / 56 判定），
+  CSS 只在 `wide` 下重排，并**只在 rail 态隐藏三个壳按钮、只留官方设置小圆钮**（用户确认口径）。
+  属性缺失 = 注入脚本未跑到 → 官方布局照旧（降级安全）；不搬节点也让自愈更简单。
+- **点击链路**：注入按钮 → `window.__dshExo.send('webpanel:toggle' | 'panel:open')`
+  （既有 dsh-view 桥，R-27 白名单不扩大）→ 主进程 `ipc-message` 监听 →
+  `windowManager.toggleWebPanel()` / `openPanelTab('overview')`。
 - **鲁棒性**：幂等（节点 id + 安装标记判重）、MutationObserver 节流自愈（React 重渲染清掉后补插）、
-  选中态由壳 `executeJavaScript` 回写。
+  选中态由壳 `executeJavaScript` 回写；侧边栏折叠只改布局宽度（不改 class、不增删节点），
+  childList 观察器看不到 → 壳在窗口 resize 时调 `syncSidebarFooter()` 显式推一次。
 - **承载方式**：仍用独立 `WebContentsView`（登录态存 `persist:deepseek-web`，重启保留）。
   **为何不用 iframe**：官方响应头实测 `Content-Security-Policy: frame-ancestors none`，iframe 会被拦截；
   独立视图是顶级浏览上下文，不受该 CSP 限制。
-- **侧边栏宽度**：实测（约 280px）后把网页版视图定位到它右侧；截图/实测脚本见
-  `scripts/probe/verify-web-sidebar-entry.cjs`（6 项全通过）与 `scripts/probe/verify-shell-top.cjs`（5 项全通过）。
+- **侧边栏宽度**：实测（约 280px）后把网页版视图定位到它右侧。
+
+**验证**：CI 级契约测试 `scripts/test/test-sidebar-footer.cjs`（30 项，已接入 `npm test`，
+用仿真 DOM 断言均分 / 重排 / 三个入口的桥消息 / 折叠转发 / 窄条只留设置 / 自愈 / 第三方在上且按键行压底）；
+实机端到端 `scripts/probe/verify-sidebar-footer.cjs`（29 项，真实内核 + 真实第三方插件共用插槽 + 生产注入脚本 + 截图）；
+另有 `verify-web-sidebar-entry.cjs`（6 项）与 `verify-shell-top.cjs`（5 项）。
+
+**验证脚本自身的两个环境坑**（已在脚本内处理，否则会误判为产品缺陷）：
+1. **必须清理陈旧 `dsh-auth-*` cookie**：脚本用默认 session，每跑一次就多一个 cookie（内核每次
+   重启都是新 secret），累积到请求头超 `node:http` 16KB 上限 → 431 → 插件 bundle 加载失败，
+   页面卡在「Failed to load plugins」（实测累积到 **62 个**）。生产代码有同款清理（`window-manager`），
+   脚本也要照做；否则会看到「侧边栏就绪: false」这种与产品无关的假失败。
+2. **取样要按几何位置过滤**：第三方插件的 `position:fixed` 提示浮层（`cm-qguide`）也是 `footArea`
+   的 DOM 后代，但坐标在屏幕别处，不排除会被误计成底栏按钮（实测多出 4 个）。
 
 #### 4.1.4 单实例运行
 

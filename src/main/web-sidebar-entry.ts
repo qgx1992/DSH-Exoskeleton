@@ -14,6 +14,20 @@
  * - 该锚点 `display: contents`，本身不产生盒子、子元素才参与布局，
  *   故插入的按钮会自然排进侧边栏底部那一列（与 dsh-cost-meter 的「今日¥」同列）。
  * - 侧边栏整体宽度实测 280px（`[class*="sidebarCol"]`），用于把网页版视图贴在它右侧。
+ *
+ * 底部工具栏（buildSidebarFooterScript + sidebarFooterCss，实测见
+ * scripts/probe/probe-sidebar-footer.cjs / probe-footer-rail.cjs）：
+ * 官方底部区是 `footArea` 两行——`footerActions`（插槽 sidebar.footer.action，
+ * 第三方插件与壳注入按钮都落这里）在上一行，`settingsArea`（官方「设置」整行大按钮
+ * 260×42）在下一行，共占 119px 高。壳把它重排成**一行 4 个小按钮**：
+ * 设置 / 网页版 DeepSeek / 管理面板 / 折叠切换，全部 32×32。
+ * - **只改 CSS 不搬 DOM**：布局用哈希无关的 `[class*="footArea"]` 等属性选择器 +
+ *   壳打在 footArea 上的 `data-dsh-exo-rail` 标记（宽/窄两态，窄条只留设置按钮）；
+ * - **官方设置按钮原样保留**：缩成方形的只是它的盒子，onClick 仍是官方那个，
+ *   所以「打开 DSH 设置弹窗」行为不变；
+ * - **折叠/展开合并成一个按钮**：视觉上隐藏 dsh-ui-tools 的整行工具条
+ *   （`.wc-collapse-bar`，宽 256×36 两个 114px 按钮），点击时按当前分组状态
+ *   转发 click 给官方那个按钮（找不到插件按钮则保持禁用，不静默失效）。
  */
 
 /** 官方网页版地址（脚本内联 + 视图加载共用） */
@@ -24,6 +38,31 @@ const FOOTER_SLOT_SELECTOR = '[data-slot="sidebar.footer.action"]'
 const ENTRY_ID = 'dsh-exo-webpanel-entry'
 /** 页面 → 壳的切换消息通道（复用 dsh-view preload 的 __dshExo.send） */
 export const WEBPANEL_TOGGLE_CHANNEL = 'webpanel:toggle'
+/** 页面 → 壳：打开壳管理面板（Dashboard，网页版/管理面板之外的第三个底部入口） */
+export const PANEL_OPEN_CHANNEL = 'panel:open'
+/** 底部工具栏样式表 id（入口脚本与工具栏脚本共用，幂等：谁先注入都一样） */
+const FOOT_STYLE_ID = 'dsh-exo-foot-style'
+/** 壳注入的底部小按钮通用类名 */
+const FOOT_BTN_CLASS = 'dsh-exo-foot-btn'
+/**
+ * 壳的 3 个底部按钮的**组容器**类名。
+ *
+ * 为何要单独包一层（而不是把 3 个按钮直接摆在插槽里）：
+ * 第三方插件（实测 dsh-cost-meter）会把自己的元素插到插槽**最前面**且占满整行，
+ * 直接摆放时壳按钮会与它混在同一个 wrap 上下文里、被顶到它下面（实测底栏高 131px）。
+ * 包一层 `flex-basis:100%` 的组后，组必定独占**最后一行** → 按键行永远压在底栏最底部，
+ * 第三方内容（余额/今日花费等）在它上方。这也是「不搬动第三方节点」的前提下
+ * 唯一能稳定控制行序的做法（搬节点会与 React 重渲染互相触发，见 §7 已知坑 2）。
+ */
+const FOOT_GROUP_CLASS = 'dsh-exo-foot-group'
+/** 管理面板入口按钮 id */
+const PANEL_ENTRY_ID = 'dsh-exo-panel-entry'
+/** 折叠/展开合并按钮 id */
+const COLLAPSE_TOGGLE_ID = 'dsh-exo-collapse-toggle'
+/** footArea 上的宽/窄态标记属性（CSS 据此只在展开态重排） */
+const RAIL_ATTR = 'data-dsh-exo-rail'
+/** 窄条（rail）宽度阈值：实测展开 280px ↔ 收起 56px */
+const RAIL_WIDTH_THRESHOLD = 100
 
 /**
  * 读取 DSH Web UI 左侧边栏实测宽度的脚本。
@@ -70,22 +109,13 @@ export function buildSidebarEntryScript(): string {
     }
     window.__dshExoWebPanelInstalled = true
 
-    const CSS_ID = ID + '-style'
+    const CSS_ID = ${JSON.stringify(FOOT_STYLE_ID)}
+    const BTN_CLASS = ${JSON.stringify(FOOT_BTN_CLASS)}
     function ensureStyle () {
       if (document.getElementById(CSS_ID)) return
       const s = document.createElement('style')
       s.id = CSS_ID
-      s.textContent = [
-        '#' + ID + '{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;',
-        'margin:0;padding:8px 12px;border:0;background:transparent;color:var(--dsh-text-2,#a6adb8);',
-        'font:inherit;font-size:13px;text-align:left;cursor:pointer;border-radius:6px;',
-        'transition:background .15s,color .15s}',
-        '#' + ID + ':hover{background:rgba(255,255,255,.06);color:var(--dsh-text-1,#f0f3f7)}',
-        '#' + ID + '[data-active="1"]{color:#e8b85a}',
-        '#' + ID + '[data-active="1"]:hover{background:rgba(232,184,90,.14)}',
-        '#' + ID + ' svg{flex:0 0 auto;opacity:.9}',
-        '#' + ID + ' span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
-      ].join('')
+      s.textContent = ${JSON.stringify(sidebarFooterCss())}
       document.head.appendChild(s)
     }
 
@@ -93,12 +123,13 @@ export function buildSidebarEntryScript(): string {
       const btn = document.createElement('button')
       btn.id = ID
       btn.type = 'button'
+      btn.className = BTN_CLASS
       btn.title = '打开 / 关闭网页版 DeepSeek'
+      btn.setAttribute('aria-label', btn.title)
       btn.innerHTML =
-        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
         'stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/>' +
-        '<path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>' +
-        '<span>网页版 DeepSeek</span>'
+        '<path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
       btn.addEventListener('click', (e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -108,13 +139,15 @@ export function buildSidebarEntryScript(): string {
     }
 
     function sync () {
+      // 样式表与底部重排规则统一由 FOOT_STYLE_ID 承担（工具栏脚本可能先跑，幂等）
+      try { window.__dshExoFootEnsureStyle && window.__dshExoFootEnsureStyle() } catch {}
       const slot = document.querySelector(SLOT)
       if (!slot) return false
       ensureStyle()
       let btn = document.getElementById(ID)
       if (!btn || !slot.contains(btn)) {
         btn = build()
-        // 插到插槽首位 → 落在「设置」行上方（插槽内已有第三方行时排其前）
+        // 插到插槽首位 → 排在第三方行之前（底部工具栏里紧跟「设置」）
         slot.insertBefore(btn, slot.firstChild)
       }
       if (window.__dshExoWebPanelActive) btn.setAttribute('data-active', '1')
@@ -145,6 +178,287 @@ export function setSidebarEntryActiveScript(active: boolean): string {
       if (window.__dshExoWebPanelSync) window.__dshExoWebPanelSync()
       return true
     } catch { return false }
+  })()`
+}
+
+/**
+ * 侧边栏底部工具栏 CSS（纯 CSS 重塑官方底部区，不搬 DOM）。
+ *
+ * 选择器全部用**哈希无关**的属性匹配（`[class*="footArea"]` / `[class*="trigger"]`），
+ * 官方 CSS module 类名带 hash（实测 footArea=`hHd-Xa_footArea`、设置按钮=`VOzbGW_trigger`），
+ * 不能直接写。作用域统一挂在 `[${RAIL_ATTR}]` 上——该标记由工具栏脚本打在 footArea 上，
+ * **只在展开态（列宽 > ${RAIL_WIDTH_THRESHOLD}px）出现**，所以：
+ * - 窄条（rail）态天然回落到官方原样式（rail 只有 36px 宽，排不下 4 个按钮）；
+ * - 内核升级/注入脚本未跑到时，页面上没有标记，官方布局照旧（降级安全）。
+ */
+export function sidebarFooterCss(): string {
+  // footArea 自身就带这个标记属性，所以前缀选择器直接写成「同类名 + 属性」，
+  // 其内部元素（footerActions/settingsArea/triggerRow）用后代选择器即可。
+  const wide = `[class*="footArea"][${RAIL_ATTR}="wide"]`
+  const rail = `[class*="footArea"][${RAIL_ATTR}="rail"]`
+  return [
+    '/* 底部区：两行并一行，4 个按钮在整行内自适应均分，且**始终压在底栏最底部** */',
+    `${wide}{flex-direction:row;align-items:flex-start;gap:0;padding:2px 0 4px;box-sizing:border-box}`,
+    // footerActions：第三方插槽内容排在前、壳按钮组排在后（见 group 的 order），
+    // 保留官方 `flex-wrap: wrap` —— 第三方“整行”元素（如余额栈 `flex:1 1 100%`）
+    // 各占一行堆在上方；壳按钮组 basis 100% 必定换到**最后一行**。
+    `${wide} [class*="footerActions"]{display:flex;flex:3 1 0;flex-wrap:wrap;min-width:0;order:2;align-content:flex-start;justify-content:flex-start}`,
+    // settingsArea 官方是 display:block，要均分必须先成为 flex 容器
+    // （插槽 div 是 display:contents，triggerRow 会直接成为它的 flex item）。
+    // flex 生长系数 1 : 3 —— 整行按 1:3 分给「设置容器」与「壳按钮容器」（少了这个比例
+    // 两个容器会 50/50 均分，四个按钮就不等距了）。
+    // align-self:flex-end —— footerActions 被第三方内容撑高时，设置按钮下沉到**最后一行**，
+    // 与壳按钮组同一排（用户口径：按键行固定在底栏最底部）。
+    `${wide} [class*="settingsArea"]{display:flex;flex:1 1 0;order:1;min-width:0;align-self:flex-end;justify-content:space-around}`,
+    // 壳按钮组：占满一整行（basis 100%）→ 无论第三方内容多少行，它必定落在**最后一行**；
+    // order:1 使它在同一 wrap 上下文里排在第三方内容之后（不搬动第三方节点，符合 §7 已知坑 2）。
+    // 组内 space-around 把 3 个按钮在整行内均分。
+    `.${FOOT_GROUP_CLASS}{display:flex;order:1;flex:1 1 100%;flex-wrap:nowrap;align-items:center;min-width:0;justify-content:space-around}`,
+    // ── 4 个按钮在整行内**自适应均分**（不同侧栏宽度下都等间距）──
+    // 难点：设置按钮在 settingsArea、另 3 个在 footerActions 的壳按钮组里，是两个并列容器，
+    // 不能直接用「整行 space-around」一次搞定。做法：整行按 1:3 分给两容器、各容器内 space-around。
+    // 这是**精确等价于 4 等分**的（与按钮宽度 w 无关）：
+    // 设整行 L、钮宽 w（n 项容器内 space-around 后第 i 项中心 = i·步长 + free/(2n) + w/2）：
+    //   设置（L/4 宽、1 项）→ 中心 = L/8；
+    //   壳钮（3L/4 宽、3 项）→ 中心 = i·L/4 + L/8 = 3L/8, 5L/8, 7L/8。
+    // 即四个中心恒为 L/8, 3L/8, 5L/8, 7L/8——完全等距，侧栏宽度变化时自动跟随。
+    // 官方设置行：260×42 整行按钮 → 32×32 小方钮（内部图标 16px 不变）。
+    // 只改盒子，onClick 仍是官方那个 → DSH 设置弹窗行为不变；flex:0 0 auto 防被均分拉宽。
+    `${wide} [class*="triggerRow"]{width:auto;margin:0;gap:0}`,
+    `${wide} [class*="triggerRow"] > button[class*="trigger"]{flex:0 0 auto;width:32px;height:32px;padding:0;border-radius:8px;justify-content:center;gap:0}`,
+    // 标签文字隐藏：小方钮里只留图标（与其余三个壳按钮一致）
+    `${wide} [class*="triggerLabel"]{display:none}`,
+    // 官方设置按钮内层 slot 包裹（display:contents）在 32px 盒子里要居中
+    `${wide} [class*="triggerRow"] [data-slot="settings.trigger"]{display:flex;align-items:center;justify-content:center}`,
+    // 第三个入口（网页版 DeepSeek）已由入口脚本插入插槽；插槽**保持官方 display:contents**，
+    // 不要在这里改成 flex —— 改了会给第三方插槽内容造出一个嵌套 flex 上下文，把
+    // dsh-cost-meter 这类「整行」元素（flex:1 1 100%）困在插槽内部换行，
+    // 而官方+插件本来的约定是让它们直接参与 footerActions 的 wrap（实测 0.9.4 前即如此）。
+    // 窄条（rail）态：排不下 4 个按钮 —— 只留官方「设置」小圆钮（用户确认的口径），
+    // 其余三个壳入口（连同容器）隐藏，避免溢出到侧边栏外面。
+    `${rail} .${FOOT_BTN_CLASS}, ${rail} .${FOOT_GROUP_CLASS}{display:none}`,
+    // dsh-ui-tools 的整行工具条：折叠/展开合并为壳的一个按钮 → 视觉隐藏原工具条。
+    // 用 display:none 而非 visibility，避免它仍占 256×36 把行高撑开；
+    // 节点本身保留在 DOM 里，壳按钮靠转发它的 click 工作（见 buildSidebarFooterScript）。
+    `.wc-collapse-bar{display:none !important}`,
+    // 壳注入的小按钮通用样式（与官方设置小方钮同尺寸同质感）。
+    // flex:0 0 auto —— 宽度固定 32px，不被组容器的 space-around 拉伸，
+    // 间距完全交给 .dsh-exo-foot-group 的 justify-content:space-around 均分。
+    `.${FOOT_BTN_CLASS}{box-sizing:border-box;flex:0 0 auto;width:32px;height:32px;padding:0;margin:0;`,
+    'display:inline-flex;align-items:center;justify-content:center;gap:0;border:0;border-radius:8px;',
+    'background:transparent;color:var(--dsw-alias-label-secondary,var(--dsh-text-2,#a6adb8));',
+    'font:inherit;cursor:pointer;transition:background-color .12s ease,color .12s ease}',
+    `.${FOOT_BTN_CLASS}:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.16));color:var(--dsw-alias-label-primary,var(--dsh-text-1,#f0f3f7))}`,
+    `.${FOOT_BTN_CLASS}:focus-visible{outline:2px solid rgba(80,140,255,.75);outline-offset:1px}`,
+    `.${FOOT_BTN_CLASS}[data-disabled="1"]{opacity:.4;cursor:default}`,
+    `.${FOOT_BTN_CLASS}[data-active="1"]{color:#e8b85a}`,
+    `.${FOOT_BTN_CLASS}[data-active="1"]:hover{background:rgba(232,184,90,.14)}`,
+    `.${FOOT_BTN_CLASS} svg{flex:0 0 auto;opacity:.95}`
+  ].join('')
+}
+
+/**
+ * 侧边栏底部工具栏脚本：把官方底部区重排为一行 4 个小按钮。
+ *
+ * 四个入口（从左到右：设置 / 网页版 DeepSeek / 管理面板 / 折叠切换）：
+ *   1. **设置** —— 官方 `[class*="triggerRow"] > button`，**原样保留**（不新建、不代理），
+ *      只由 CSS 缩成 32×32，点击照旧打开 DSH 设置弹窗；
+ *   2. **网页版 DeepSeek** —— 由 `buildSidebarEntryScript` 注入（保持既有链路）；
+ *   3. **管理面板** —— 本脚本新建，经 `__dshExo.send('panel:open')` 回壳；
+ *   4. **折叠切换** —— 本脚本新建，隐藏了 dsh-ui-tools 的整行工具条，
+ *      点击时**转发 click 给官方那两个按钮之一**（按当前分组展开状态选目标）。
+ *
+ * 为什么不自建折叠逻辑：`setAllGroupsExpanded` 在插件内部，依赖 `ctx.slots`/store；
+ * 壳无法从页面侧调用，只能转发官方按钮的 click（实测两个按钮的 aria-label 稳定：
+ * 「折叠所有工作区」/「展开所有工作区」）。找不到官方按钮时按钮置 `data-disabled` 并
+ * 提示，不静默失效。
+ *
+ * 状态判定（实测 `scripts/probe/probe-footer-rail.cjs`）：工作区分组头是
+ * `[slot="sidebar.workspaces"] div[class*="projectRow"][aria-expanded]`，
+ * 只要有任一分组是展开的，按钮就呈现「折叠」面（通用 toggle 语义）。
+ */
+export function buildSidebarFooterScript(): string {
+  return `(() => {
+    const STYLE_ID = ${JSON.stringify(FOOT_STYLE_ID)}
+    const BTN_CLASS = ${JSON.stringify(FOOT_BTN_CLASS)}
+    const GROUP_CLASS = ${JSON.stringify(FOOT_GROUP_CLASS)}
+    const BTN_PANEL = ${JSON.stringify(PANEL_ENTRY_ID)}
+    const BTN_COLLAPSE = ${JSON.stringify(COLLAPSE_TOGGLE_ID)}
+    const RAIL_ATTR = ${JSON.stringify(RAIL_ATTR)}
+    const RAIL_MAX = ${RAIL_WIDTH_THRESHOLD}
+    const SEND_CHANNEL = ${JSON.stringify(PANEL_OPEN_CHANNEL)}
+
+    function ensureStyle () {
+      if (document.getElementById(STYLE_ID)) return
+      const s = document.createElement('style')
+      s.id = STYLE_ID
+      s.textContent = ${JSON.stringify(sidebarFooterCss())}
+      document.head.appendChild(s)
+    }
+    window.__dshExoFootEnsureStyle = ensureStyle
+
+    function sidebarWidth () {
+      try {
+        const col = document.querySelector('[class*="sidebarCol"]')
+        if (col) { const w = Math.round(col.getBoundingClientRect().width); if (w > 0) return w }
+      } catch {}
+      return 0
+    }
+
+    function footArea () { return document.querySelector('[class*="footArea"]') }
+
+    // 官方「设置」行（仅用于定位，不搬动、不复制）
+    function settingsRow () { return document.querySelector('[class*="triggerRow"]') }
+
+    // dsh-ui-tools 的折叠/展开按钮（可能因为插件未启用而不存在）。
+    // 必须限定在 .wc-collapse-bar 内：壳自己的折叠按钮 aria-label 与官方同名，
+    // 全局 querySelector 会先命中壳自己 → 转发变成自点（实测踩过，按钮永久失效）。
+    function officialCollapseButton () {
+      return document.querySelector('.wc-collapse-bar button[aria-label="折叠所有工作区"]')
+    }
+    function officialExpandButton () {
+      return document.querySelector('.wc-collapse-bar button[aria-label="展开所有工作区"]')
+    }
+
+    // 是否有任一分组处于展开态（决定折叠按钮呈现哪一面）
+    // 语义取「通用 toggle」：只要还有展开的就给「折叠」，全收起才给「展开」；
+    // 否则混合状态下按钮会一直停在「展开」，用户点不出「一键收起」。
+    function anyExpanded () {
+      try {
+        const rows = document.querySelectorAll('[data-slot="sidebar.workspaces"] [aria-expanded]')
+        for (const r of rows) {
+          // 排除按钮自身（官方搜索按钮也带 aria-expanded，与分组无关）
+          if (r.tagName === 'BUTTON') continue
+          if (r.getAttribute('aria-expanded') === 'true') return true
+        }
+        return false
+      } catch { return false }
+    }
+
+    const ICON_COLLAPSE =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></svg>'
+    const ICON_EXPAND =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg>'
+    const ICON_PANEL =
+      '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/>' +
+      '<path d="M3 9h18"/><path d="M9 21V9"/></svg>'
+
+    function makeButton (id, label, svg) {
+      const btn = document.createElement('button')
+      btn.id = id
+      btn.type = 'button'
+      btn.className = BTN_CLASS
+      btn.title = label
+      btn.setAttribute('aria-label', label)
+      btn.innerHTML = svg
+      return btn
+    }
+
+    function buildPanelButton () {
+      const btn = makeButton(BTN_PANEL, '打开管理面板', ICON_PANEL)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        try { window.__dshExo && window.__dshExo.send(SEND_CHANNEL, {}) } catch {}
+      })
+      return btn
+    }
+
+    function buildCollapseButton () {
+      const btn = makeButton(BTN_COLLAPSE, '折叠所有工作区', ICON_EXPAND)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        // 按当前状态选目标：还有展开的 → 折叠；全部收起 → 展开
+        const target = anyExpanded() ? officialCollapseButton() : officialExpandButton()
+        if (!target) return
+        target.click()
+        // 官方状态是异步落盘的，稍后再同步一次图标/文案
+        setTimeout(() => { try { syncCollapse() } catch {} }, 80)
+      })
+      return btn
+    }
+
+    function syncCollapse () {
+      const btn = document.getElementById(BTN_COLLAPSE)
+      if (!btn) return
+      const enabled = !!(officialCollapseButton() || officialExpandButton())
+      const expanded = anyExpanded()
+      const label = !enabled ? '折叠/展开工作区（需启用 dsh-ui-tools 插件）' : expanded ? '折叠所有工作区' : '展开所有工作区'
+      // 只在状态真的变了才改 DOM（每秒同步一次，重写 innerHTML 会白建 SVG）
+      const key = (enabled ? '1' : '0') + (expanded ? '1' : '0')
+      if (btn.__dshExoKey === key) return
+      btn.__dshExoKey = key
+      btn.innerHTML = expanded ? ICON_COLLAPSE : ICON_EXPAND
+      btn.title = label
+      btn.setAttribute('aria-label', label)
+      if (enabled) btn.removeAttribute('data-disabled')
+      else btn.setAttribute('data-disabled', '1')
+    }
+
+    /**
+     * 把壳的 3 个按钮放进**组容器**（.dsh-exo-foot-group）并挂到插槽末尾。
+     *
+     * 为何要包一层组：第三方插件（实测 dsh-cost-meter）会把自己的元素插到插槽**最前面**
+     * 且占满整行；若不分组，壳按钮会与它混在同一 wrap 上下文里被顶到它下面。
+     * 组用 flex:1 1 100% 独占一整行，且 order:1 排在第三方内容之后
+     * （见 sidebarFooterCss 注释）→ 壳按钮行**永远压在底栏最底部**，第三方内容在上。
+     * 组挂在插槽**末尾**而不是最前：视觉行序由 CSS order 控制，DOM 顺序保持「第三方在前」，
+     * 这样万一 CSS 未生效（降级），第三方仍按官方顺序渲染，不会出现意外。
+     */
+    function place (slot) {
+      let group = slot.querySelector(':scope > .' + GROUP_CLASS)
+      if (!group) {
+        group = document.createElement('div')
+        group.className = GROUP_CLASS
+        // 壳按钮组是壳自己的容器：标记 aria-hidden=false 以便无障碍工具读取内部按钮；
+        // 用 role=group 给屏幕阅读器一个“这是一组底部操作”的语义。
+        group.setAttribute('role', 'group')
+        group.setAttribute('aria-label', '壳入口')
+        slot.appendChild(group)
+      }
+      const webpanel = document.getElementById(${JSON.stringify(ENTRY_ID)})
+      if (webpanel && !group.contains(webpanel)) group.appendChild(webpanel)
+      let panel = document.getElementById(BTN_PANEL)
+      if (!panel) panel = buildPanelButton()
+      if (!group.contains(panel)) group.appendChild(panel)
+      let collapse = document.getElementById(BTN_COLLAPSE)
+      if (!collapse) collapse = buildCollapseButton()
+      if (!group.contains(collapse)) group.appendChild(collapse)
+    }
+
+    function sync () {
+      ensureStyle()
+      const foot = footArea()
+      if (!foot || !settingsRow()) return 'no-foot'
+      // 宽/窄两态标记：CSS 只在 wide 下重排（窄条 36px 排不下 4 个按钮）。
+      // 窄态写成显式 "rail" 而不是移除属性：属性缺失 = 注入脚本还没跑完，
+      // 那时壳按钮照常显示（降级安全），不用猜。
+      const w = sidebarWidth()
+      foot.setAttribute(RAIL_ATTR, w > RAIL_MAX ? 'wide' : 'rail')
+      const slot = foot.querySelector('[data-slot="sidebar.footer.action"]')
+      if (slot) place(slot)
+      syncCollapse()
+      return 'ok'
+    }
+
+    window.__dshExoFootSync = sync
+    const first = sync()
+    // 分组状态是 React 状态，点开后 DOM 会重渲染；用轻量定时器同步图标（500ms，代价可忽略）
+    if (!window.__dshExoFootInstalled) {
+      window.__dshExoFootInstalled = true
+      let timer = null
+      const schedule = () => {
+        if (timer) return
+        timer = setTimeout(() => { timer = null; try { sync() } catch {} }, 250)
+      }
+      try { new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true }) } catch {}
+      setInterval(() => { try { syncCollapse() } catch {} }, 1000)
+    }
+    return first
   })()`
 }
 

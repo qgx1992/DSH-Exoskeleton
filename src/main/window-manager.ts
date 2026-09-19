@@ -12,7 +12,7 @@ import { logger } from './logger'
 import { dshManager } from './dsh-manager'
 import { configStore } from './config'
 import { notificationHub } from './notification-hub'
-import { buildSidebarEntryScript, setSidebarEntryActiveScript, measureSidebarWidthScript, buildTopDragRegionCss, buildTopDragStripScript, WINDOW_CONTROLS_CLUSTER_WIDTH, DEEPSEEK_WEB_URL, WEBPANEL_TOGGLE_CHANNEL } from './web-sidebar-entry'
+import { buildSidebarEntryScript, setSidebarEntryActiveScript, measureSidebarWidthScript, buildTopDragRegionCss, buildTopDragStripScript, buildSidebarFooterScript, WINDOW_CONTROLS_CLUSTER_WIDTH, DEEPSEEK_WEB_URL, WEBPANEL_TOGGLE_CHANNEL, PANEL_OPEN_CHANNEL } from './web-sidebar-entry'
 import {
   SHELL_CANVAS_COLOR,
   DSH_TOP_COLOR_DARK,
@@ -174,6 +174,8 @@ export class WindowManager {
       this.layoutView()
       // 窗口尺寸变了拖拽条横向范围也变（页面内 resize 监听在 WebContentsView 场景不一定触发）
       this.syncDragStrip()
+      // 底部工具栏的宽/窄态同理（侧边栏折叠只改布局宽度，页面内观察器看不到）
+      this.syncSidebarFooter()
       this.schedulePersist()
     })
     this.win.on('move', () => this.schedulePersist())
@@ -251,6 +253,11 @@ export class WindowManager {
       // 侧边栏「网页版 DeepSeek」入口的点击（注入按钮→ __dshExo.send）
       if (String(args[0]) === WEBPANEL_TOGGLE_CHANNEL) {
         this.toggleWebPanel()
+        return
+      }
+      // 侧边栏底部「管理面板」入口（网页版/管理面板是底部工具栏里的两个壳入口）
+      if (String(args[0]) === PANEL_OPEN_CHANNEL) {
+        this.openPanelTab('overview')
         return
       }
       // DSH 主题切换（页面观察 body[data-ds-dark-theme] 后回壳）→ 跟随换叠加层底色
@@ -528,6 +535,10 @@ export class WindowManager {
     view.webContents.executeJavaScript(buildSidebarEntryScript()).catch((err) => {
       logger.debug('sidebar entry inject skipped', err)
     })
+    // 底部工具栏：把官方底部区（设置行 + 插槽行）重排成一行 4 个小按钮（详见 web-sidebar-entry）
+    view.webContents.executeJavaScript(buildSidebarFooterScript()).catch((err) => {
+      logger.debug('sidebar footer inject skipped', err)
+    })
     // 主题观察：DSH 换主题只改 body 属性、不发事件，注入观察器回壳换叠加层底色
     view.webContents.executeJavaScript(buildThemeWatchScript()).catch((err) => {
       logger.debug('theme watch inject skipped', err)
@@ -546,6 +557,23 @@ export class WindowManager {
         }
       })
       .catch(() => {})
+    // 底部工具栏的宽/窄态重排（侧边栏折叠切换时 footer 布局要跟着切）
+    this.syncSidebarFooter()
+  }
+
+  /**
+   * 重新同步侧边栏底部工具栏（侧边栏折叠/展开、窗口几何变化后由壳主动推）。
+   *
+   * 为什么壳侧要推：页面内已有 MutationObserver，但侧边栏折叠只改布局宽度
+   * （不改 class、不增删节点，实测见 verify-drag-region 的同类结论），
+   * childList 观察器看不到，必须显式同步一次宽/窄态标记。
+   */
+  syncSidebarFooter(): void {
+    const view = this.view
+    if (!view || view.webContents.isDestroyed()) return
+    void view.webContents
+      .executeJavaScript(`(() => { try { return window.__dshExoFootSync ? window.__dshExoFootSync() : 'no-sync' } catch { return 'error' } })()`)
+      .catch((err) => logger.debug('sidebar footer sync skipped', err))
   }
 
   /**

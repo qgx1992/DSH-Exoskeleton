@@ -29,6 +29,7 @@ const CASES = [
   { name: 'session-ask', src: 'scripts/test/test-ask-entry.ts', out: 'session-ask.cjs', test: 'scripts/test/test-ask-detect.cjs' },
   { name: 'dsh-view-preload', src: 'src/preload/dsh-view.ts', out: 'dsh-view.cjs', test: 'scripts/test/test-dsh-view.cjs' },
   { name: 'titlebar-overlay', src: 'src/main/titlebar-overlay.ts', out: 'titlebar-overlay.cjs', test: 'scripts/test/test-titlebar-overlay.cjs' },
+  { name: 'sidebar-footer', src: 'src/main/web-sidebar-entry.ts', out: 'sidebar-footer.cjs', test: 'scripts/test/test-sidebar-footer.cjs' },
   { name: 'session-jsonl', plain: ['--experimental-strip-types', 'scripts/test/test-session-jsonl.mts'] },
   { name: 'prune-dist', plain: ['scripts/test/test-prune-dist.mjs'] },
 ]
