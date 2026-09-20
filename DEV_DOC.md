@@ -287,10 +287,18 @@ const win = new BrowserWindow({
 | 5/8 | 管理面板 | 壳注入 | 经 `__dshExo.send('panel:open')` 回壳开管理面板 |
 | 7/8 | 折叠切换 | 壳注入（合并了 dsh-ui-tools 的两个整行按钮） | 转发 click 给官方「折叠/展开所有工作区」按钮，双向 toggle |
 
-**均分算法**：设置按钮在 `settingsArea`、另 3 个在 `footerActions`，是两个并列容器，
-不能直接用「整行 space-around」。做法是**整行按 1:3 分给两容器（`flex:1` / `flex:3`）+ 各容器内 `space-around`**，
-这是**与按钮宽度无关的精确 4 等分**（设整行 L：设置（L/4 宽、1 项）中心 = L/8；
-壳钮（3L/4 宽、3 项）中心 = i·L/4 + L/8 = 3L/8, 5L/8, 7L/8）。侧栏宽度变化时自动跟随，无需 JS 计算。
+**均分算法**：设置按钮在 `settingsArea`、另 3 个在 `footerActions` 的壳按钮组里，是两个并列容器。
+做法：设置列**绝对定位**（`left:0;width:25%`，脱离横向流）→ 其中心在行宽 1/8 处；
+壳按钮组 `padding-left:25%` + `space-around` → 3 个按钮中心为 3L/8, 5L/8, 7L/8。
+这是**与按钮宽度无关的精确 4 等分**。
+
+> **为何组要 `padding-left:25%`**：3 项 `space-around` 的自然中心是 1/6·1/2·5/6，不是 3/8·5/8·7/8。
+> 推导（设整行 L、左内边距 p、内容宽 W=L-p）：要求 `p + W/6 = 3L/8`、`p + W/2 = 5L/8`
+> → `W = 3L/4`、`p = L/4 = 25%`。验证 L=256：中心 = 64+32、64+96、64+160 = 96/160/224 = 3/8·5/8·7/8 ✓。
+
+> **为何设置列要绝对定位**：它曾是流内 flex item（靠 1:3 分栏均分），但那样第三方插槽内容
+> 只能占剩下的 3/4 宽 → 左侧空一截（实测 footArea x=12..268 而 footerActions 只有 x=76..268）。
+> 脱离横向流后 `footerActions` 恢复 100% 宽，第三方内容从底栏左边缘铺满。
 
 **实测依据**（`scripts/probe/probe-sidebar-footer.cjs`、`probe-footer-rail.cjs`、`probe-footer-html.cjs`）：
 官方底部区 `footArea` 原本是**两行**——上一行 `footerActions`（插槽 `sidebar.footer.action`，
@@ -315,8 +323,9 @@ const win = new BrowserWindow({
   1. **壳按钮必须包在组容器里（`flex:1 1 100%` + `order:1`）**：第三方插件（实测 dsh-cost-meter 的
      `cm-footer-stack`）会把自己元素插到插槽**最前面**且占满整行，不分组时壳按钮会与它混在同一 wrap
      上下文里、被顶到中间（实测底栏 131px、按键不在底行）。包组后组独占**最后一行**
-     → 第三方内容在上、**按键行永远压在底栏最底部**（用户口径）；`settingsArea` 用 `align-self:flex-end`
-     下沉到同一底行。行序完全由 CSS `order` 控制，**不搬动第三方节点**（§7 已知坑 2）；
+     → 第三方内容在上、**按键行永远压在底栏最底部**（用户口径）；
+  2. **设置列必须绝对定位**：它是流内 item 时会占掉 1/4 行宽，把第三方内容挤到右 3/4、
+     左侧空一截（实测 x=12..76 为空）；绝对定位后第三方内容铺满整行；
   2. **官方工具条按钮查找必须限定 `.wc-collapse-bar`**：壳的折叠按钮 `aria-label` 与官方同名，
      全局 `querySelector` 会先命中壳自己 → 转发变成自点死循环（实测踩过，按钮永久失效）；
   3. **底栏总高会被第三方内容行撑高**（实测余额栈 93px），这是正确行为（不能为好看压掉插件内容）；
@@ -335,9 +344,9 @@ const win = new BrowserWindow({
   独立视图是顶级浏览上下文，不受该 CSP 限制。
 - **侧边栏宽度**：实测（约 280px）后把网页版视图定位到它右侧。
 
-**验证**：CI 级契约测试 `scripts/test/test-sidebar-footer.cjs`（30 项，已接入 `npm test`，
-用仿真 DOM 断言均分 / 重排 / 三个入口的桥消息 / 折叠转发 / 窄条只留设置 / 自愈 / 第三方在上且按键行压底）；
-实机端到端 `scripts/probe/verify-sidebar-footer.cjs`（29 项，真实内核 + 真实第三方插件共用插槽 + 生产注入脚本 + 截图）；
+**验证**：CI 级契约测试 `scripts/test/test-sidebar-footer.cjs`（31 项，已接入 `npm test`，
+用仿真 DOM 断言均分 / 重排 / 三个入口的桥消息 / 折叠转发 / 窄条只留设置 / 自愈 / 第三方铺满整行且按键行压底）；
+实机端到端 `scripts/probe/verify-sidebar-footer.cjs`（31 项，真实内核 + 真实第三方插件共用插槽 + 生产注入脚本 + 截图）；
 另有 `verify-web-sidebar-entry.cjs`（6 项）与 `verify-shell-top.cjs`（5 项）。
 
 **验证脚本自身的两个环境坑**（已在脚本内处理，否则会误判为产品缺陷）：
