@@ -262,6 +262,39 @@ app.whenReady().then(async () => {
   const allAbove = nonFixed.every((e) => e.bottom <= Math.min(...layout.btnTops) + 2)
   assert(allAbove, '★ 第三方插槽内容均在按键行**上方**', { others: nonFixed, btnTops: layout.btnTops })
 
+  // ★ 第三方内容必须**铺满整行**（从底栏左边缘开始）
+  // 旧实现把设置列当流内 flex item 占 1/4 宽，第三方内容被挤到右 3/4、左侧空一截
+  // （实测 footArea x=12..268、footerActions x=76..268 → 左 64px 空白）。
+  // 现改为设置列绝对定位（脱离横向流），第三方内容从 footArea.left 开始。
+  const fill = await view.webContents.executeJavaScript(`(() => {
+    const foot = document.querySelector('[class*="footArea"]')
+    const fr = foot.getBoundingClientRect()
+    const actions = document.querySelector('[class*="footerActions"]')
+    const ar = actions.getBoundingClientRect()
+    // 底栏内**画出来的内容**最左边缘（排除壳的组与官方设置行）
+    const slot = document.querySelector('[data-slot="sidebar.footer.action"]')
+    let minLeft = null
+    for (const el of slot.children) {
+      if (el.classList.contains('dsh-exo-foot-group')) continue
+      const r = el.getBoundingClientRect()
+      if (r.width <= 0 || r.height <= 0) continue
+      if (getComputedStyle(el).position === 'fixed') continue
+      if (minLeft === null || r.left < minLeft) minLeft = Math.round(r.left)
+    }
+    // 壳按钮组的左内边距（用于确认它是 padding 而非流内占位）
+    const group = document.querySelector('.dsh-exo-foot-group')
+    return {
+      footLeft: Math.round(fr.left), footRight: Math.round(fr.right), footW: Math.round(fr.width),
+      actionsLeft: Math.round(ar.left), actionsW: Math.round(ar.width),
+      thirdPartyMinLeft: minLeft,
+      groupPadLeft: group ? getComputedStyle(group).paddingLeft : null
+    }
+  })()`)
+  assert(fill.thirdPartyMinLeft !== null && fill.thirdPartyMinLeft - fill.footLeft <= 2,
+    '★ 第三方内容铺满整行（左侧无空白间隙）', fill)
+  assert(fill.actionsLeft - fill.footLeft <= 2 && Math.abs(fill.actionsW - fill.footW) <= 2,
+    '★ footerActions 占满底栏全宽（设置列已脱离横向流）', fill)
+
   assert(wide.collapseBarDisplay === 'none', '⑥dsh-ui-tools 整行工具条已收起（display:none）', wide.collapseBarDisplay)
   // 注意：底栏总高会被**第三方插件自己的内容行**撑高（实测 dsh-cost-meter 的 cm-footer-stack
   // 余额栈 93px），这是正确行为（不能为了好看压掉插件内容）。所以这里校验的是

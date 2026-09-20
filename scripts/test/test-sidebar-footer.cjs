@@ -255,36 +255,41 @@ app.whenReady().then(async () => {
   const restored = await win.webContents.executeJavaScript(SURVEY)
   assert(restored.buttons.filter((b) => b.visible).length === 4, '恢复宽态后 4 个按钮回来', restored.buttons.filter((b) => b.visible).map((b) => b.aria))
 
-  // 第三方「整行」元素（余额行等）应在**上方**，而壳按钮行固定在**最底部**。
-  // 同时验「4 个按钮仍在同一行」——这是组容器（flex-basis:100% + order）的核心作用
-  // （实机曾因第三方元素排在壳按钮之前而被顶到第二行，footArea 高 131px）。
-  const balance = await win.webContents.executeJavaScript(`(() => {
-    const R = (el) => { const r = el.getBoundingClientRect(); return { t: Math.round(r.top), l: Math.round(r.left), w: Math.round(r.width), h: Math.round(r.height) } }
+  // 第三方「整行」元素（余额行等）应在**上方**且**铺满整行**，壳按钮行固定在**最底部**。
+  // 覆盖两个历史缺陷：① 第三方元素排在壳按钮之前把按键组顶到中间（footArea 131px）；
+  // ② 设置列当流内 flex item 占 1/4 宽，把第三方内容挤到右 3/4、左侧空一截（实测 x=12..76 为空）。
+  const fill = await win.webContents.executeJavaScript(`(() => {
+    const R = (el) => { const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), t: Math.round(r.top), b: Math.round(r.bottom) } }
     const el = document.querySelector('.cm-balance')
     el.style.display = 'block'
     window.__dshExoFootSync()
-    const all = [...document.querySelectorAll('.dsh-exo-foot-btn, [class*="triggerRow"] > button[class*="trigger"]')]
+    const foot = R(document.querySelector('[class*="footArea"]'))
+    const bal = R(el)
+    const btns = [...document.querySelectorAll('.dsh-exo-foot-btn, [class*="triggerRow"] > button[class*="trigger"]')]
       .filter((b) => b.getBoundingClientRect().width > 0)
-    const btns = [...document.querySelectorAll('.dsh-exo-foot-btn')].filter((b) => b.getBoundingClientRect().width > 0)
-    const foot = document.querySelector('[class*="footArea"]')
     const out = {
-      balance: R(el),
-      btnTops: btns.map((b) => Math.round(b.getBoundingClientRect().top)),
-      btnSizes: btns.map((b) => Math.round(b.getBoundingClientRect().width)),
-      allTops: all.map((b) => Math.round(b.getBoundingClientRect().top)),
-      allBottoms: all.map((b) => Math.round(b.getBoundingClientRect().bottom)),
-      footRect: R(foot),
-      footBottoms: [R(foot).t + R(foot).h]
+      foot,
+      balance: bal,
+      leftGap: bal.l - foot.l,
+      rightGap: foot.r - bal.r,
+      allTops: btns.map((b) => Math.round(b.getBoundingClientRect().top)),
+      allBottoms: btns.map((b) => Math.round(b.getBoundingClientRect().bottom)),
+      btnSizes: [...document.querySelectorAll('.dsh-exo-foot-btn')]
+        .filter((b) => b.getBoundingClientRect().width > 0)
+        .map((b) => Math.round(b.getBoundingClientRect().width)),
+      footBottom: foot.b
     }
     el.style.display = 'none'
     window.__dshExoFootSync()
     return out
   })()`)
-  assert(balance.btnSizes.every((w) => w === 32), '第三方整行元素不挤扁壳按钮（仍为 32px 宽）', balance.btnSizes)
-  assert(Math.max(...balance.allTops) - Math.min(...balance.allTops) <= 2, '★ 有第三方整行元素时 4 个按钮仍在同一行', balance.allTops)
-  assert(balance.balance.t < Math.min(...balance.allTops), '★ 第三方整行元素排在按钮行**上方**（按键行在最底）', balance)
-  assert(Math.max(...balance.allBottoms) >= balance.footRect.t + balance.footRect.h - 6,
-    '★ 按键行压在底栏最底部（底边贴近底栏底边）', { allBottoms: balance.allBottoms, footBottom: balance.footRect.t + balance.footRect.h })
+  assert(fill.leftGap <= 2, '★ 第三方内容铺满整行（左侧无空白间隙）', fill)
+  assert(fill.rightGap <= 2, '★ 第三方内容铺满整行（右侧无空白间隙）', fill)
+  assert(fill.balance.t < Math.min(...fill.allTops), '★ 铺满后第三方内容仍在按键行上方', fill)
+  assert(Math.max(...fill.allTops) - Math.min(...fill.allTops) <= 2, '★ 有第三方内容时 4 个按钮仍在同一行', fill.allTops)
+  assert(fill.btnSizes.every((w) => w === 32), '★ 第三方内容不挤扁壳按钮（仍为 32px 宽）', fill.btnSizes)
+  assert(Math.max(...fill.allBottoms) >= fill.footBottom - 8,
+    '★ 按键行压在底栏最底部（底边贴近底栏底边 ≤8px）', { allBottoms: fill.allBottoms, footBottom: fill.footBottom })
 
   console.log(failed === 0 ? '\n✅ 全部通过' : `\n❌ ${failed} 项失败`)
   app.exit(failed === 0 ? 0 : 1)

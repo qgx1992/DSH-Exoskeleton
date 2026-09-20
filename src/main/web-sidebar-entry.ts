@@ -197,31 +197,39 @@ export function sidebarFooterCss(): string {
   const wide = `[class*="footArea"][${RAIL_ATTR}="wide"]`
   const rail = `[class*="footArea"][${RAIL_ATTR}="rail"]`
   return [
-    '/* 底部区：两行并一行，4 个按钮在整行内自适应均分，且**始终压在底栏最底部** */',
-    `${wide}{flex-direction:row;align-items:flex-start;gap:0;padding:2px 0 4px;box-sizing:border-box}`,
-    // footerActions：第三方插槽内容排在前、壳按钮组排在后（见 group 的 order），
-    // 保留官方 `flex-wrap: wrap` —— 第三方“整行”元素（如余额栈 `flex:1 1 100%`）
-    // 各占一行堆在上方；壳按钮组 basis 100% 必定换到**最后一行**。
-    `${wide} [class*="footerActions"]{display:flex;flex:3 1 0;flex-wrap:wrap;min-width:0;order:2;align-content:flex-start;justify-content:flex-start}`,
-    // settingsArea 官方是 display:block，要均分必须先成为 flex 容器
-    // （插槽 div 是 display:contents，triggerRow 会直接成为它的 flex item）。
-    // flex 生长系数 1 : 3 —— 整行按 1:3 分给「设置容器」与「壳按钮容器」（少了这个比例
-    // 两个容器会 50/50 均分，四个按钮就不等距了）。
-    // align-self:flex-end —— footerActions 被第三方内容撑高时，设置按钮下沉到**最后一行**，
-    // 与壳按钮组同一排（用户口径：按键行固定在底栏最底部）。
-    `${wide} [class*="settingsArea"]{display:flex;flex:1 1 0;order:1;min-width:0;align-self:flex-end;justify-content:space-around}`,
+    '/* 底部区：两行并一行，4 个按钮在整行内自适应均分，且**始终压在底栏最底部**。 */',
+    '/* 关键：设置列用绝对定位**脱离横向流**，第三方插槽内容才能铺满整行（否则第三方 */',
+    '/* 内容被挤在右 3/4，左侧空出一截——实测 x=12..76 为空、第三方从 x=76 才开始）。 */',
+    `${wide}{position:relative;flex-direction:column;align-items:stretch;gap:0;padding:2px 0 4px;box-sizing:border-box}`,
+    // footerActions：第三方插槽内容与壳按钮组都在这一个 wrap 上下文里，宽 **100%**
+    // → 第三方“整行”元素（余额栈 `flex:1 1 100%`）从底栏最左开始铺满，不再被挤窄。
+    // 保留官方 wrap：第三方各行堆在上，壳按钮组 basis 100% 必定换到**最后一行**。
+    `${wide} [class*="footerActions"]{display:flex;width:100%;flex-wrap:wrap;min-width:0;align-content:flex-start;justify-content:flex-start}`,
+    // 设置列：**绝对定位**到底栏左下角，宽 = 整行的 1/4（即四个按钮均分后第一个的槽位），
+    // 高 = 32px 按钮高，坐标与壳按钮组同行同高 → 四个按钮仍精确均分；
+    // 因为它不在流内，不再占用第三方内容的横向空间（修「左侧空一截」）。
+    // 为何宽是 25% 而不是固定值：均分要求设置按钮中心在行宽 1/8 处，即其容器中心也是 1/8，
+    // 而左边缘贴 0 → 容器宽 25% 时中心恰为 12.5% ✓（与行宽无关，自适应）。
+    `${wide} [class*="settingsArea"]{display:flex;position:absolute;left:0;bottom:4px;width:25%;height:32px;justify-content:center;align-items:center}`,
+    // 注：bottom 与 footArea 的 padding-bottom（4px）对齐，使设置按钮与壳按钮组**同行同高**；
+    // 改 padding 时这里要同步改（否则设置按钮会浮起/下沉几像素）。
     // 壳按钮组：占满一整行（basis 100%）→ 无论第三方内容多少行，它必定落在**最后一行**；
     // order:1 使它在同一 wrap 上下文里排在第三方内容之后（不搬动第三方节点，符合 §7 已知坑 2）。
-    // 组内 space-around 把 3 个按钮在整行内均分。
-    `.${FOOT_GROUP_CLASS}{display:flex;order:1;flex:1 1 100%;flex-wrap:nowrap;align-items:center;min-width:0;justify-content:space-around}`,
+    //
+    // 组内均分的关键：**padding-left:25% + justify-content:space-around**。
+    // 为何不能直接 space-around：3 项 space-around 的中心是 1/6·1/2·5/6，而我们要的是
+    // 3/8·5/8·7/8（与设置按钮 1/8 连成四等分）。推导（设整行 L、左内边距 p、内容宽 W=L-p）：
+    //   要求 p + W/6 = 3L/8、p + W/2 = 5L/8、p + 5W/6 = 7L/8
+    //   由第二式得 p = 5L/8 - W/2，代入第一式 → W = 3L/4，故 p = L/4 = 25%。
+    // 验证（L=256）：内容区 192、槽宽 64，中心 = 64+32、64+96、64+160 = 96/160/224 = 3/8·5/8·7/8 ✓
+    // box-sizing:border-box 保证 25% 内边距不被额外加到宽度上（否则会横向溢出）。
+    `.${FOOT_GROUP_CLASS}{display:flex;order:1;flex:1 1 100%;flex-wrap:nowrap;align-items:center;min-width:0;`, 
+    `box-sizing:border-box;padding-left:25%;justify-content:space-around}`,
     // ── 4 个按钮在整行内**自适应均分**（不同侧栏宽度下都等间距）──
-    // 难点：设置按钮在 settingsArea、另 3 个在 footerActions 的壳按钮组里，是两个并列容器，
-    // 不能直接用「整行 space-around」一次搞定。做法：整行按 1:3 分给两容器、各容器内 space-around。
-    // 这是**精确等价于 4 等分**的（与按钮宽度 w 无关）：
-    // 设整行 L、钮宽 w（n 项容器内 space-around 后第 i 项中心 = i·步长 + free/(2n) + w/2）：
-    //   设置（L/4 宽、1 项）→ 中心 = L/8；
-    //   壳钮（3L/4 宽、3 项）→ 中心 = i·L/4 + L/8 = 3L/8, 5L/8, 7L/8。
-    // 即四个中心恒为 L/8, 3L/8, 5L/8, 7L/8——完全等距，侧栏宽度变化时自动跟随。
+    // 难点：设置按钮在 settingsArea、另 3 个在 footerActions 的壳按钮组里，是两个并列容器。
+    // 做法：设置列宽度固定为整行的 25%（且不在流内）→ 其中心在行宽 1/8 处；
+    // 壳按钮组 padding-left:25% + space-around → 中心为 3L/8, 5L/8, 7L/8（见组规则处的推导）。
+    // 这是**精确等价于 4 等分**的（与按钮宽度 w 无关），侧栏宽度变化时自动跟随。
     // 官方设置行：260×42 整行按钮 → 32×32 小方钮（内部图标 16px 不变）。
     // 只改盒子，onClick 仍是官方那个 → DSH 设置弹窗行为不变；flex:0 0 auto 防被均分拉宽。
     `${wide} [class*="triggerRow"]{width:auto;margin:0;gap:0}`,

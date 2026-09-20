@@ -27,6 +27,8 @@ const markers = [
   ['管理面板入口 id', 'dsh-exo-panel-entry'],
   ['折叠切换按钮 id', 'dsh-exo-collapse-toggle'],
   ['壳按钮组类名（按键行压底的关键）', 'dsh-exo-foot-group'],
+  ['设置列绝对定位（第三方铺满整行的关键）', 'position:absolute;left:0;bottom:4px;width:25%'],
+  ['壳按钮组左内边距 25%（四等分的关键）', 'padding-left:25%'],
   ['管理面板桥通道', 'panel:open'],
   ['底部工具栏注入函数', 'buildSidebarFooterScript'],
   ['壳侧同步方法', 'syncSidebarFooter'],
