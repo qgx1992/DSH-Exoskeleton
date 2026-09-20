@@ -268,6 +268,14 @@ export function registerIpcHandlers(): void {
         args: app.isPackaged ? [] : ['--hidden']
       })
     }
+    // 自动更新开关：立即同步 electron-updater 策略位（无需重启应用生效）
+    if (patch?.autoCheckUpdate !== undefined || patch?.autoDownloadUpdate !== undefined) {
+      updater.applyAutoSwitches()
+      logger.info('updater: 自动更新开关已更新', {
+        autoCheckUpdate: cfg.autoCheckUpdate,
+        autoDownloadUpdate: cfg.autoDownloadUpdate
+      })
+    }
     rebuildMenu()
     return cfg
   })
@@ -287,6 +295,7 @@ export function registerIpcHandlers(): void {
 
   // ---------- 更新 ----------
   ipcMain.handle('updater:check', () => updater.check(true))
+  ipcMain.handle('updater:download', () => updater.download())
   ipcMain.handle('updater:install', () => updater.install())
 
   // ---------- 日志 ----------

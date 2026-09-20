@@ -16,6 +16,9 @@ const DEFAULTS: AppConfig = {
   minimizeToTray: true,
   autoStartService: true,
   notifyServiceEvents: true,
+  // 自动更新：默认沿用历史行为（启动后静默检查 + 发现新版静默下载），用户可在「更新」页分别关闭
+  autoCheckUpdate: true,
+  autoDownloadUpdate: true,
   notifySessionDone: 'per-turn',
   notifyChannel: 'auto',
   // 聚合窗口默认 5s（P1 review 修正）：过大会让单轮通知延迟整个窗口；

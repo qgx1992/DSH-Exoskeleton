@@ -178,7 +178,8 @@ async function bootstrap(): Promise<void> {
     windowManager.broadcast('updater:status', info)
   })
   if (app.isPackaged) {
-    setTimeout(() => void updater.check().catch(() => logger.warn('background update check failed')), 15_000)
+    // 启动后台静默检查；config.autoCheckUpdate=false 时不发请求（checkIfAutoEnabled 内部判断）
+    setTimeout(() => updater.checkIfAutoEnabled(), 15_000)
   }
 
   // 自动启动 DSH 服务

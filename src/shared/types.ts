@@ -56,6 +56,22 @@ export interface AppConfig {
   /** 服务事件通知开关（保留原字段） */
   notifyServiceEvents: boolean
   /**
+   * 自动检查更新开关（管理面板「更新」页）
+   * - true：启动后延迟静默检查新版本（历史行为）
+   * - false：启动后不发任何后台检查；用户仍可在面板手动点「检查更新」
+   * 只闸「后台自动」，不闸手动，也不管下载（下载另有 autoDownloadUpdate）。
+   */
+  autoCheckUpdate: boolean
+  /**
+   * 自动下载更新开关（管理面板「更新」页）
+   * - true：发现新版本后后台静默下载，下载完成随退出自动安装（历史行为）
+   * - false：只提示有新版本，是否下载由用户点面板的「下载更新」决定；
+   *          下载完成后也不随退出自动安装（面板「立即重启安装」仍可手动触发）
+   * 与 autoCheckUpdate 正交：后台检查与下载是两个独立意图（“别联网查” ≠ “可以查但别偷我带宽”）。
+   * 便携版/开发版无静默下载通道，本项不生效（一律走下载页引导）。
+   */
+  autoDownloadUpdate: boolean
+  /**
    * 会话完成通知粒度（设计 NOTIFICATION-PLUGIN-DESIGN.md §3.3）
    * - off：不通知；per-turn：每轮立即通知（现状行为）；aggregate：窗口内按会话 uuid 合并
    * 兼容旧 boolean：true→'per-turn'、false→'off'（config.ts 迁移）
@@ -285,6 +301,11 @@ export interface UpdateInfo {
   /** 下载完成待安装 */
   downloaded: boolean
   installing: boolean
+  /**
+   * 是否支持静默下载安装（仅安装版 NSIS 为 true；便携版/开发版只能走下载页）。
+   * UI 据此决定要不要显示「下载更新」按钮——否则便携版用户点下去只会拿到一条错误。
+   */
+  autoUpdateSupported: boolean
 }
 
 /** 首次启动引导状态 */
@@ -477,6 +498,8 @@ export interface DesktopApi {
   }
   updater: {
     check: () => Promise<UpdateInfo>
+    /** 手动下载更新（仅安装版；「自动下载」关闭时的明确路径） */
+    download: () => Promise<{ ok: boolean; error?: string }>
     install: () => Promise<void>
     onStatus: (callback: (info: UpdateInfo) => void) => () => void
   }

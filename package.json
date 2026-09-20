@@ -17,7 +17,8 @@
     "dist:win": "npm run build && electron-builder --win",
     "release:notes": "node scripts/release-notes.mjs",
     "clean:dist": "node scripts/prune-dist.mjs",
-    "gen:icon": "node scripts/build-blackgold.mjs && node scripts/build-whale-component.mjs && electron scripts/render-icons.cjs"
+    "gen:icon": "node scripts/build-blackgold.mjs && node scripts/build-whale-component.mjs && electron scripts/render-icons.cjs",
+    "probe:update": "electron scripts/probe/probe-updater-switch.cjs && electron scripts/probe/probe-update-ui.cjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.10",

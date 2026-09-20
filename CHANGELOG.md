@@ -6,9 +6,18 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
 - 条目按 conventional commit 前缀分组（✨ 新功能 / 🐛 Bug 修复 / ⚡ 性能优化 / 📝 文档 / 🧹 维护）。
 - 发布时可先用 `npm run release:notes -- vX.Y.Z --out scripts/out/release-notes.md` 自动生成草稿，再人工润色合并进本文件。
 
-## [未发布]
+## [0.9.6] - 2026-09-20
 
 ### ✨ 新功能
+- **「更新」页新增两个独立开关：「自动检查更新」+「自动下载更新」**（`config.autoCheckUpdate` / `config.autoDownloadUpdate`，均默认开，保持历史行为）。两项**正交**，因为“别联网查” 与 “可以查但别偷我带宽/别偷偷装” 是两种不同诉求，单开关表达不了。
+  - **自动检查更新**：关掉后启动不再 15s 静默联网检查新版本；面板「检查更新」/ 托盘菜单的手动检查仍可用。
+  - **自动下载更新**：关掉后检查到新版本**只提示、不下载**（典型场景：流量敏感、想先看更新日志再决定）；下载完成后也不随退出自动安装（`autoInstallOnAppQuit` 与它同命）——否则“我不想让它自己装”会被退出时的静默替换背刺。
+  - **手动路径不被开关阻断**：面板新增「下载更新」按钮（`updater.download()` → `autoUpdater.downloadUpdate()`）。已核实上游实现：`autoDownload` 只控制 `checkForUpdates()` 内部是否顺带下载，**显式调 `downloadUpdate()` 不受该标志约束**（源码注释即写明“可用的前提是 autoDownload=false”），所以「关了自动下载仍能手动下」是成立的一等路径。
+  - **改完立即生效**，不需重启：`config:set` 里调 `updater.applyAutoSwitches()` 同步策略位（`init()` 带事件注册只能跑一次，故拆分）。
+  - **老配置兼容**：两个开关都用 `!== false` 判定。升级用户的 config.json 没有这些字段（`undefined`），必须视为**开启**以沿用历史行为，不能因缺字段变成静默关闭。
+  - **顺带拆掉上一轮的临时 hack**：v0.9.x 初期版本为了让“手动检查也能下载”，曾在 `check(force)` 里临时把 `autoDownload` 置 true 再于 `try/finally` 恢复。引入下载开关后这种写法会让**手动检查绕过下载开关**，已直接删除（不碰策略位，从根上消掉状态泄漏）。
+  - **`UpdateInfo.autoUpdateSupported`**：主进程告知 UI 是否支持静默下载（仅安装版 NSIS 为 true）。便携版/开发版据此**不渲染**「下载更新」按钮，避免给出“点了只报错误”的入口。
+  - 测试：`updater-switch` 用例扩到 **19 项**（老配置兼容 / 两开关正交四种组合 / 手动下载不被开关阻断 / 落盘布尔 / `download()` 守卫 / `autoUpdateSupported`），加 `scripts/probe/probe-updater-switch.cjs` 实机探针 **20 项**（伪装 `app.isPackaged=true` 后直接观察 `autoDownload` / `autoInstallOnAppQuit` 真实取值，并验证手动下载后无状态泄漏、抛错后策略位未被改写）。因 `updater` 与 `configStore` 分开 bundle 会得到两份 configStore 单例（开关改了不生效、测试假绿），二者共用专用入口 `scripts/test/test-updater-entry.ts`。
 - **侧边栏底部改成一行 4 个小按钮（设置 / 网页版 DeepSeek / 管理面板 / 折叠切换）**：官方底部区原本是**两行**——上一行 `footerActions`（插槽 `sidebar.footer.action`，第三方插件与壳注入按钮都落这里）占 69px，下一行官方「设置」整行大按钮（260×42）占 50px，合计 **119px**；现在重排成**一行 4 个 32×32 小图标按钮**，且在整行内**自适应均分**（中心恒为行宽的 1/8·3/8·5/8·7/8，侧栏宽窄变化自动跟随，实机 / 仿真双验证）。实现坚持**只改 CSS 不搬 DOM**（历史教训：搬 slot 节点会与框架重渲染互相触发、渲染进程 100% CPU 卡死），全部用哈希无关的属性选择器（实测官方类名是 hash：`hHd-Xa_footArea`、设置按钮 `VOzbGW_trigger`），宽/窄两态靠壳打在 `footArea` 上的 `data-dsh-exo-rail` 标记区分。
   - **官方「设置」按钮原样保留**，只把盒子从 260×42 缩成 32×32、隐藏文字标签，onClick 仍是官方那个 → **打开 DSH 设置弹窗的行为不变**（测试断言点击仍触发官方节点）；
   - **「折叠全部/展开全部」两个按钮合并成一个双向 toggle**：`dsh-ui-tools` 那行 256×36 工具条 `display:none` 收起，点击时**按现状转发 click 给官方按钮**（用稳定的 `aria-label` 定位，状态取自工作区分组头的 `aria-expanded`；找不到插件按钮则置灰并提示，不静默失效）。为何不自建折叠逻辑：`setAllGroupsExpanded` 在插件内部、依赖 `ctx.slots`/store，壳无法从页面侧调用；
@@ -30,6 +39,9 @@ DeepSeek Harness 桌面客户端（DSH-Exoskeleton / dsh-desktop）的版本历�
     要求 p + W/6 = 3L/8、p + W/2 = 5L/8 → W = 3L/4、p = L/4 = 25%；验证 L=256 时按钮中心
     96/160/224 = 3/8·5/8·7/8 ✓（与按钮宽度无关，侧栏宽窄变化自动跟随）。
   - 测试：新增 `sidebar-footer` 契约用例（31 项，已接入 `npm test`，含模板字符串 CSS 的语法防线——漏逗号会把两条规则静默合成一条；均分断言覆盖 240/280/320 三种侧栏宽度；「第三方铺满整行 + 在上 + 按键行压底」几何断言），实机端到端 `scripts/probe/verify-sidebar-footer.cjs` **31/31 通过**（真实内核 + 真实第三方插件 + 生产注入脚本 + 宽/窄态截图）。
+
+### 🐛 Bug 修复
+- **侧边栏底部按键行被第三方插件顶到中间、且左侧空一截**（本次重排后实测发现并修掉的两个布局缺陷，详细推导见上方「新功能」条目内的几何说明）：① 第三方插件（实测 dsh-cost-meter）会把自己的元素插到插槽**最前面**且占满整行，不分组时壳按钮会与它混在同一 wrap 上下文里被顶到中间（实测底栏 131px、按键不在底行）——现包一层 `flex:1 1 100%` + `order:1` 的组容器，按键行恒压底；② 设置列占位导致 `footerActions` 只剩 x=76..268、左 64px 空白——现改用绝对定位（`left:0; width:25%`）脱流，第三方内容从底栏左边缘铺满（实测 x=12..268 与 `footArea` 完全对齐）。两处修法都**不搬动第三方节点**（遵守 §7 已知坑 2）。
 
 ## [0.9.5] - 2026-09-16
 

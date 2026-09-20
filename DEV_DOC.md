@@ -462,6 +462,13 @@ if (!gotTheLock) {
 - 使用 `electron-updater` 配合 GitHub Releases
 - 安装版（NSIS）：后台静默下载，完成后弹窗通知[reference:51]
 - 便携版：仅提示有更新，引导用户手动下载替换[reference:52]
+- **自动更新开关（两个，正交，均默认开）**：管理面板「更新」页可分别控制
+  - `autoCheckUpdate`（自动检查）：关闭后启动不再静默联网检查；面板「检查更新」/托盘菜单的手动检查仍可用
+  - `autoDownloadUpdate`（自动下载）：关闭后检查到新版只提示不下载，且不随退出自动安装（`autoInstallOnAppQuit` 同命）；面板「下载更新」按钮是明确的手动路径
+  - 只闸「后台自动」，不闸手动：`autoDownload` 仅影响 `checkForUpdates()` 是否顺带下载，显式 `downloadUpdate()` 不受它约束（上游源码行为已核实）
+  - 改开关立即生效（`config:set` → `updater.applyAutoSwitches()`），无需重启
+  - 老配置无这两个字段时均视为开启（`!== false` 判定），避免升级用户被静默关掉更新
+  - `UpdateInfo.autoUpdateSupported` 告知 UI 是否支持静默下载（仅安装版），便携版/开发版不渲染「下载更新」按钮
 
 #### 4.3.2 仪表盘
 

@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto'
 import { logger } from './logger'
 import { windowManager } from './window-manager'
 import { notificationHub } from './notification-hub'
+import { configStore } from './config'
 import { compareVersions } from '../shared/version'
 import type { UpdateInfo } from '../shared/types'
 
@@ -21,6 +22,8 @@ class Updater extends EventEmitter {
   private cache: UpdateInfo | null = null
   private installing = false
   private initialized = false
+  /** 下载进行中标记（防用户连点「下载更新」触发重入） */
+  private downloading = false
   /** R-19: 进度广播节流（下载进度事件可能每秒数十次，避免高频 IPC） */
   private lastProgressEmit = 0
 
@@ -39,6 +42,50 @@ class Updater extends EventEmitter {
     return app.isPackaged && !this.isPortable
   }
 
+  /**
+   * 自动检查开关（config.autoCheckUpdate）——默认开，只有显式 false 才关闭。
+   * 用 `!== false` 而不是真值判断：老配置没有该字段时为 undefined，应视为开启（沿用历史行为）。
+   */
+  isAutoCheckEnabled(): boolean {
+    return configStore.get().autoCheckUpdate !== false
+  }
+
+  /**
+   * 自动下载开关（config.autoDownloadUpdate）——默认开，语义同上。
+   * 与「自动检查」正交：“别联网查” 与 “可以查但别偷我带宽” 是两种不同诉求。
+   * 注意：本开关只管**自动**下载；用户点面板「下载更新」的手动路径不受它限制。
+   */
+  isAutoDownloadEnabled(): boolean {
+    return configStore.get().autoDownloadUpdate !== false
+  }
+
+  /**
+   * 启动时的后台自动检查：开关关闭则不发任何网络请求（管理面板手动检查不受影响）。
+   * 只闸「后台自动」，不闸手动——手动检查是用户明确意图。
+   */
+  checkIfAutoEnabled(): void {
+    if (!this.isAutoCheckEnabled()) {
+      logger.info('updater: 自动检查更新已关闭（config.autoCheckUpdate=false）→ 跳过启动后台检查')
+      return
+    }
+    void this.check().catch(() => logger.warn('background update check failed'))
+  }
+
+  /**
+   * 运行期切换开关（用户改配置时立即生效，无需重启）。
+   * 与 init() 分开：init 带事件注册只能跑一次，本方法只同步 autoUpdater 的策略位。
+   */
+  applyAutoSwitches(): void {
+    if (!this.canAutoUpdate) return
+    // autoDownload 只跟「自动下载」开关走：不再掺入「自动检查」——两者已解耦，
+    // 现在是「可以检查但不自动下」这个中间态真正可表达的根因
+    const autoDownload = this.isAutoDownloadEnabled()
+    autoUpdater.autoDownload = autoDownload
+    // 随退出安装与自动下载同命：用户关了自动下载却仍在退出时静默替换安装包，与意图不符
+    // （已下载的更新不会丢，面板「立即重启安装」仍可手动触发）
+    autoUpdater.autoInstallOnAppQuit = autoDownload
+  }
+
   /** 仅安装版初始化 electron-updater */
   init(): void {
     if (!this.canAutoUpdate) {
@@ -48,8 +95,7 @@ class Updater extends EventEmitter {
     }
     if (this.initialized) return
     this.initialized = true
-    autoUpdater.autoDownload = true
-    autoUpdater.autoInstallOnAppQuit = true
+    this.applyAutoSwitches()
     autoUpdater.logger = {
       info: (m: string) => logger.debug('[autoUpdater]', m),
       warn: (m: string) => logger.warn('[autoUpdater]', m),
@@ -121,7 +167,8 @@ class Updater extends EventEmitter {
       error: null,
       progress: null,
       downloaded: false,
-      installing: false
+      installing: false,
+      autoUpdateSupported: this.canAutoUpdate
     }
   }
 
@@ -137,6 +184,9 @@ class Updater extends EventEmitter {
     if (this.canAutoUpdate) {
       const base = this.base()
       try {
+        // 不再临时改写 autoDownload：检查与下载已解耦，手动检查不预设「马上要下」，
+        // 下不下由「自动下载」开关（后台场景）或用户点「下载更新」（手动场景）决定。
+        // 改写策略位曾用 try/finally 兜底抛错，现在直接不碰，从根上消掉了这个状态泄漏。
         const result = await autoUpdater.checkForUpdates()
         const version = result?.updateInfo?.version
         base.latest = version ?? null
@@ -178,6 +228,36 @@ class Updater extends EventEmitter {
     this.cache = base
     this.emitStatus()
     return base
+  }
+
+  /**
+   * 手动下载更新（仅安装版）：给「自动下载」关掉时用的明确路径。
+   * 关键：不能靠临时改 autoDownload 再 checkForUpdates 来变相下载——那种写法
+   * 会把「检查」与「下载」两件事糅回一起，也容易泄漏状态位。
+   * 注意：electron-updater 的 autoDownload 只影响 checkForUpdates 内部是否顺带下载，
+   * 显式调 downloadUpdate() 不在其约束内，所以手动路径天然不受开关影响。
+   */
+  async download(): Promise<{ ok: boolean; error?: string }> {
+    if (!this.canAutoUpdate) {
+      // 便携版/开发版无静默下载通道：退回「打开下载页」的引导
+      return { ok: false, error: '当前版本不支持自动下载，请前往下载页手动更新' }
+    }
+    if (this.downloading) return { ok: false, error: '正在下载中' }
+    if (this.cache?.downloaded) return { ok: false, error: '更新已下载完成，可直接安装' }
+    // 自动下载已在跑（进度已在推送）→ 不重复触发，否则 electron-updater 会串两个下载任务
+    if (this.cache?.progress) return { ok: false, error: '正在下载中' }
+    if (!this.cache?.available) return { ok: false, error: '当前没有可下载的更新' }
+    this.downloading = true
+    try {
+      await autoUpdater.downloadUpdate()
+      return { ok: true }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.warn('update download failed', msg)
+      return { ok: false, error: msg }
+    } finally {
+      this.downloading = false
+    }
   }
 
   /** 安装更新：安装版调 quitAndInstall；便携版/开发版打开下载页 */

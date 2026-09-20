@@ -81,6 +81,7 @@ const api: DesktopApi = {
   },
   updater: {
     check: () => ipcRenderer.invoke('updater:check'),
+    download: () => ipcRenderer.invoke('updater:download'),
     install: () => ipcRenderer.invoke('updater:install'),
     onStatus: (callback) => subscribe('updater:status', callback)
   },
